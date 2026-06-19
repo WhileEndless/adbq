@@ -3,6 +3,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, Dropdown, FeatureNotice, IconBtn, Modal, Switch, showToast, promptDialog, confirmDialog} from '../ui';
+import type {MenuItem} from '../ui';
 
 // emptyProfile returns a fully-populated blank profile (all step sub-objects
 // present) so the editor can bind inputs without undefined checks.
@@ -52,14 +53,16 @@ export function ProfileSelector({device, refreshKey, onSwitch, onEdit, onNew, on
   useEffect(refresh, [key, refreshKey]);
 
   const bound = profiles.find(p => p.id === boundId);
-  const items = [];
-  for (const p of profiles) {
-    items.push({
-      label: (p.id === boundId ? '● ' : '   ') + p.name,
-      onClick: () => device && onSwitch(device.id, p.id),
-    });
+  const items: MenuItem[] = [];
+  // Flat list of profiles — the bound one gets a subtle accent + check; no
+  // glyph/space prefixes. Actions live below a divider.
+  if (profiles.length) {
+    items.push({label: 'Profiles', header: true, onClick: () => {}});
+    for (const p of profiles) {
+      items.push({label: p.name, active: p.id === boundId, onClick: () => device && onSwitch(device.id, p.id)});
+    }
+    items.push({label: '', onClick: () => {}, divider: true});
   }
-  if (profiles.length) items.push({label: '', onClick: () => {}, divider: true});
   items.push({
     label: 'Base / no profile', icon: <Icon.X width={13} height={13}/>,
     onClick: () => {

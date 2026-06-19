@@ -295,6 +295,8 @@ export interface MenuItem {
   danger?: boolean;
   icon?: React.ReactNode;
   divider?: boolean;
+  active?: boolean;  // selected row: accent + trailing check
+  header?: boolean;  // non-clickable section label
 }
 export function Dropdown({trigger, items}:{trigger: React.ReactNode; items: MenuItem[]}) {
   const [open, setOpen] = useState(false);
@@ -307,10 +309,14 @@ export function Dropdown({trigger, items}:{trigger: React.ReactNode; items: Menu
           {items.map((it, i) =>
             it.divider
               ? <div key={i} className='sep'/>
-              : <div key={i} className={`item${it.danger ? ' danger' : ''}`}
-                     onClick={() => { it.onClick(); setOpen(false); }}>
-                  {it.icon}{it.label}
-                </div>
+              : it.header
+                ? <div key={i} className='dropdown-header'>{it.label}</div>
+                : <div key={i} className={`item${it.danger ? ' danger' : ''}${it.active ? ' active' : ''}`}
+                       onClick={() => { it.onClick(); setOpen(false); }}>
+                    {it.icon}
+                    <span className='dd-label'>{it.label}</span>
+                    {it.active && <Icon.Check className='dd-check' width={13} height={13}/>}
+                  </div>
           )}
         </div>
       )}
