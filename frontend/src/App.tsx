@@ -17,7 +17,7 @@ import {NetworkScreen} from './screens/Network';
 import {CaptureScreen} from './screens/Capture';
 import {IptablesScreen} from './screens/Iptables';
 import {ProcessesScreen} from './screens/Processes';
-import {ProfileSelector, ProfileEditor, ApplyConfirm, PastDevices} from './screens/Profiles';
+import {ProfileSelector, ProfileEditor, ApplyConfirm, PastDevices, deviceKey} from './screens/Profiles';
 
 const ACCENTS = ['#a07cf7', '#7aa2ff', '#5ed29a', '#e9b454', '#ec6a73', '#c5a3ff'];
 
@@ -43,15 +43,30 @@ function AppInner() {
   const [profilesVersion, setProfilesVersion] = useState(0);
   const [editor, setEditor] = useState<{profile: adb.Profile | null} | null>(null);
   const [pastOpen, setPastOpen] = useState(false);
-  const [apply, setApply] = useState<{serial: string; profileId: string} | null>(null);
+  // FIFO queue of pending apply prompts; the head is the one shown. A queue (vs
+  // a single value) prevents two devices reconnecting at once from clobbering
+  // each other's prompt.
+  const [applyQueue, setApplyQueue] = useState<{serial: string; profileId: string; key: string}[]>([]);
+  const apply = applyQueue[0] || null;
   const prevOnline = useRef<Record<string, boolean>>({});
   const pendingApply = useRef<Set<string>>(new Set());
 
   const bump = () => setProfilesVersion(v => v + 1);
-  const switchProfile = useCallback((serial: string, profileId: string) => {
-    API.BindDeviceProfile(serial, profileId).then(bump).catch(() => {});
-    setApply({serial, profileId});
+  const enqueueApply = useCallback((serial: string, profileId: string, key: string) => {
+    setApplyQueue(q => q.some(e => e.key === key) ? q : [...q, {serial, profileId, key}]);
   }, []);
+  const dequeueApply = useCallback(() => {
+    setApplyQueue(q => {
+      if (q.length) pendingApply.current.delete(q[0].key);
+      return q.slice(1);
+    });
+  }, []);
+  const switchProfile = useCallback((serial: string, profileId: string) => {
+    const dev = devices.find(d => d.id === serial);
+    const key = deviceKey(dev) || serial;
+    API.BindDeviceProfile(serial, profileId).then(bump).catch(() => {});
+    enqueueApply(serial, profileId, key);
+  }, [devices, enqueueApply]);
   const captureProfile = useCallback((serial: string, suggested: string) => {
     promptDialog({title: 'Capture profile from device', label: 'Profile name', defaultValue: suggested})
       .then(name => {
@@ -107,21 +122,21 @@ function AppInner() {
   // state — we don't prompt on app launch for already-connected devices.
   useEffect(() => {
     for (const d of devices) {
-      const key = d.hardwareSerial || d.id;
+      const key = deviceKey(d);
       API.RegisterDevice(d).catch(() => {});
       const was = prevOnline.current[key];
-      if (d.online && was === false && !pendingApply.current.has(key) && !apply) {
+      if (d.online && was === false && !pendingApply.current.has(key)) {
         pendingApply.current.add(key);
         API.LookupDeviceProfile(key)
           .then(pid => {
-            if (pid) setApply({serial: d.id, profileId: pid});
+            if (pid) enqueueApply(d.id, pid, key);
             else pendingApply.current.delete(key);
           })
           .catch(() => pendingApply.current.delete(key));
       }
       prevOnline.current[key] = d.online;
     }
-  }, [devices, apply]);
+  }, [devices, enqueueApply]);
 
   const device = useMemo(() => devices.find(d => d.id === activeId) || devices[0], [devices, activeId]);
 
@@ -220,18 +235,17 @@ function AppInner() {
                        onSaved={bump}/>
       )}
       {apply && (
-        <ApplyConfirm serial={apply.serial} profileId={apply.profileId}
+        <ApplyConfirm key={apply.key} serial={apply.serial} profileId={apply.profileId}
                       reload={reload}
                       onApplied={bump}
-                      onClose={() => {
-                        const k = devices.find(d => d.id === apply.serial)?.hardwareSerial || apply.serial;
-                        pendingApply.current.delete(k);
-                        setApply(null);
-                      }}/>
+                      onClose={dequeueApply}/>
       )}
       {pastOpen && (
         <PastDevices onClose={() => setPastOpen(false)}
-                     onApply={(serial, profileId) => setApply({serial, profileId})}/>
+                     onApply={(serial, profileId) => {
+                       const k = deviceKey(devices.find(d => d.id === serial)) || serial;
+                       enqueueApply(serial, profileId, k);
+                     }}/>
       )}
 
       <ToastHost/>

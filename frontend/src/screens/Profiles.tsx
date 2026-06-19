@@ -23,6 +23,15 @@ function emptyProfile(): any {
 
 const clone = (p: any) => JSON.parse(JSON.stringify(p));
 
+// deviceKey mirrors Go's adb.DeviceKey: prefer the hardware serial, but treat
+// "" / "unknown" (common on emulators where ro.serialno is unset) as absent and
+// fall back to the adb id — so the frontend key always matches the backend key.
+export function deviceKey(d?: {hardwareSerial?: string; id?: string}): string {
+  const hw = (d?.hardwareSerial || '').trim();
+  if (hw && hw !== 'unknown') return hw;
+  return d?.id || '';
+}
+
 // ─── Titlebar profile selector ──────────────────────────────────────────────
 
 export function ProfileSelector({device, refreshKey, onSwitch, onEdit, onNew, onCapture, onManage}: {
@@ -36,7 +45,7 @@ export function ProfileSelector({device, refreshKey, onSwitch, onEdit, onNew, on
 }) {
   const [profiles, setProfiles] = useState<adb.Profile[]>([]);
   const [boundId, setBoundId] = useState<string>('');
-  const key = device?.hardwareSerial || device?.id || '';
+  const key = deviceKey(device);
 
   const refresh = () => {
     API.ListProfiles().then(p => setProfiles(p || [])).catch(() => {});
@@ -304,7 +313,7 @@ export function PastDevices({onClose, onApply}: {onClose: () => void; onApply: (
     API.ListProfiles().then(p => setProfiles(p || [])).catch(() => {});
     API.ListDevices().then(ds => {
       const m: Record<string, string> = {};
-      (ds || []).forEach(dev => { if (dev.online) m[dev.hardwareSerial || dev.id] = dev.id; });
+      (ds || []).forEach(dev => { if (dev.online) m[deviceKey(dev)] = dev.id; });
       setConnected(m);
     }).catch(() => {});
   };
