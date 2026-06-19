@@ -2,6 +2,7 @@ package adb
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -18,24 +19,33 @@ type FileEntry struct {
 	Link  string `json:"link,omitempty"`
 }
 
-// ListDir runs `ls -lAp` (optionally via su) and parses the rows.
+// ListDir lists a directory via `ls -l`, parses the rows, and degrades
+// gracefully on old/minimal ROMs. The preferred form is `ls -lAp` (almost-all,
+// trailing-slash on dirs), but the toolbox `ls` on API ≤22 lacks `-A`/`-p` and
+// can reject the combined flags — so when that yields no parseable rows we retry
+// with the universally-supported `ls -la` and filter `.`/`..` ourselves.
 func (c *Client) ListDir(ctx context.Context, serial, path string, asRoot bool) ([]FileEntry, error) {
 	if path == "" {
 		path = "/"
 	}
-	// Quote path
 	q := "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
-	command := "ls -lAp " + q
-	var out string
-	var err error
-	if asRoot {
-		out, _, err = c.ShellSU(ctx, serial, command)
-	} else {
-		out, err = c.Shell(ctx, serial, command)
+
+	out, err := c.runLs(ctx, serial, "ls -lAp "+q, asRoot)
+	parsed, content := countLsRows(out)
+	// Format/flag mismatch (e.g. toolbox ls): output arrived but nothing parsed.
+	// Retry with the portable form before giving up.
+	if parsed == 0 && content > 0 {
+		if out2, err2 := c.runLs(ctx, serial, "ls -la "+q, asRoot); err2 == nil || out2 != "" {
+			out, err = out2, err2
+		}
 	}
-	if err != nil && out == "" {
+	if (err != nil && strings.TrimSpace(out) == "") || isPermissionDenied(out) {
+		if isPermissionDenied(out) || isPermissionDenied(errString(err)) {
+			return nil, fmt.Errorf("permission denied listing %s — enable Root to browse this path", path)
+		}
 		return nil, err
 	}
+
 	entries := []FileEntry{}
 	if path != "/" {
 		entries = append(entries, FileEntry{Name: "..", Type: "up"})
@@ -46,7 +56,7 @@ func (c *Client) ListDir(ctx context.Context, serial, path string, asRoot bool) 
 			continue
 		}
 		e, ok := parseLsLine(t)
-		if !ok {
+		if !ok || e.Name == "." || e.Name == ".." {
 			continue
 		}
 		entries = append(entries, e)
@@ -54,12 +64,52 @@ func (c *Client) ListDir(ctx context.Context, serial, path string, asRoot bool) 
 	return entries, nil
 }
 
-// parseLsLine handles both common `ls -l` layouts seen on Android, anchoring
-// on the ISO date column so it works whether or not the link-count column is
-// present (older toybox on e.g. API-21 emulators omits it):
+func (c *Client) runLs(ctx context.Context, serial, command string, asRoot bool) (string, error) {
+	if asRoot {
+		out, _, err := c.ShellSU(ctx, serial, command)
+		return out, err
+	}
+	return c.Shell(ctx, serial, command)
+}
+
+// countLsRows reports how many content lines parsed as ls entries (parsed) and
+// how many non-empty, non-"total" content lines there were (content). A
+// content>0, parsed==0 result means the output didn't match any known layout.
+func countLsRows(out string) (parsed, content int) {
+	for _, ln := range strings.Split(out, "\n") {
+		t := strings.TrimRight(ln, "\r")
+		if t == "" || strings.HasPrefix(t, "total ") {
+			continue
+		}
+		content++
+		if _, ok := parseLsLine(t); ok {
+			parsed++
+		}
+	}
+	return parsed, content
+}
+
+func isPermissionDenied(s string) bool {
+	return strings.Contains(strings.ToLower(s), "permission denied")
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// parseLsLine handles the `ls -l` layouts seen across Android, anchoring on the
+// modification-time column so it works whether or not the link-count column is
+// present (older toybox on e.g. API-21 emulators omits it) and across both the
+// ISO date format (toybox, API 23+) and the BSD/toolbox "MMM DD" format
+// (toolbox, API ≤22):
 //
-//	-rw-r--r-- 1 user grp 1024 2026-05-22 12:18 name        (GNU/newer toybox)
-//	-rwxr-xr-x   root root 53489240 2026-06-18 14:37 name   (older toybox, no link count)
+//	-rw-r--r-- 1 user grp 1024 2026-05-22 12:18 name        (toybox ISO)
+//	-rwxr-xr-x   root root 53489240 2026-06-18 14:37 name   (toybox ISO, no link count)
+//	-rw-r--r-- 1 root root 1024 Jun 18 14:37 name           (toolbox, current year)
+//	-rw-r--r-- 1 root root 1024 Jun 18 2024 name            (toolbox, old file → year)
 //	lrwxrwxrwx 1 root root 8 2026-... link -> target
 func parseLsLine(s string) (FileEntry, bool) {
 	fields := strings.Fields(s)
@@ -70,43 +120,29 @@ func parseLsLine(s string) (FileEntry, bool) {
 	if len(perms) < 10 {
 		return FileEntry{}, false
 	}
-	// Find the ISO date column (YYYY-MM-DD). Everything else is positioned
-	// relative to it: size is the token before it, group/owner the two before
-	// that (a link-count column, when present, sits further left and is
-	// ignored), and the time + name follow.
-	di := -1
-	for i := 1; i < len(fields); i++ {
-		if isISODate(fields[i]) {
-			di = i
-			break
-		}
-	}
-	if di < 4 || di+1 >= len(fields) {
+	// Locate the date column and how many tokens it spans (dn): 2 for ISO
+	// "date time", 3 for BSD "month day time/year". Everything to its left is
+	// positioned relative to it — size is the token before, owner/group the two
+	// before that (an optional link-count column sits further left and is
+	// ignored) — and the name follows the date.
+	di, dn := findLsDateColumn(fields)
+	if di < 4 || di+dn >= len(fields) {
 		return FileEntry{}, false
 	}
 	owner := fields[di-3]
 	group := fields[di-2]
 	size, _ := strconv.ParseInt(fields[di-1], 10, 64)
-	date := fields[di] + " " + fields[di+1]
-	// Name is everything after the time field, preserving embedded spaces.
-	// Walk the original string consuming (di+2) whitespace-separated tokens.
-	pos := 0
-	for i := 0; i < di+2; i++ {
-		// skip spaces
-		for pos < len(s) && s[pos] == ' ' {
-			pos++
-		}
-		// skip token
-		for pos < len(s) && s[pos] != ' ' {
-			pos++
-		}
+	date := strings.Join(fields[di:di+dn], " ")
+	// Name is everything after the date tokens, preserving embedded spaces.
+	rest := strings.TrimSpace(skipFields(s, di+dn))
+	if rest == "" {
+		return FileEntry{}, false
 	}
-	rest := strings.TrimSpace(s[pos:])
 	name := rest
 	link := ""
-	if i := strings.Index(rest, " -> "); i >= 0 {
-		name = rest[:i]
-		link = rest[i+4:]
+	if before, after, found := strings.Cut(rest, " -> "); found {
+		name = before
+		link = after
 	}
 	typ := "file"
 	switch perms[0] {
@@ -115,7 +151,7 @@ func parseLsLine(s string) (FileEntry, bool) {
 	case 'l':
 		typ = "link"
 	}
-	// `-p` adds trailing slash on directories
+	// `-p` adds a trailing slash on directories.
 	if strings.HasSuffix(name, "/") {
 		typ = "dir"
 		name = strings.TrimSuffix(name, "/")
@@ -132,8 +168,26 @@ func parseLsLine(s string) (FileEntry, bool) {
 	}, true
 }
 
-// isISODate reports whether s is a YYYY-MM-DD date, the format Android's ls
-// uses for the modification-time column.
+// findLsDateColumn returns the index of the modification-time column and the
+// number of tokens it spans (dn), or (-1, 0) when no date is found. It scans
+// from index 4 since the date can never precede perms+owner+group+size.
+func findLsDateColumn(fields []string) (di, dn int) {
+	for i := 4; i < len(fields); i++ {
+		if isISODate(fields[i]) {
+			if i+1 < len(fields) && isClockHHMM(fields[i+1]) {
+				return i, 2
+			}
+			return i, 1
+		}
+		if i+2 < len(fields) && isMonthAbbr(fields[i]) && isDayNum(fields[i+1]) &&
+			(isClockHHMM(fields[i+2]) || isYear4(fields[i+2])) {
+			return i, 3
+		}
+	}
+	return -1, 0
+}
+
+// isISODate reports whether s is a YYYY-MM-DD date.
 func isISODate(s string) bool {
 	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
 		return false
@@ -148,6 +202,38 @@ func isISODate(s string) bool {
 	}
 	return true
 }
+
+func isMonthAbbr(s string) bool {
+	switch s {
+	case "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec":
+		return true
+	}
+	return false
+}
+
+// isDayNum reports whether s is a 1- or 2-digit day-of-month.
+func isDayNum(s string) bool {
+	if len(s) < 1 || len(s) > 2 || !isAllDigits(s) {
+		return false
+	}
+	n, _ := strconv.Atoi(s)
+	return n >= 1 && n <= 31
+}
+
+// isClockHHMM reports whether s looks like HH:MM or HH:MM:SS.
+func isClockHHMM(s string) bool {
+	if len(s) < 4 || strings.IndexByte(s, ':') < 0 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != ':' && (s[i] < '0' || s[i] > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func isYear4(s string) bool { return len(s) == 4 && isAllDigits(s) }
 
 // PushFile copies a local file to remote on the device.
 func (c *Client) PushFile(ctx context.Context, serial, local, remote string) (string, error) {

@@ -45,6 +45,12 @@ func TestParseLsLine(t *testing.T) {
 		// Older toybox (e.g. API-21 emulator) omits the link-count column.
 		{"-rwxr-xr-x root root 53489240 2026-06-18 14:37 frida-server-17.14.1-android-arm64", true, "frida-server-17.14.1-android-arm64", "file", 53489240},
 		{"drwxr-xr-x root root 4096 2026-06-18 14:37 sub/", true, "sub", "dir", 4096},
+		// toolbox `ls -l` on API ≤22 uses the BSD "MMM DD time|year" date format.
+		{"-rw-r--r-- 1 root root 1024 Jun 18 14:37 hosts", true, "hosts", "file", 1024},
+		{"-rw-r--r-- 1 root root 2048 Jun 18 2024 old.txt", true, "old.txt", "file", 2048},
+		{"drwxr-xr-x 5 root root 4096 Jan  5 09:00 data", true, "data", "dir", 4096},
+		// BSD format without the link-count column.
+		{"-rw-r--r-- root root 512 Mar 3 08:00 note", true, "note", "file", 512},
 		{"total 1234", false, "", "", 0},
 	}
 	for _, tc := range cases {
