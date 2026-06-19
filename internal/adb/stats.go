@@ -10,13 +10,16 @@ import (
 func (c *Client) GetStats(ctx context.Context, serial string) (*Stats, error) {
 	s := &Stats{}
 
-	// Battery
+	// Battery via dumpsys; fall back to sysfs for ROMs where dumpsys battery is
+	// stubbed/absent (some emulators, TV boxes, very stripped builds).
+	batteryFound := false
 	if out, err := c.Shell(ctx, serial, "dumpsys battery"); err == nil {
 		for _, ln := range strings.Split(out, "\n") {
 			t := strings.TrimSpace(ln)
 			switch {
 			case strings.HasPrefix(t, "level:"):
 				s.BatteryLevel = atoi(strings.TrimSpace(strings.TrimPrefix(t, "level:")))
+				batteryFound = true
 			case strings.HasPrefix(t, "temperature:"):
 				v := atoi(strings.TrimSpace(strings.TrimPrefix(t, "temperature:")))
 				s.BatteryTemp = float64(v) / 10.0
@@ -29,16 +32,35 @@ func (c *Client) GetStats(ctx context.Context, serial string) (*Stats, error) {
 			}
 		}
 	}
+	if !batteryFound {
+		c.readBatterySysfs(ctx, serial, s)
+	}
 
 	// Memory
 	if out, err := c.Shell(ctx, serial, "cat /proc/meminfo"); err == nil {
+		var memFree, buffers, cached int64
+		memAvailFound := false
 		for _, ln := range strings.Split(out, "\n") {
 			t := strings.TrimSpace(ln)
-			if strings.HasPrefix(t, "MemTotal:") {
+			switch {
+			case strings.HasPrefix(t, "MemTotal:"):
 				s.MemTotalKB = atoi64(extractNum(t))
-			} else if strings.HasPrefix(t, "MemAvailable:") {
+			case strings.HasPrefix(t, "MemAvailable:"):
 				s.MemAvailKB = atoi64(extractNum(t))
+				memAvailFound = true
+			case strings.HasPrefix(t, "MemFree:"):
+				memFree = atoi64(extractNum(t))
+			case strings.HasPrefix(t, "Buffers:"):
+				buffers = atoi64(extractNum(t))
+			case strings.HasPrefix(t, "Cached:"):
+				cached = atoi64(extractNum(t))
 			}
+		}
+		// MemAvailable arrived in kernel 3.14; API 21-22 devices on older
+		// kernels lack it, which would make Overview report 100% RAM used.
+		// Approximate with MemFree + Buffers + Cached.
+		if !memAvailFound {
+			s.MemAvailKB = memFree + buffers + cached
 		}
 	}
 
@@ -130,6 +152,38 @@ func (c *Client) GetStats(ctx context.Context, serial string) (*Stats, error) {
 	}
 
 	return s, nil
+}
+
+// readBatterySysfs fills battery fields from /sys/class/power_supply/battery,
+// the universal source when dumpsys battery is unavailable. Each node is read
+// into its own sentinel-delimited section so a missing node can't shift the
+// parse of the others.
+func (c *Client) readBatterySysfs(ctx context.Context, serial string, s *Stats) {
+	const base = "/sys/class/power_supply/battery"
+	cmd := "for f in capacity temp voltage_now status; do cat " + base + "/$f 2>/dev/null; echo '@@@'; done"
+	out, err := c.Shell(ctx, serial, cmd)
+	if err != nil {
+		return
+	}
+	parts := strings.Split(out, "@@@")
+	get := func(i int) string {
+		if i < len(parts) {
+			return strings.TrimSpace(parts[i])
+		}
+		return ""
+	}
+	if v := get(0); v != "" {
+		s.BatteryLevel = atoi(v)
+	}
+	if v := get(1); v != "" {
+		s.BatteryTemp = float64(atoi(v)) / 10.0 // tenths of °C
+	}
+	if v := get(2); v != "" {
+		s.BatteryVoltage = atoi(v) / 1000 // µV → mV
+	}
+	if st := strings.ToLower(get(3)); st == "charging" || st == "full" {
+		s.Charging = true
+	}
 }
 
 // cpuSample holds the aggregate jiffy counters from the `cpu` line of

@@ -132,16 +132,8 @@ func (c *Client) Enrich(parent context.Context, d *Device) {
 	d.Root, d.RootMethod = c.detectRoot(ctx, d.ID)
 	// Network
 	d.IP = c.detectIP(ctx, d.ID)
-	if w, err := c.Shell(ctx, d.ID, "dumpsys wifi | grep -E 'mWifiInfo|SSID:'"); err == nil {
-		w = firstLine(w)
-		// crude: extract SSID="..." if present
-		if i := strings.Index(w, "SSID:"); i >= 0 {
-			rest := strings.TrimSpace(w[i+5:])
-			if j := strings.Index(rest, ","); j > 0 {
-				rest = rest[:j]
-			}
-			d.WiFi = strings.Trim(rest, `" `)
-		}
+	if w, err := c.Shell(ctx, d.ID, "dumpsys wifi"); err == nil {
+		d.WiFi = parseWifiSSID(w)
 	}
 	if m, err := c.Shell(ctx, d.ID, "cat /sys/class/net/wlan0/address"); err == nil {
 		d.MAC = strings.TrimSpace(m)
@@ -230,6 +222,27 @@ func firstInetAddr(out string, skipLoopback bool) string {
 		if ip != "" {
 			return ip
 		}
+	}
+	return ""
+}
+
+// parseWifiSSID extracts the connected Wi-Fi SSID from `dumpsys wifi` output,
+// host-side (no device `grep`). Returns "" when not present or redacted.
+func parseWifiSSID(out string) string {
+	for _, ln := range strings.Split(out, "\n") {
+		_, after, ok := strings.Cut(ln, "SSID:")
+		if !ok {
+			continue
+		}
+		rest := strings.TrimSpace(after)
+		if before, _, ok := strings.Cut(rest, ","); ok {
+			rest = before
+		}
+		rest = strings.Trim(rest, `" `)
+		if rest == "" || rest == "<unknown ssid>" || rest == "<none>" {
+			continue
+		}
+		return rest
 	}
 	return ""
 }
