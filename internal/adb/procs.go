@@ -2,6 +2,7 @@ package adb
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -106,10 +107,14 @@ func (c *Client) StartTopStream(ctx context.Context, serial string, intervalSec 
 //	/proc/stat (CPU jiffies + cpuN lines for ncpu)
 //	all /proc/PID/stat lines
 //	/proc/meminfo (MemTotal)
+//	per-PID "PID UID" pairs (owner uid, for the User column)
 //
 // Sections are separated by a sentinel line so the host-side parser can split
-// them without relying on tools like awk/sed (missing on stripped ROMs).
-const procfsCmd = "cat /proc/stat; echo '@@@'; cat /proc/[0-9]*/stat 2>/dev/null; echo '@@@'; cat /proc/meminfo"
+// them without relying on tools like awk/sed (missing on stripped ROMs). The
+// uid loop uses only shell builtins (for/while/read/[/echo) — no tr/grep/printf
+// — so it works on stripped ROMs, and emits one tiny line per PID.
+const procfsCmd = "cat /proc/stat; echo '@@@'; cat /proc/[0-9]*/stat 2>/dev/null; echo '@@@'; cat /proc/meminfo; echo '@@@'; " +
+	`for p in /proc/[0-9]*; do while read k v _; do if [ "$k" = Uid: ]; then echo "${p##*/} $v"; break; fi; done < "$p/status" 2>/dev/null; done`
 
 func (s *TopStream) loop(ctx context.Context) {
 	defer close(s.out)
@@ -166,10 +171,11 @@ func (s *TopStream) loop(ctx context.Context) {
 // buildSnapshot parses one procfs dump, computes CPU%/Mem%, and updates the
 // cross-cycle accounting state on s.
 func (s *TopStream) buildSnapshot(out string) ProcSnapshot {
-	statSec, procSec, memSec := splitProcfsSections(out)
+	statSec, procSec, memSec, uidSec := splitProcfsSections(out)
 
 	totalJiffies, ncpu := parseProcStat(statSec)
 	memTotalKB := parseMemTotalKB(memSec)
+	uids := parseUIDSection(uidSec)
 
 	totalDelta := totalJiffies - s.prevTotal
 	hasPrevTotal := s.prevTotal > 0
@@ -191,8 +197,13 @@ func (s *TopStream) buildSnapshot(out string) ProcSnapshot {
 		procJiffies := p.utime + p.stime
 		nextProc[p.pid] = procJiffies
 
+		uid := -1
+		if u, ok := uids[p.pid]; ok {
+			uid = u
+		}
 		row := ProcRow{
 			PID:     p.pid,
+			User:    androidUserForUID(uid),
 			State:   p.state,
 			Name:    p.comm,
 			Cmdline: p.comm,
@@ -224,8 +235,8 @@ func (s *TopStream) buildSnapshot(out string) ProcSnapshot {
 }
 
 // splitProcfsSections splits the combined dump on the "@@@" sentinel lines into
-// (statSection, procSection, memSection).
-func splitProcfsSections(out string) (string, string, string) {
+// (statSection, procSection, memSection, uidSection).
+func splitProcfsSections(out string) (string, string, string, string) {
 	parts := strings.Split(out, "@@@")
 	get := func(i int) string {
 		if i < len(parts) {
@@ -233,7 +244,53 @@ func splitProcfsSections(out string) (string, string, string) {
 		}
 		return ""
 	}
-	return get(0), get(1), get(2)
+	return get(0), get(1), get(2), get(3)
+}
+
+// parseUIDSection parses the "PID UID" lines emitted by procfsCmd's uid loop
+// into a pid→uid map.
+func parseUIDSection(sec string) map[int]int {
+	m := map[int]int{}
+	for _, ln := range strings.Split(sec, "\n") {
+		fs := strings.Fields(ln)
+		if len(fs) < 2 {
+			continue
+		}
+		pid, err1 := strconv.Atoi(fs[0])
+		uid, err2 := strconv.Atoi(fs[1])
+		if err1 == nil && err2 == nil {
+			m[pid] = uid
+		}
+	}
+	return m
+}
+
+// androidUserForUID maps an Android uid to a display name. Returns "" for an
+// unknown/unreadable uid (passed as -1) so the UI shows a blank rather than a
+// misleading "root".
+func androidUserForUID(uid int) string {
+	switch {
+	case uid < 0:
+		return ""
+	case uid == 0:
+		return "root"
+	case uid == 1000:
+		return "system"
+	case uid == 1001:
+		return "radio"
+	case uid == 1013:
+		return "media"
+	case uid == 2000:
+		return "shell"
+	case uid >= 10000:
+		// App uids: u<userId>_a<appId>. userId = uid / 100000.
+		user := uid / 100000
+		appID := (uid % 100000) - 10000
+		if appID >= 0 {
+			return fmt.Sprintf("u%d_a%d", user, appID)
+		}
+	}
+	return strconv.Itoa(uid)
 }
 
 // parseProcStat reads /proc/stat and returns total jiffies (sum of all numbers

@@ -86,8 +86,8 @@ MemFree:          580952 kB`
 }
 
 func TestSplitProcfsSections(t *testing.T) {
-	in := "cpu 1 2 3\n@@@\n1 (init) S 0\n@@@\nMemTotal: 100 kB\n"
-	a, b, c := splitProcfsSections(in)
+	in := "cpu 1 2 3\n@@@\n1 (init) S 0\n@@@\nMemTotal: 100 kB\n@@@\n1 0\n1234 10042\n"
+	a, b, c, d := splitProcfsSections(in)
 	if a != "cpu 1 2 3" {
 		t.Errorf("stat section: %q", a)
 	}
@@ -96,5 +96,28 @@ func TestSplitProcfsSections(t *testing.T) {
 	}
 	if c != "MemTotal: 100 kB" {
 		t.Errorf("mem section: %q", c)
+	}
+	uids := parseUIDSection(d)
+	if uids[1] != 0 || uids[1234] != 10042 {
+		t.Errorf("uid section: %v", uids)
+	}
+}
+
+func TestAndroidUserForUID(t *testing.T) {
+	cases := map[int]string{
+		-1:    "",
+		0:     "root",
+		1000:  "system",
+		2000:  "shell",
+		10042: "u0_a42",
+		10000: "u0_a0",
+		// secondary user 10, app 5 → 10*100000 + 10005 = 1010005
+		1010005: "u10_a5",
+		9999:    "9999",
+	}
+	for uid, want := range cases {
+		if got := androidUserForUID(uid); got != want {
+			t.Errorf("androidUserForUID(%d) = %q, want %q", uid, got, want)
+		}
 	}
 }
