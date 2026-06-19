@@ -29,6 +29,11 @@ type Client struct {
 	// device's su accepts (see rootWrap).
 	suMu     sync.Mutex
 	suStyles map[string]suStyle
+
+	// capMu guards caps, the per-serial cache of device Capabilities (SDK,
+	// SELinux, ABI, binary presence) — see capabilities.go.
+	capMu sync.Mutex
+	caps  map[string]*Capabilities
 }
 
 // suStyle records how a device grants root. Devices differ widely:
