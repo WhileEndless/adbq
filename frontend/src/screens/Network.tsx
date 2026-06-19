@@ -4,17 +4,19 @@ import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, CodeBlock, SearchInput, Switch, confirmDialog, showToast} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
+import {useDeviceData} from '../cache';
 
 type Tab = 'overview' | 'proxy' | 'cert' | 'hosts' | 'dns' | 'capture' | 'connections';
 
 export function NetworkScreen({device}: {device: adb.Device}) {
   const [tab, setTab] = useState<Tab>('overview');
-  const [info, setInfo] = useState<adb.NetworkInfo | null>(null);
 
-  const reload = () => {
-    if (device?.id) API.GetNetworkInfo(device.id).then(setInfo).catch(e => showToast({title: 'Network info failed', body: String(e), kind: 'err'}));
-  };
-  useEffect(() => { reload(); }, [device?.id]);
+  // Cached-first: show the last network snapshot instantly, revalidate quietly.
+  const {data: info, refreshing, refresh: reload} = useDeviceData(
+    device?.id ? `net-info:${device.id}` : null,
+    () => API.GetNetworkInfo(device.id),
+    {staleMs: 10000},
+  );
 
   const tabs: {id: Tab; label: string; icon: React.ReactNode}[] = [
     {id: 'overview',    label: 'Overview',       icon: <Icon.Wifi/>},
@@ -32,7 +34,7 @@ export function NetworkScreen({device}: {device: adb.Device}) {
         <h1>Network</h1>
         <span className='subtitle mono'>{info?.wifiSsid || '—'} · {info?.ip || device.ip} · {info?.mac || device.mac}</span>
         <div className='spacer' style={{flex: 1}}/>
-        <button className='btn' onClick={reload}><Icon.Refresh/>Refresh</button>
+        <button className='btn' onClick={reload}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Refresh</button>
       </div>
 
       <div style={{borderBottom: '1px solid var(--border)', padding: '0 18px', display: 'flex', gap: 0, overflowX: 'auto'}}>
@@ -48,11 +50,11 @@ export function NetworkScreen({device}: {device: adb.Device}) {
       </div>
 
       <div className='screen-body' style={{paddingTop: 16}}>
-        {tab === 'overview'    && <NetOverview device={device} info={info}/>}
-        {tab === 'proxy'       && <NetProxy device={device} info={info} reload={reload}/>}
+        {tab === 'overview'    && <NetOverview device={device} info={info ?? null}/>}
+        {tab === 'proxy'       && <NetProxy device={device} info={info ?? null} reload={reload}/>}
         {tab === 'cert'        && <NetCert device={device}/>}
         {tab === 'hosts'       && <NetHosts device={device}/>}
-        {tab === 'dns'         && <NetDns device={device} info={info}/>}
+        {tab === 'dns'         && <NetDns device={device} info={info ?? null}/>}
         {tab === 'capture'     && <NetCapture device={device}/>}
         {tab === 'connections' && <NetConnections device={device}/>}
       </div>

@@ -1,8 +1,9 @@
-import React, {useEffect, useState} from 'react';
+import React, {useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Modal, confirmDialog, showToast} from '../ui';
+import {useDeviceData} from '../cache';
 
 // Curated bidirectional preset catalogue. `dir` decides which adb call we
 // make ("forward" host→device, "reverse" device→host). Kept together in one
@@ -19,19 +20,22 @@ const PRESETS: {label: string; local: string; remote: string; dir: 'fwd' | 'rev'
 ];
 
 export function ForwardsScreen({device}: {device: adb.Device}) {
-  const [fwd, setFwd] = useState<adb.Forward[]>([]);
-  const [rev, setRev] = useState<adb.Forward[]>([]);
   const [add, setAdd] = useState<null | 'fwd' | 'rev'>(null);
   const [aLocal, setALocal] = useState('tcp:8080');
   const [aRemote, setARemote] = useState('tcp:8080');
   const [showCmds, setShowCmds] = useState(false);
 
-  const reload = () => {
-    if (!device?.id) return;
-    API.ListForwards(device.id).then(f => setFwd(f || [])).catch(e => showToast({title: 'List forwards failed', body: String(e), kind: 'err'}));
-    API.ListReverses(device.id).then(f => setRev(f || [])).catch(e => showToast({title: 'List reverses failed', body: String(e), kind: 'err'}));
-  };
-  useEffect(reload, [device?.id]);
+  const {data, refreshing, refresh} = useDeviceData(
+    device?.id ? `forwards:${device.id}` : null,
+    async () => {
+      const [f, r] = await Promise.all([API.ListForwards(device.id), API.ListReverses(device.id)]);
+      return {fwd: f || [], rev: r || []};
+    },
+    {staleMs: 8000},
+  );
+  const fwd = data?.fwd || [];
+  const rev = data?.rev || [];
+  const reload = refresh;
 
   function applyPreset(p: typeof PRESETS[number]) {
     const call = p.dir === 'rev'
@@ -73,7 +77,7 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
         <button className={`btn sm${showCmds ? ' primary' : ''}`} onClick={() => setShowCmds(v => !v)} title='Toggle equivalent adb commands'>
           <Icon.Terminal/>Show commands
         </button>
-        <button className='btn' onClick={reload}><Icon.Refresh/>Reload</button>
+        <button className='btn' onClick={reload}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
       </div>
 
       <div className='screen-body'>

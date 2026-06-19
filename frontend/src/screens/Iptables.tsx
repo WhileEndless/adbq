@@ -3,6 +3,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, FeatureNotice, SearchInput, confirmDialog, showToast} from '../ui';
+import {useDeviceData, mutateData} from '../cache';
 
 type Family = 'ipv4' | 'ipv6';
 type Table = 'filter' | 'nat' | 'mangle' | 'raw';
@@ -13,41 +14,36 @@ const SAFE_POLICY_TIMEOUT_MS = 30_000;
 export function IptablesScreen({device}: {device: adb.Device}) {
   const [family, setFamily] = useState<Family>('ipv4');
   const [table, setTable] = useState<Table>('filter');
-  const [snap, setSnap] = useState<adb.IPTSnapshot | null>(null);
   const [chain, setChain] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [info, setInfo] = useState<adb.IPTBackendInfo | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   const [raw, setRaw] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const safetyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function refresh() {
-    if (!device?.id) return;
-    setLoading(true);
-    try {
-      // Probe first; only list when a backend (iptables or read-only nft) is
-      // actually present, so a device without it shows a clean "not available"
-      // banner instead of a scary "List failed" error toast.
+  // Cached-first load: show the last ruleset instantly, revalidate in the
+  // background. Probe first so a device without iptables/nft shows a clean
+  // banner instead of a "List failed" toast; listing needs root.
+  const cacheKey = device?.id ? `iptables:${device.id}:${family}:${table}` : null;
+  const {data, loading, refreshing, refresh} = useDeviceData(
+    cacheKey,
+    async (): Promise<{info: adb.IPTBackendInfo | null; snap: adb.IPTSnapshot | null}> => {
       const pb = await API.ProbeIptables(device.id, family);
-      setInfo(pb);
-      // Listing the ruleset needs root (iptables -L and nft list ruleset both
-      // do). Skip it when unavailable or unrooted so we don't fire a "List
-      // failed" toast; the render below shows the appropriate notice instead.
-      if (!pb?.available || !device.root) {
-        setSnap(null);
-        return;
-      }
+      if (!pb?.available || !device.root) return {info: pb, snap: null};
       const sn = await API.ListIptables(device.id, family, table);
-      setSnap(sn);
-      if (sn?.chains?.length && !sn.chains.some(c => c.name === chain)) {
-        setChain(sn.chains[0].name);
-      }
-    } catch (e) {
-      showToast({title: 'List failed', body: String(e), kind: 'err'});
-    } finally { setLoading(false); }
-  }
-  useEffect(() => { void refresh(); }, [device?.id, family, table]);
+      return {info: pb, snap: sn};
+    },
+    {staleMs: 15000},
+  );
+  const info = data?.info || null;
+  const snap = data?.snap || null;
+  // Apply a mutation's returned snapshot straight into the cache (no re-list).
+  const applySnap = (sn: adb.IPTSnapshot) => { if (cacheKey) mutateData(cacheKey, {info, snap: sn}); };
+
+  useEffect(() => {
+    if (snap?.chains?.length && !snap.chains.some(c => c.name === chain)) {
+      setChain(snap.chains[0].name);
+    }
+  }, [snap, chain]);
 
   const selected = useMemo(
     () => snap?.chains?.find(c => c.name === chain) || snap?.chains?.[0] || null,
@@ -60,7 +56,7 @@ export function IptablesScreen({device}: {device: adb.Device}) {
     if (!ok) return;
     try {
       const sn = await API.DeleteIptablesRule(device.id, family, table, selected.name, num);
-      setSnap(sn);
+      applySnap(sn);
       showToast({title: 'Rule deleted', body: `${selected.name} #${num}`, kind: 'ok'});
     } catch (e) { showToast({title: 'Delete failed', body: String(e), kind: 'err'}); }
   }
@@ -71,7 +67,7 @@ export function IptablesScreen({device}: {device: adb.Device}) {
     if (!ok) return;
     try {
       const sn = await API.FlushIptables(device.id, family, table, selected.name);
-      setSnap(sn);
+      applySnap(sn);
       showToast({title: 'Chain flushed', body: selected.name, kind: 'ok'});
     } catch (e) { showToast({title: 'Flush failed', body: String(e), kind: 'err'}); }
   }
@@ -113,7 +109,7 @@ export function IptablesScreen({device}: {device: adb.Device}) {
   async function undo() {
     try {
       const sn = await API.UndoIptables(device.id, family);
-      setSnap(sn);
+      applySnap(sn);
       showToast({title: 'Undone', body: 'Reverted to last snapshot', kind: 'ok'});
     } catch (e) { showToast({title: 'Undo failed', body: String(e), kind: 'err'}); }
   }
@@ -191,7 +187,7 @@ export function IptablesScreen({device}: {device: adb.Device}) {
         <button className='btn sm' onClick={undo} title='Revert to previous snapshot'><Icon.Refresh/>Undo</button>
         <button className='btn sm' onClick={exportRules}><Icon.Download/>Export</button>
         <button className='btn sm' onClick={() => setShowRaw(true)}><Icon.Upload/>Raw / Import</button>
-        <button className='btn sm' onClick={() => refresh()}><Icon.Refresh/>Reload</button>
+        <button className='btn sm' onClick={() => refresh()}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
       </div>
 
       {info && !info.available && (
@@ -276,7 +272,7 @@ export function IptablesScreen({device}: {device: adb.Device}) {
             const sn = pos > 0
               ? await API.InsertIptablesRule(device.id, family, table, selected.name, pos, spec)
               : await API.AppendIptablesRule(device.id, family, table, selected.name, spec);
-            setSnap(sn);
+            applySnap(sn);
             setAddOpen(false);
             showToast({title: 'Rule added', body: spec.join(' '), kind: 'ok', mono: true});
           } catch (e) { showToast({title: 'Add rule failed', body: String(e), kind: 'err'}); }

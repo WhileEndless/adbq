@@ -18,6 +18,26 @@ import {CaptureScreen} from './screens/Capture';
 import {IptablesScreen} from './screens/Iptables';
 import {ProcessesScreen} from './screens/Processes';
 import {ProfileSelector, ProfileEditor, ApplyConfirm, PastDevices, deviceKey} from './screens/Profiles';
+import {prefetchData} from './cache';
+
+// prefetchDeviceData warms the shared cache for the cheaper request/response
+// screens when a device appears online, so opening those screens is instant —
+// even if the user never opened them before. Keys/shapes MUST match what each
+// screen reads via useDeviceData. Heavy/streaming screens are left out.
+function prefetchDeviceData(d: adb.Device) {
+  const id = d.id;
+  prefetchData(`forwards:${id}`, async () => {
+    const [f, r] = await Promise.all([API.ListForwards(id), API.ListReverses(id)]);
+    return {fwd: f || [], rev: r || []};
+  });
+  prefetchData(`net-info:${id}`, () => API.GetNetworkInfo(id));
+  prefetchData(`iptables:${id}:ipv4:filter`, async () => {
+    const pb = await API.ProbeIptables(id, 'ipv4');
+    if (!pb?.available || !d.root) return {info: pb, snap: null};
+    const sn = await API.ListIptables(id, 'ipv4', 'filter');
+    return {info: pb, snap: sn};
+  });
+}
 
 const ACCENTS = ['#a07cf7', '#7aa2ff', '#5ed29a', '#e9b454', '#ec6a73', '#c5a3ff'];
 
@@ -128,6 +148,11 @@ function AppInner() {
       // every 5s poll (each call writes devices.json).
       if (was === undefined || was !== d.online) {
         API.RegisterDevice(d).catch(() => {});
+      }
+      // Warm the cache once when a device appears online (first sight or
+      // reconnect), so the cacheable screens open instantly later.
+      if (d.online && (was === undefined || was === false)) {
+        prefetchDeviceData(d);
       }
       if (d.online && was === false && !pendingApply.current.has(key)) {
         pendingApply.current.add(key);
