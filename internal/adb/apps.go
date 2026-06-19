@@ -77,14 +77,18 @@ func (c *Client) ListApps(ctx context.Context, serial string, onlyUser bool) ([]
 		if !strings.HasPrefix(ln, "package:") {
 			continue
 		}
-		// package:/path/base.apk=com.foo
+		// "package:/path/base.apk=com.foo" — or, on degraded package managers,
+		// just "package:com.foo" with no path. Don't drop the pathless form
+		// (that would silently hide the app from the list); emit it with an
+		// empty path.
 		rest := strings.TrimPrefix(ln, "package:")
-		eq := strings.LastIndex(rest, "=")
-		if eq < 0 {
+		path, pkg := "", rest
+		if eq := strings.LastIndex(rest, "="); eq >= 0 { // path may contain '='
+			path, pkg = rest[:eq], rest[eq+1:]
+		}
+		if pkg == "" {
 			continue
 		}
-		path := rest[:eq]
-		pkg := rest[eq+1:]
 		apps = append(apps, App{
 			Pkg:    pkg,
 			Path:   path,

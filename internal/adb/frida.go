@@ -2,6 +2,7 @@ package adb
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -71,41 +72,56 @@ func (c *Client) ListFridaServers(ctx context.Context, serial string) ([]FridaSe
 type fridaProc struct {
 	pid  int
 	comm string // /proc/<pid>/comm (truncated to 15 chars by the kernel)
-	exe  string // readlink /proc/<pid>/exe — the full binary path, when available
+	exe  string // readlink /proc/<pid>/exe — full binary path, when readable
+	cmd0 string // /proc/<pid>/cmdline argv[0] — full path, when readable
 }
 
 // matches reports whether this process is the given on-device binary. Prefers an
-// exact /proc/<pid>/exe match; falls back to the (truncated) comm being a prefix
-// of the filename, which is how the kernel reports e.g. "frida-server-17".
+// exact full-path match (exe, then cmdline argv[0]); only when neither is
+// readable (e.g. a root-owned process scanned without root) does it fall back to
+// the truncated comm being a prefix of the filename. The cmdline path resolves
+// the 15-char comm ambiguity between e.g. frida-server-16.x and -16.y.
 func (p fridaProc) matches(path, name string) bool {
 	if p.exe != "" {
 		return p.exe == path
+	}
+	if p.cmd0 != "" {
+		return p.cmd0 == path
 	}
 	return p.comm != "" && strings.HasPrefix(name, p.comm)
 }
 
 // runningFrida scans procfs for live frida-server processes. It avoids ps/grep/
 // tr/pkill — minimal ROMs ship none of those — using only shell builtins plus
-// readlink. Reads run as root since frida-server runs as root.
+// readlink. Reads run as root since frida-server runs as root. Fields are
+// '|'-delimited because paths can contain spaces. `read a0 < cmdline` naturally
+// yields argv[0]: shell vars can't hold the NUL that separates cmdline args.
 func (c *Client) runningFrida(ctx context.Context, serial string) []fridaProc {
-	const script = `for p in /proc/[0-9]*; do read c < "$p/comm" 2>/dev/null || continue; case "$c" in *frida-server*) echo "${p##*/} $c $(readlink "$p/exe" 2>/dev/null)";; esac; done`
+	const script = `for p in /proc/[0-9]*; do read c < "$p/comm" 2>/dev/null || continue; case "$c" in *frida-server*) read a0 < "$p/cmdline" 2>/dev/null; echo "${p##*/}|$c|$(readlink "$p/exe" 2>/dev/null)|$a0";; esac; done`
 	out, _, _ := c.ShellSU(ctx, serial, script)
 	if strings.TrimSpace(out) == "" {
 		out, _ = c.Shell(ctx, serial, script)
 	}
 	var procs []fridaProc
 	for _, ln := range strings.Split(out, "\n") {
-		f := strings.Fields(strings.TrimSpace(ln))
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		f := strings.Split(ln, "|")
 		if len(f) < 2 {
 			continue
 		}
-		pid, err := strconv.Atoi(f[0])
+		pid, err := strconv.Atoi(strings.TrimSpace(f[0]))
 		if err != nil {
 			continue
 		}
-		p := fridaProc{pid: pid, comm: f[1]}
+		p := fridaProc{pid: pid, comm: strings.TrimSpace(f[1])}
 		if len(f) >= 3 {
-			p.exe = f[2]
+			p.exe = strings.TrimSpace(f[2])
+		}
+		if len(f) >= 4 {
+			p.cmd0 = strings.TrimSpace(f[3])
 		}
 		procs = append(procs, p)
 	}
@@ -148,6 +164,14 @@ func (c *Client) StartFrida(ctx context.Context, serial, serverPath, iface strin
 	q := shQuote(serverPath)
 	cmd := "chmod 755 " + q + " && " + q + " -l " + iface + ":" + strconv.Itoa(port) + " -D"
 	out, _, err := c.ShellSU(ctx, serial, cmd)
+	// SELinux frequently blocks executing binaries from /data/local/tmp on
+	// enforcing stock ROMs. Surface that distinctly so the UI stops blaming an
+	// arch mismatch for what is really a policy denial.
+	if low := strings.ToLower(out); strings.Contains(low, "avc: denied") ||
+		(strings.Contains(low, "denied") && strings.Contains(low, "execute")) ||
+		strings.Contains(low, "permission denied") {
+		return out, fmt.Errorf("SELinux blocked executing frida-server from %s — push it to a Magisk-allowed path (e.g. /data/adb/…) or set the domain permissive: %s", serverPath, firstLine(strings.TrimSpace(out)))
+	}
 	return out, err
 }
 
