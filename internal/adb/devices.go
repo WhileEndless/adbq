@@ -28,6 +28,17 @@ type Device struct {
 	IP             string `json:"ip"`
 	WiFi           string `json:"wifi"`
 	MAC            string `json:"mac"`
+	HardwareSerial string `json:"hardwareSerial"` // ro.serialno — stable across USB↔Wi-Fi
+}
+
+// DeviceKey returns a stable per-device identity for profile binding. It prefers
+// the hardware serial (ro.serialno), which survives USB↔Wi-Fi/IP changes, and
+// falls back to the adb id when that's empty or redacted.
+func DeviceKey(d *Device) string {
+	if s := strings.TrimSpace(d.HardwareSerial); s != "" && s != "unknown" {
+		return s
+	}
+	return d.ID
 }
 
 // ListDevices runs `adb devices -l` and parses the result. Does not enrich.
@@ -124,6 +135,7 @@ func (c *Client) Enrich(parent context.Context, d *Device) {
 	d.BuildID = get("ro.build.id")
 	d.CPU = get("ro.hardware") // generic; not great but stdlib only
 	d.Arch = get("ro.product.cpu.abi")
+	d.HardwareSerial = get("ro.serialno")
 	// Kernel
 	if k, err := c.Shell(ctx, d.ID, "uname -r"); err == nil {
 		d.Kernel = strings.TrimSpace(k)

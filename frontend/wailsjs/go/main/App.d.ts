@@ -19,7 +19,15 @@ export function AppendIptablesRule(arg1:string,arg2:string,arg3:string,arg4:stri
 
 export function ApplyHostsConfig(arg1:string):Promise<adb.HostsApplyResult>;
 
+export function ApplyProfile(arg1:string,arg2:string):Promise<adb.ApplyReport>;
+
+export function BindDeviceProfile(arg1:string,arg2:string):Promise<void>;
+
+export function BindDeviceProfileByKey(arg1:string,arg2:string):Promise<void>;
+
 export function CancelTask(arg1:string):Promise<void>;
+
+export function CaptureProfileFromDevice(arg1:string,arg2:string):Promise<adb.Profile>;
 
 export function CaptureStatus(arg1:string):Promise<adb.CaptureState>;
 
@@ -49,11 +57,15 @@ export function DeleteIptablesChain(arg1:string,arg2:string,arg3:string,arg4:str
 
 export function DeleteIptablesRule(arg1:string,arg2:string,arg3:string,arg4:string,arg5:number):Promise<adb.IPTSnapshot>;
 
+export function DeleteProfile(arg1:string):Promise<void>;
+
 export function DescribeApp(arg1:string,arg2:string):Promise<adb.AppDetail>;
 
 export function DescribeLivePacket(arg1:string,arg2:number):Promise<adb.LivePacketDetail>;
 
 export function DeviceDetails(arg1:string):Promise<adb.Device>;
+
+export function DeviceKey(arg1:string):Promise<string>;
 
 export function DisconnectDevice(arg1:string):Promise<string>;
 
@@ -72,6 +84,8 @@ export function ForceStopApp(arg1:string,arg2:string):Promise<string>;
 export function FridaArchInfo(arg1:string):Promise<adb.FridaArchInfo>;
 
 export function GetNetworkInfo(arg1:string):Promise<adb.NetworkInfo>;
+
+export function GetProfile(arg1:string):Promise<adb.Profile>;
 
 export function GetProxy(arg1:string):Promise<string>;
 
@@ -107,6 +121,8 @@ export function ListCACerts(arg1:string):Promise<Array<adb.CACert>>;
 
 export function ListConnections(arg1:string):Promise<Array<adb.Connection>>;
 
+export function ListDeviceRecords():Promise<Array<adb.DeviceRecord>>;
+
 export function ListDevices():Promise<Array<adb.Device>>;
 
 export function ListDir(arg1:string,arg2:string,arg3:boolean):Promise<Array<adb.FileEntry>>;
@@ -121,6 +137,8 @@ export function ListIptables(arg1:string,arg2:string,arg3:string):Promise<adb.IP
 
 export function ListPackageUIDs(arg1:string):Promise<Record<number, string>>;
 
+export function ListProfiles():Promise<Array<adb.Profile>>;
+
 export function ListReverses(arg1:string):Promise<Array<adb.Forward>>;
 
 export function ListShellHistory():Promise<Array<adb.ScrollbackEntry>>;
@@ -130,6 +148,8 @@ export function ListTasks():Promise<Array<adb.TaskState>>;
 export function LiveCaptureStatus(arg1:string):Promise<adb.LiveCaptureState>;
 
 export function LoadHostsConfig(arg1:string):Promise<string>;
+
+export function LookupDeviceProfile(arg1:string):Promise<string>;
 
 export function Mkdir(arg1:string,arg2:string,arg3:boolean):Promise<string>;
 
@@ -142,6 +162,8 @@ export function OpenShell(arg1:string,arg2:boolean):Promise<string>;
 export function PickAndInstallAPK(arg1:string):Promise<string>;
 
 export function PlanTcpdumpAutoInstall(arg1:string):Promise<adb.TcpdumpAutoPlan>;
+
+export function PreviewProfile(arg1:string,arg2:string):Promise<Array<adb.StepPreview>>;
 
 export function ProbeIptables(arg1:string,arg2:string):Promise<adb.IPTBackendInfo>;
 
@@ -163,6 +185,8 @@ export function Reboot(arg1:string,arg2:string):Promise<string>;
 
 export function RecordingActive(arg1:string):Promise<boolean>;
 
+export function RegisterDevice(arg1:adb.Device):Promise<void>;
+
 export function RemoveForward(arg1:string,arg2:string):Promise<string>;
 
 export function RemoveReverse(arg1:string,arg2:string):Promise<string>;
@@ -180,6 +204,8 @@ export function RunCommandRoot(arg1:string,arg2:string):Promise<string>;
 export function SaveHostsConfig(arg1:string,arg2:string):Promise<void>;
 
 export function SaveLivePcap(arg1:string):Promise<string>;
+
+export function SaveProfile(arg1:adb.Profile):Promise<adb.Profile>;
 
 export function SaveScreenshotAs(arg1:string):Promise<string>;
 

@@ -34,8 +34,24 @@ export function ApplyHostsConfig(arg1) {
   return window['go']['main']['App']['ApplyHostsConfig'](arg1);
 }
 
+export function ApplyProfile(arg1, arg2) {
+  return window['go']['main']['App']['ApplyProfile'](arg1, arg2);
+}
+
+export function BindDeviceProfile(arg1, arg2) {
+  return window['go']['main']['App']['BindDeviceProfile'](arg1, arg2);
+}
+
+export function BindDeviceProfileByKey(arg1, arg2) {
+  return window['go']['main']['App']['BindDeviceProfileByKey'](arg1, arg2);
+}
+
 export function CancelTask(arg1) {
   return window['go']['main']['App']['CancelTask'](arg1);
+}
+
+export function CaptureProfileFromDevice(arg1, arg2) {
+  return window['go']['main']['App']['CaptureProfileFromDevice'](arg1, arg2);
 }
 
 export function CaptureStatus(arg1) {
@@ -94,6 +110,10 @@ export function DeleteIptablesRule(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['DeleteIptablesRule'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function DeleteProfile(arg1) {
+  return window['go']['main']['App']['DeleteProfile'](arg1);
+}
+
 export function DescribeApp(arg1, arg2) {
   return window['go']['main']['App']['DescribeApp'](arg1, arg2);
 }
@@ -104,6 +124,10 @@ export function DescribeLivePacket(arg1, arg2) {
 
 export function DeviceDetails(arg1) {
   return window['go']['main']['App']['DeviceDetails'](arg1);
+}
+
+export function DeviceKey(arg1) {
+  return window['go']['main']['App']['DeviceKey'](arg1);
 }
 
 export function DisconnectDevice(arg1) {
@@ -140,6 +164,10 @@ export function FridaArchInfo(arg1) {
 
 export function GetNetworkInfo(arg1) {
   return window['go']['main']['App']['GetNetworkInfo'](arg1);
+}
+
+export function GetProfile(arg1) {
+  return window['go']['main']['App']['GetProfile'](arg1);
 }
 
 export function GetProxy(arg1) {
@@ -210,6 +238,10 @@ export function ListConnections(arg1) {
   return window['go']['main']['App']['ListConnections'](arg1);
 }
 
+export function ListDeviceRecords() {
+  return window['go']['main']['App']['ListDeviceRecords']();
+}
+
 export function ListDevices() {
   return window['go']['main']['App']['ListDevices']();
 }
@@ -238,6 +270,10 @@ export function ListPackageUIDs(arg1) {
   return window['go']['main']['App']['ListPackageUIDs'](arg1);
 }
 
+export function ListProfiles() {
+  return window['go']['main']['App']['ListProfiles']();
+}
+
 export function ListReverses(arg1) {
   return window['go']['main']['App']['ListReverses'](arg1);
 }
@@ -256,6 +292,10 @@ export function LiveCaptureStatus(arg1) {
 
 export function LoadHostsConfig(arg1) {
   return window['go']['main']['App']['LoadHostsConfig'](arg1);
+}
+
+export function LookupDeviceProfile(arg1) {
+  return window['go']['main']['App']['LookupDeviceProfile'](arg1);
 }
 
 export function Mkdir(arg1, arg2, arg3) {
@@ -280,6 +320,10 @@ export function PickAndInstallAPK(arg1) {
 
 export function PlanTcpdumpAutoInstall(arg1) {
   return window['go']['main']['App']['PlanTcpdumpAutoInstall'](arg1);
+}
+
+export function PreviewProfile(arg1, arg2) {
+  return window['go']['main']['App']['PreviewProfile'](arg1, arg2);
 }
 
 export function ProbeIptables(arg1, arg2) {
@@ -322,6 +366,10 @@ export function RecordingActive(arg1) {
   return window['go']['main']['App']['RecordingActive'](arg1);
 }
 
+export function RegisterDevice(arg1) {
+  return window['go']['main']['App']['RegisterDevice'](arg1);
+}
+
 export function RemoveForward(arg1, arg2) {
   return window['go']['main']['App']['RemoveForward'](arg1, arg2);
 }
@@ -356,6 +404,10 @@ export function SaveHostsConfig(arg1, arg2) {
 
 export function SaveLivePcap(arg1) {
   return window['go']['main']['App']['SaveLivePcap'](arg1);
+}
+
+export function SaveProfile(arg1) {
+  return window['go']['main']['App']['SaveProfile'](arg1);
 }
 
 export function SaveScreenshotAs(arg1) {

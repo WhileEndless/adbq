@@ -45,6 +45,7 @@ type App struct {
 	scrcpy   *adb.ScrcpyManager
 	sessions *adb.SessionStore
 	icons    *adb.IconCache
+	profiles *adb.ProfileStore
 
 	dnsMu   sync.Mutex
 	dnsSnif map[string]*adb.DNSSnifferStream
@@ -55,6 +56,7 @@ type App struct {
 
 func NewApp() *App {
 	store, _ := adb.NewSessionStore()
+	profiles, _ := adb.NewProfileStore()
 	return &App{
 		client:      adb.NewClient(),
 		tasks:       adb.NewTaskManager(),
@@ -65,6 +67,7 @@ func NewApp() *App {
 		scrcpy:      adb.NewScrcpyManager(),
 		sessions:    store,
 		icons:       adb.NewIconCache(),
+		profiles:    profiles,
 		dnsSnif:     map[string]*adb.DNSSnifferStream{},
 		procStreams: map[string]*adb.TopStream{},
 	}
