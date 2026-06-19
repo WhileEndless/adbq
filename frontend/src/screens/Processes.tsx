@@ -21,6 +21,7 @@ interface ProcSnapshot {
   time: number;
   total: number;
   rows: ProcRow[];
+  root: boolean;
 }
 
 type SortKey = 'cpu' | 'mem' | 'rss' | 'pid' | 'name';
@@ -180,7 +181,14 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
           </div>
         )}
         {snap && filteredSorted.length === 0 && (
-          <div className='muted' style={{padding: 30, textAlign: 'center'}}>No processes match the filter.</div>
+          <div className='muted' style={{padding: 30, textAlign: 'center'}}>
+            {rows.length === 0 ? 'No processes readable from this device.' : 'No processes match the filter.'}
+          </div>
+        )}
+        {snap && !snap.root && (
+          <div className='muted' style={{padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border)'}}>
+            Limited view — device isn’t rooted, so Android only exposes processes the shell can see (Android 7+ hides others). Connect as root for the full list.
+          </div>
         )}
       </div>
 
@@ -188,7 +196,7 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
         <span>{filteredSorted.length} visible</span>
         <span>{paused ? 'Paused' : 'Live'} · refresh {interval}s</span>
         <div style={{flex: 1}}/>
-        <span className='subtle'>adb -s {device.id} shell top -b -d {interval} -n 0 -o PID,USER,%CPU,%MEM,RES,VIRT,S,CMDLINE</span>
+        <span className='subtle'>adb -s {device.id} shell cat /proc/stat /proc/[0-9]*/stat /proc/meminfo · {interval}s</span>
       </div>
     </div>
   );

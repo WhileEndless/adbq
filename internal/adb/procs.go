@@ -26,6 +26,11 @@ type ProcSnapshot struct {
 	Time  int64     `json:"time"`
 	Total int       `json:"total"`
 	Rows  []ProcRow `json:"rows"`
+	// Root is true when the snapshot was read as root. When false the device
+	// gave us no usable root, so /proc was read as the shell user — the list is
+	// limited to processes the shell can see (Android 7+ hides others' /proc via
+	// hidepid), which the UI surfaces as a "limited view" hint.
+	Root bool `json:"root"`
 }
 
 // pageSizeKB is the assumed memory page size in KB. The Linux page size is
@@ -50,6 +55,11 @@ type TopStream struct {
 	// CPU% accounting carried across cycles.
 	prevTotal int64         // previous /proc/stat total jiffies
 	prevProc  map[int]int64 // pid -> previous (utime+stime) jiffies
+
+	// rootless latches once ShellSU reports root is unavailable, so subsequent
+	// cycles read procfs directly as the shell user instead of re-probing su
+	// every tick (the negative su probe is intentionally not cached).
+	rootless bool
 }
 
 func (s *TopStream) Snapshots() <-chan ProcSnapshot { return s.out }
@@ -106,7 +116,23 @@ func (s *TopStream) loop(ctx context.Context) {
 	defer close(s.done)
 
 	tick := func() bool {
-		out, _, err := s.c.ShellSU(ctx, s.serial, procfsCmd)
+		var (
+			out string
+			err error
+		)
+		if s.rootless {
+			out, err = s.c.Shell(ctx, s.serial, procfsCmd)
+		} else {
+			var unavailable bool
+			out, unavailable, err = s.c.ShellSU(ctx, s.serial, procfsCmd)
+			if err != nil && unavailable {
+				// No usable root: the /proc aggregates and the shell-visible PIDs
+				// are still readable without it, so a partial list beats an empty
+				// screen. Latch the decision to avoid re-probing su every cycle.
+				s.rootless = true
+				out, err = s.c.Shell(ctx, s.serial, procfsCmd)
+			}
+		}
 		if err != nil {
 			return ctx.Err() == nil // keep looping on transient errors
 		}
@@ -194,7 +220,7 @@ func (s *TopStream) buildSnapshot(out string) ProcSnapshot {
 	s.prevTotal = totalJiffies
 	s.prevProc = nextProc
 
-	return ProcSnapshot{Time: time.Now().UnixMilli(), Total: len(rows), Rows: rows}
+	return ProcSnapshot{Time: time.Now().UnixMilli(), Total: len(rows), Rows: rows, Root: !s.rootless}
 }
 
 // splitProcfsSections splits the combined dump on the "@@@" sentinel lines into
