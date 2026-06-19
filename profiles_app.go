@@ -453,6 +453,10 @@ func (a *App) CaptureProfileFromDevice(serial, name string) (*adb.Profile, error
 		return nil, err
 	}
 	p := adb.Profile{Name: name}
+	// Non-nil so they marshal as [] not null — the editor would crash mapping a
+	// null array.
+	p.Forwards.Forwards = []adb.ForwardSpec{}
+	p.Forwards.Reverses = []adb.ReverseSpec{}
 
 	if fwds, err := a.client.ListForwards(a.ctx, serial); err == nil {
 		for _, f := range fwds {

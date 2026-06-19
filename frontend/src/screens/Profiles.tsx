@@ -292,18 +292,21 @@ export function ProfileEditor({initial, device, onClose, onSaved}: {
   );
 }
 
-function SpecList({label, rows, a, b, onChange}: {label: string; rows: any[]; a: string; b: string; onChange: (rows: any[]) => void}) {
+function SpecList({label, rows, a, b, onChange}: {label: string; rows?: any[] | null; a: string; b: string; onChange: (rows: any[]) => void}) {
+  // A captured profile can arrive with nil slices (→ JSON null); never .map/
+  // spread a null, or the editor crashes and blanks the app.
+  const list = Array.isArray(rows) ? rows : [];
   return (
     <div className='field'>
       <label>{label}</label>
-      {rows.map((r, i) => (
+      {list.map((r, i) => (
         <div key={i} style={{display: 'flex', gap: 6, marginBottom: 4}}>
-          <input className='input mono' value={r[a]} placeholder='tcp:8080' onChange={e => { const n = [...rows]; n[i] = {...n[i], [a]: e.target.value}; onChange(n); }}/>
-          <input className='input mono' value={r[b]} placeholder='tcp:8080' onChange={e => { const n = [...rows]; n[i] = {...n[i], [b]: e.target.value}; onChange(n); }}/>
-          <IconBtn title='Remove' onClick={() => onChange(rows.filter((_, j) => j !== i))}><Icon.Trash width={13} height={13}/></IconBtn>
+          <input className='input mono' value={r[a]} placeholder='tcp:8080' onChange={e => { const n = [...list]; n[i] = {...n[i], [a]: e.target.value}; onChange(n); }}/>
+          <input className='input mono' value={r[b]} placeholder='tcp:8080' onChange={e => { const n = [...list]; n[i] = {...n[i], [b]: e.target.value}; onChange(n); }}/>
+          <IconBtn title='Remove' onClick={() => onChange(list.filter((_, j) => j !== i))}><Icon.Trash width={13} height={13}/></IconBtn>
         </div>
       ))}
-      <button className='btn sm' onClick={() => onChange([...rows, {[a]: '', [b]: ''}])}><Icon.Plus width={13} height={13}/>Add</button>
+      <button className='btn sm' onClick={() => onChange([...list, {[a]: '', [b]: ''}])}><Icon.Plus width={13} height={13}/>Add</button>
     </div>
   );
 }

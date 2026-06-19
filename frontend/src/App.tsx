@@ -42,10 +42,37 @@ function prefetchDeviceData(d: adb.Device) {
 
 const ACCENTS = ['#a07cf7', '#7aa2ff', '#5ed29a', '#e9b454', '#ec6a73', '#c5a3ff'];
 
+// ErrorBoundary keeps a render crash from blanking the whole window (a black
+// screen with no recourse). It shows the error and a Reload affordance instead.
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, {error: Error | null}> {
+  constructor(props: {children: React.ReactNode}) { super(props); this.state = {error: null}; }
+  static getDerivedStateFromError(error: Error) { return {error}; }
+  componentDidCatch(error: Error, info: React.ErrorInfo) { console.error('UI crash:', error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{padding: 40, maxWidth: 640, color: 'var(--text)'}}>
+          <h2 style={{marginTop: 0}}>Something went wrong</h2>
+          <pre style={{whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--err)', fontSize: 12, background: 'var(--bg-inset)', padding: 12, borderRadius: 6}}>
+            {String(this.state.error?.stack || this.state.error?.message || this.state.error)}
+          </pre>
+          <div style={{display: 'flex', gap: 8, marginTop: 14}}>
+            <button className='btn primary' onClick={() => window.location.reload()}>Reload</button>
+            <button className='btn' onClick={() => this.setState({error: null})}>Dismiss</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
     <StoreProvider>
-      <AppInner/>
+      <ErrorBoundary>
+        <AppInner/>
+      </ErrorBoundary>
     </StoreProvider>
   );
 }
