@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, FeatureNotice, SearchInput, confirmDialog, showToast} from '../ui';
 
 type Family = 'ipv4' | 'ipv6';
 type Table = 'filter' | 'nat' | 'mangle' | 'raw';
@@ -31,7 +31,10 @@ export function IptablesScreen({device}: {device: adb.Device}) {
       // banner instead of a scary "List failed" error toast.
       const pb = await API.ProbeIptables(device.id, family);
       setInfo(pb);
-      if (!pb?.available) {
+      // Listing the ruleset needs root (iptables -L and nft list ruleset both
+      // do). Skip it when unavailable or unrooted so we don't fire a "List
+      // failed" toast; the render below shows the appropriate notice instead.
+      if (!pb?.available || !device.root) {
         setSnap(null);
         return;
       }
@@ -159,9 +162,17 @@ export function IptablesScreen({device}: {device: adb.Device}) {
   }
 
   if (!device.root) {
-    return <div className='screen'><div className='card' style={{margin: 24, padding: 16}}>
-      <strong>Root required.</strong> iptables changes need <span className='mono'>su -c</span>. This device is not flagged as rooted, so the screen is read-only.
-    </div></div>;
+    return (
+      <div className='screen'>
+        <div className='screen-header'><h1>iptables</h1></div>
+        <FeatureNotice state={{
+          kind: 'requires-root',
+          what: info && !info.available
+            ? 'iptables/nft was not found on this device, and reading firewall rules'
+            : 'Reading and editing firewall rules',
+        }}/>
+      </div>
+    );
   }
 
   return (
