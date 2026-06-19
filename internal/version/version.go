@@ -15,4 +15,4 @@
 package version
 
 // Version is bumped with each user-facing release. This literal is canonical.
-var Version = "v0.1.4-beta"
+var Version = "v0.1.5-beta"
