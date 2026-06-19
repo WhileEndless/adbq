@@ -74,23 +74,9 @@ type IptablesStep struct {
 	V6Blob string `json:"v6Blob,omitempty"` // ip6tables-save text
 }
 
-// Preset steps below are stored for the relevant screens to read as defaults;
-// they are NOT auto-run on connect (capture/logcat/scrcpy are interactive).
-type CaptureStep struct {
-	ProfileStep
-	Iface string `json:"iface"`
-	BPF   string `json:"bpf"`
-}
-type LogcatStep struct {
-	ProfileStep
-	Package string `json:"package"`
-}
-type ScrcpyStep struct {
-	ProfileStep
-	Args []string `json:"args"`
-}
-
-// Profile is a reusable named bundle of per-device settings.
+// Profile is a reusable named bundle of per-device settings. Every step is an
+// action applied on connect (after confirmation); there are no stored-but-unused
+// "preset" steps.
 type Profile struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -103,9 +89,6 @@ type Profile struct {
 	Hosts    HostsStep    `json:"hosts"`
 	Cert     CertStep     `json:"cert"`
 	Iptables IptablesStep `json:"iptables"`
-	Capture  CaptureStep  `json:"capture"`
-	Logcat   LogcatStep   `json:"logcat"`
-	Scrcpy   ScrcpyStep   `json:"scrcpy"`
 }
 
 // DeviceRecord remembers a device adbq has seen and which profile it last used
@@ -167,16 +150,16 @@ type ProfileStore struct {
 }
 
 func NewProfileStore() (*ProfileStore, error) {
+	// Always return a usable (non-nil) store so callers never have to nil-check:
+	// if the config dir can't be resolved, the store works in-memory and its
+	// saves become no-ops (empty paths).
+	s := &ProfileStore{profiles: map[string]Profile{}, devices: map[string]DeviceRecord{}}
 	d, err := configDir()
 	if err != nil {
-		return nil, err
+		return s, err
 	}
-	s := &ProfileStore{
-		profilesPath: filepath.Join(d, "profiles.json"),
-		devicesPath:  filepath.Join(d, "devices.json"),
-		profiles:     map[string]Profile{},
-		devices:      map[string]DeviceRecord{},
-	}
+	s.profilesPath = filepath.Join(d, "profiles.json")
+	s.devicesPath = filepath.Join(d, "devices.json")
 	if b, err := os.ReadFile(s.profilesPath); err == nil {
 		_ = json.Unmarshal(b, &s.profiles)
 	}
@@ -205,8 +188,18 @@ func atomicWriteJSON(path string, v any) error {
 	return os.Rename(tmp, path)
 }
 
-func (s *ProfileStore) saveProfiles() error { return atomicWriteJSON(s.profilesPath, s.profiles) }
-func (s *ProfileStore) saveDevices() error  { return atomicWriteJSON(s.devicesPath, s.devices) }
+func (s *ProfileStore) saveProfiles() error {
+	if s.profilesPath == "" {
+		return nil // in-memory store (config dir unavailable)
+	}
+	return atomicWriteJSON(s.profilesPath, s.profiles)
+}
+func (s *ProfileStore) saveDevices() error {
+	if s.devicesPath == "" {
+		return nil
+	}
+	return atomicWriteJSON(s.devicesPath, s.devices)
+}
 
 // ListProfiles returns all profiles.
 func (s *ProfileStore) ListProfiles() []Profile {

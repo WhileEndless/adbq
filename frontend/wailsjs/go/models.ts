@@ -258,22 +258,6 @@ export namespace adb {
 	        this.warning = source["warning"];
 	    }
 	}
-	export class CaptureStep {
-	    enabled: boolean;
-	    iface: string;
-	    bpf: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new CaptureStep(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.enabled = source["enabled"];
-	        this.iface = source["iface"];
-	        this.bpf = source["bpf"];
-	    }
-	}
 	export class CertInstallResult {
 	    subject: string;
 	    fileName: string;
@@ -965,20 +949,6 @@ export namespace adb {
 	}
 	
 	
-	export class LogcatStep {
-	    enabled: boolean;
-	    package: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new LogcatStep(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.enabled = source["enabled"];
-	        this.package = source["package"];
-	    }
-	}
 	export class NetIface {
 	    name: string;
 	    ipv4: string;
@@ -1041,20 +1011,6 @@ export namespace adb {
 		    return a;
 		}
 	}
-	export class ScrcpyStep {
-	    enabled: boolean;
-	    args: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new ScrcpyStep(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.enabled = source["enabled"];
-	        this.args = source["args"];
-	    }
-	}
 	export class ProxyStep {
 	    enabled: boolean;
 	    hostPort: string;
@@ -1082,9 +1038,6 @@ export namespace adb {
 	    hosts: HostsStep;
 	    cert: CertStep;
 	    iptables: IptablesStep;
-	    capture: CaptureStep;
-	    logcat: LogcatStep;
-	    scrcpy: ScrcpyStep;
 	
 	    static createFrom(source: any = {}) {
 	        return new Profile(source);
@@ -1102,9 +1055,6 @@ export namespace adb {
 	        this.hosts = this.convertValues(source["hosts"], HostsStep);
 	        this.cert = this.convertValues(source["cert"], CertStep);
 	        this.iptables = this.convertValues(source["iptables"], IptablesStep);
-	        this.capture = this.convertValues(source["capture"], CaptureStep);
-	        this.logcat = this.convertValues(source["logcat"], LogcatStep);
-	        this.scrcpy = this.convertValues(source["scrcpy"], ScrcpyStep);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1125,7 +1075,6 @@ export namespace adb {
 		    return a;
 		}
 	}
-	
 	
 	
 	export class ScrollbackEntry {

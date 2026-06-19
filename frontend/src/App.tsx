@@ -123,8 +123,12 @@ function AppInner() {
   useEffect(() => {
     for (const d of devices) {
       const key = deviceKey(d);
-      API.RegisterDevice(d).catch(() => {});
       const was = prevOnline.current[key];
+      // Record the device only on first sight or an online-state change, not on
+      // every 5s poll (each call writes devices.json).
+      if (was === undefined || was !== d.online) {
+        API.RegisterDevice(d).catch(() => {});
+      }
       if (d.online && was === false && !pendingApply.current.has(key)) {
         pendingApply.current.add(key);
         API.LookupDeviceProfile(key)

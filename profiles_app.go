@@ -215,15 +215,29 @@ func (a *App) ApplyProfile(serial, profileID string) (*adb.ApplyReport, error) {
 		report.Steps = append(report.Steps, a.applyProxy(serial, p.Proxy))
 	}
 
+	var anyOK, anyErr bool
 	for _, s := range report.Steps {
 		if s.NeedsReboot {
 			report.NeedsReboot = true
 		}
+		switch s.Status {
+		case "ok":
+			anyOK = true
+		case "err":
+			anyErr = true
+		}
 	}
-	// Remember this profile as the device's default for next reconnect.
-	_ = a.profiles.BindProfile(adb.DeviceKey(d), profileID)
+	// Remember this profile as the device's default for next reconnect — but not
+	// if every step failed (don't adopt a profile that did nothing useful).
+	if anyOK || len(report.Steps) == 0 {
+		_ = a.profiles.BindProfile(adb.DeviceKey(d), profileID)
+	}
 
-	a.tasks.Finish(id, "ok", "", summarizeReport(report))
+	status := "ok"
+	if anyErr {
+		status = "err"
+	}
+	a.tasks.Finish(id, status, "", summarizeReport(report))
 	return report, nil
 }
 
@@ -303,7 +317,10 @@ func (a *App) applyCert(serial string, step adb.CertStep) adb.StepResult {
 	if err != nil {
 		return adb.StepResult{Name: "cert", Status: "err", Message: err.Error()}
 	}
-	return adb.StepResult{Name: "cert", Status: "ok", Message: res.Note, NeedsReboot: !res.Persistent}
+	// Only a rooted, non-persistent (tmpfs-overlay) install actually benefits
+	// from a reboot note. A user-store install (unrooted) is also non-persistent
+	// but a reboot does nothing for it, so don't flag it.
+	return adb.StepResult{Name: "cert", Status: "ok", Message: res.Note, NeedsReboot: res.Rooted && !res.Persistent}
 }
 
 func (a *App) applyFrida(serial string, d *adb.Device, step adb.FridaStep, note func(string)) adb.StepResult {
@@ -316,9 +333,10 @@ func (a *App) applyFrida(serial string, d *adb.Device, step adb.FridaStep, note 
 		arch = info.Primary
 	}
 	version := step.Version
-	// Resolve "latest" and check availability up front.
-	releases, relErr := a.client.ListFridaReleases(a.ctx, serial, arch)
+	// Resolve "latest" only when no version is pinned — avoids an unnecessary
+	// GitHub round-trip on every apply for a pinned version.
 	if version == "" {
+		releases, relErr := a.client.ListFridaReleases(a.ctx, serial, arch)
 		if relErr != nil || len(releases) == 0 {
 			return adb.StepResult{Name: "frida", Status: "err", Message: "could not resolve latest frida-server version"}
 		}

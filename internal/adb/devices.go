@@ -102,6 +102,15 @@ func (c *Client) Enrich(parent context.Context, d *Device) {
 	if !d.Online {
 		return
 	}
+	// Identity first, on its own short budget: ro.serialno keys profile binding
+	// and must resolve deterministically, not get starved by the slower root/
+	// network probes that share the enrichment timeout below.
+	sctx, scancel := context.WithTimeout(parent, 3*time.Second)
+	if out, err := c.Shell(sctx, d.ID, "getprop ro.serialno"); err == nil {
+		d.HardwareSerial = strings.TrimSpace(out)
+	}
+	scancel()
+
 	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
 	defer cancel()
 	get := func(key string) string {
@@ -135,7 +144,6 @@ func (c *Client) Enrich(parent context.Context, d *Device) {
 	d.BuildID = get("ro.build.id")
 	d.CPU = get("ro.hardware") // generic; not great but stdlib only
 	d.Arch = get("ro.product.cpu.abi")
-	d.HardwareSerial = get("ro.serialno")
 	// Kernel
 	if k, err := c.Shell(ctx, d.ID, "uname -r"); err == nil {
 		d.Kernel = strings.TrimSpace(k)

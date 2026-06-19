@@ -15,9 +15,6 @@ function emptyProfile(): any {
     hosts: {enabled: false, content: '', flushDns: true},
     cert: {enabled: false, pem: '', subject: ''},
     iptables: {enabled: false, v4Blob: '', v6Blob: ''},
-    capture: {enabled: false, iface: 'any', bpf: ''},
-    logcat: {enabled: false, package: ''},
-    scrcpy: {enabled: false, args: []},
   };
 }
 
@@ -79,7 +76,7 @@ export function ProfileSelector({device, refreshKey, onSwitch, onEdit, onNew, on
   const trigger = (
     <button className='btn sm' title='Device profile' style={{display: 'flex', alignItems: 'center', gap: 5, maxWidth: 180}}>
       <Icon.Zap width={13} height={13}/>
-      <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{bound ? bound.name : 'Profile'}</span>
+      <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{bound ? bound.name : 'No profile'}</span>
     </button>
   );
   return <Dropdown trigger={trigger} items={items}/>;
@@ -124,12 +121,14 @@ export function ApplyConfirm({serial, profileId, onClose, onApplied, reload}: {
                  {report.needsReboot && <button className='btn' onClick={() => API.Reboot(serial, '').then(reload).catch(() => {})}>Reboot now</button>}
                  <button className='btn primary' onClick={onClose}>Done</button>
                </>
-             : <>
-                 <button className='btn' onClick={onClose}>Cancel</button>
-                 <button className='btn primary' disabled={busy || !preview} onClick={apply}>
-                   {busy ? 'Applying…' : `Apply ${preview?.length || 0} step(s)`}
-                 </button>
-               </>}>
+             : (preview && preview.length === 0)
+               ? <button className='btn primary' onClick={onClose}>Close</button>
+               : <>
+                   <button className='btn' onClick={onClose}>Cancel</button>
+                   <button className='btn primary' disabled={busy || !preview} onClick={apply}>
+                     {busy ? 'Applying…' : `Apply ${preview?.length || 0} step(s)`}
+                   </button>
+                 </>}>
       {!report && !preview && <FeatureNotice state={{kind: 'loading'}}/>}
       {!report && preview && preview.length === 0 && (
         <div className='muted' style={{padding: 16}}>This profile has no enabled steps.</div>
@@ -183,6 +182,12 @@ export function ProfileEditor({initial, device, onClose, onSaved}: {
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const del = async () => {
+    if (!initial?.id) return;
+    if (!await confirmDialog({title: `Delete profile “${initial.name}”?`, body: 'This also unbinds it from any device.', confirmLabel: 'Delete', danger: true})) return;
+    API.DeleteProfile(initial.id).then(() => { showToast({title: 'Profile deleted', kind: 'ok'}); onSaved(); onClose(); })
+      .catch(e => showToast({title: 'Delete failed', body: String(e), kind: 'err'}));
+  };
   const [d, setD] = useState<any>(() => (initial ? clone(initial) : emptyProfile()));
   const [versions, setVersions] = useState<string[]>([]);
   const upd = (fn: (x: any) => void) => setD((prev: any) => { const n = clone(prev); fn(n); return n; });
@@ -206,6 +211,8 @@ export function ProfileEditor({initial, device, onClose, onSaved}: {
   return (
     <Modal open onClose={onClose} width={640} title={initial ? 'Edit profile' : 'New profile'}
            footer={<>
+             {initial && <button className='btn danger' onClick={del}><Icon.Trash width={13} height={13}/>Delete</button>}
+             <div style={{flex: 1}}/>
              <button className='btn' onClick={onClose}>Cancel</button>
              <button className='btn primary' onClick={save}>Save</button>
            </>}>
@@ -279,7 +286,7 @@ export function ProfileEditor({initial, device, onClose, onSaved}: {
       </Section>
 
       <div className='muted' style={{fontSize: 11, marginTop: 4}}>
-        Capture / Logcat / Scrcpy presets are stored with the profile and used as defaults by those screens (not auto-run on connect).
+        Enabled steps are applied (after you confirm) whenever a device using this profile connects.
       </div>
     </Modal>
   );
@@ -343,10 +350,18 @@ export function PastDevices({onClose, onApply}: {onClose: () => void; onApply: (
               </div>
               <div className='muted mono' style={{fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{rec.key}</div>
             </div>
-            <select className='btn sm' value={rec.boundProfileId} onChange={e => bind(rec.key, e.target.value)}>
-              <option value=''>Base / no profile</option>
-              {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <Dropdown
+              trigger={<button className='btn sm' style={{display: 'flex', alignItems: 'center', gap: 5, maxWidth: 160}}>
+                <Icon.Zap width={12} height={12}/>
+                <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                  {profiles.find(p => p.id === rec.boundProfileId)?.name || 'Base / no profile'}
+                </span>
+              </button>}
+              items={[
+                {label: 'Base / no profile', onClick: () => bind(rec.key, '')},
+                ...(profiles.length ? [{label: '', onClick: () => {}, divider: true}] : []),
+                ...profiles.map(p => ({label: (p.id === rec.boundProfileId ? '● ' : '   ') + p.name, onClick: () => bind(rec.key, p.id)})),
+              ]}/>
             {onlineSerial && rec.boundProfileId &&
               <button className='btn sm primary' onClick={() => { onApply(onlineSerial, rec.boundProfileId); onClose(); }}>Apply now</button>}
             <IconBtn title='Forget' onClick={() => del(rec.key)}><Icon.Trash width={13} height={13}/></IconBtn>
