@@ -3,6 +3,7 @@ package adb
 import (
 	"context"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -57,8 +58,20 @@ type NetworkInfo struct {
 // GetNetworkInfo gathers the snapshot.
 func (c *Client) GetNetworkInfo(ctx context.Context, serial string) (*NetworkInfo, error) {
 	info := &NetworkInfo{}
+	// Interfaces: prefer iproute2 `ip`, but it's absent on API 21-23 toolbox and
+	// stripped ROMs — fall back to ifconfig then netcfg so Overview isn't blank.
 	if out, err := c.Shell(ctx, serial, "ip -f inet addr"); err == nil {
 		info.NetIfaces = parseIfaces(out)
+	}
+	if len(info.NetIfaces) == 0 {
+		if out, err := c.Shell(ctx, serial, "ifconfig"); err == nil {
+			info.NetIfaces = parseIfconfig(out)
+		}
+	}
+	if len(info.NetIfaces) == 0 {
+		if out, err := c.Shell(ctx, serial, "netcfg"); err == nil {
+			info.NetIfaces = parseNetcfg(out)
+		}
 	}
 	for _, ifc := range info.NetIfaces {
 		if ifc.Name == "wlan0" {
@@ -84,6 +97,13 @@ func (c *Client) GetNetworkInfo(ctx context.Context, serial string) (*NetworkInf
 				info.Gateway = fs[2]
 				break
 			}
+		}
+	}
+	if info.Gateway == "" {
+		// No `ip` (old/minimal ROM): the default gateway is in /proc/net/route,
+		// which exists on every Android kernel and needs no userspace tool.
+		if out, err := c.Shell(ctx, serial, "cat /proc/net/route"); err == nil {
+			info.Gateway = parseProcRouteGateway(out)
 		}
 	}
 	if dns, err := c.Shell(ctx, serial, "getprop net.dns1; getprop net.dns2"); err == nil {
@@ -159,6 +179,143 @@ func parseIfaces(out string) []NetIface {
 		res = append(res, *cur)
 	}
 	return res
+}
+
+// parseIfconfig parses `ifconfig` output. It handles both the busybox layout
+// ("inet addr:1.2.3.4", "HWaddr aa:..") and the newer toybox/net-tools layout
+// ("inet 1.2.3.4", "ether aa:.."). A new interface block starts at a line with
+// no leading whitespace.
+func parseIfconfig(out string) []NetIface {
+	res := []NetIface{}
+	var cur *NetIface
+	flush := func() {
+		if cur != nil && cur.Name != "" {
+			res = append(res, *cur)
+		}
+	}
+	for _, raw := range strings.Split(out, "\n") {
+		if raw == "" {
+			continue
+		}
+		if raw[0] != ' ' && raw[0] != '\t' {
+			flush()
+			name := strings.TrimSuffix(strings.Fields(raw)[0], ":")
+			cur = &NetIface{Name: name, Up: strings.Contains(raw, "UP")}
+		}
+		if cur == nil {
+			continue
+		}
+		ln := strings.TrimSpace(raw)
+		if strings.Contains(ln, "UP") {
+			cur.Up = true
+		}
+		// IPv4
+		if _, after, ok := strings.Cut(ln, "inet addr:"); ok {
+			cur.IPv4 = firstField(after)
+		} else if _, after, ok := strings.Cut(ln, "inet "); ok {
+			if v := firstField(after); isDottedIPv4(v) {
+				cur.IPv4 = v
+			}
+		}
+		// MAC
+		if _, after, ok := strings.Cut(ln, "HWaddr "); ok {
+			cur.MAC = firstField(after)
+		} else if _, after, ok := strings.Cut(ln, "ether "); ok {
+			cur.MAC = firstField(after)
+		}
+	}
+	flush()
+	return res
+}
+
+// parseNetcfg parses Android `netcfg` output (API ≤23):
+//
+//	wlan0    UP    192.168.0.5/24   0x00001043 02:00:00:00:00:00
+func parseNetcfg(out string) []NetIface {
+	res := []NetIface{}
+	for _, raw := range strings.Split(out, "\n") {
+		fs := strings.Fields(raw)
+		if len(fs) < 3 {
+			continue
+		}
+		ip := fs[2]
+		if i := strings.IndexByte(ip, '/'); i >= 0 {
+			ip = ip[:i]
+		}
+		if !isDottedIPv4(ip) && ip != "0.0.0.0" {
+			continue
+		}
+		ifc := NetIface{Name: fs[0], Up: fs[1] == "UP", IPv4: ip}
+		if ip == "0.0.0.0" {
+			ifc.IPv4 = ""
+		}
+		if len(fs) >= 5 && strings.Count(fs[4], ":") == 5 {
+			ifc.MAC = fs[4]
+		}
+		res = append(res, ifc)
+	}
+	return res
+}
+
+// parseProcRouteGateway extracts the default gateway from /proc/net/route. The
+// Gateway column is a little-endian hex IPv4; the default route is the row whose
+// Destination is 00000000.
+func parseProcRouteGateway(out string) string {
+	for _, ln := range strings.Split(out, "\n") {
+		fs := strings.Fields(ln)
+		if len(fs) < 3 || fs[0] == "Iface" {
+			continue
+		}
+		if fs[1] != "00000000" {
+			continue
+		}
+		if ip := hexLEToIPv4(fs[2]); ip != "" && ip != "0.0.0.0" {
+			return ip
+		}
+	}
+	return ""
+}
+
+// hexLEToIPv4 converts a /proc/net/route little-endian hex word (e.g.
+// "0102A8C0") to dotted IPv4 ("192.168.2.1").
+func hexLEToIPv4(h string) string {
+	if len(h) != 8 {
+		return ""
+	}
+	b := make([]int64, 4)
+	for i := range 4 {
+		v, err := strconv.ParseInt(h[i*2:i*2+2], 16, 0)
+		if err != nil {
+			return ""
+		}
+		b[i] = v
+	}
+	// little-endian: last hex byte is the first octet
+	return strconv.FormatInt(b[3], 10) + "." + strconv.FormatInt(b[2], 10) + "." +
+		strconv.FormatInt(b[1], 10) + "." + strconv.FormatInt(b[0], 10)
+}
+
+func firstField(s string) string {
+	if fs := strings.Fields(s); len(fs) > 0 {
+		return fs[0]
+	}
+	return ""
+}
+
+func isDottedIPv4(s string) bool {
+	parts := strings.Split(s, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" || len(p) > 3 || !isAllDigits(p) {
+			return false
+		}
+		if n, _ := strconv.Atoi(p); n > 255 {
+			return false
+		}
+	}
+	return true
 }
 
 // SetProxy sets the global HTTP proxy. Use "" to clear.
