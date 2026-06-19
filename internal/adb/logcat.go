@@ -180,18 +180,6 @@ func parseThreadtime(line string) (LogEntry, bool) {
 	return LogEntry{}, false
 }
 
-func isAllDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		if s[i] < '0' || s[i] > '9' {
-			return false
-		}
-	}
-	return true
-}
-
 // isLogLevel reports whether b is an Android log priority letter.
 func isLogLevel(b byte) bool {
 	switch b {
@@ -199,21 +187,6 @@ func isLogLevel(b byte) bool {
 		return true
 	}
 	return false
-}
-
-// skipFields returns the remainder of line after the first n whitespace-
-// separated fields, keeping the remainder's own internal spacing intact.
-func skipFields(line string, n int) string {
-	s := line
-	for range n {
-		s = strings.TrimLeft(s, " \t")
-		i := strings.IndexAny(s, " \t")
-		if i < 0 {
-			return ""
-		}
-		s = s[i:]
-	}
-	return strings.TrimLeft(s, " \t")
 }
 
 // PidOf returns the PID of the named package or 0 if not running.

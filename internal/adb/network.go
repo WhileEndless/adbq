@@ -120,15 +120,8 @@ func (c *Client) GetNetworkInfo(ctx context.Context, serial string) (*NetworkInf
 			info.Proxy = p
 		}
 	}
-	if ssid, err := c.Shell(ctx, serial, "dumpsys wifi | grep -m1 'SSID:' || true"); err == nil {
-		s := strings.TrimSpace(ssid)
-		if idx := strings.Index(s, "SSID:"); idx >= 0 {
-			rest := strings.TrimSpace(s[idx+5:])
-			if j := strings.Index(rest, ","); j > 0 {
-				rest = rest[:j]
-			}
-			info.WiFiSSID = strings.Trim(rest, `" `)
-		}
+	if ssid, err := c.Shell(ctx, serial, "dumpsys wifi"); err == nil {
+		info.WiFiSSID = parseWifiSSID(ssid)
 	}
 	return info, nil
 }
@@ -293,29 +286,6 @@ func hexLEToIPv4(h string) string {
 	// little-endian: last hex byte is the first octet
 	return strconv.FormatInt(b[3], 10) + "." + strconv.FormatInt(b[2], 10) + "." +
 		strconv.FormatInt(b[1], 10) + "." + strconv.FormatInt(b[0], 10)
-}
-
-func firstField(s string) string {
-	if fs := strings.Fields(s); len(fs) > 0 {
-		return fs[0]
-	}
-	return ""
-}
-
-func isDottedIPv4(s string) bool {
-	parts := strings.Split(s, ".")
-	if len(parts) != 4 {
-		return false
-	}
-	for _, p := range parts {
-		if p == "" || len(p) > 3 || !isAllDigits(p) {
-			return false
-		}
-		if n, _ := strconv.Atoi(p); n > 255 {
-			return false
-		}
-	}
-	return true
 }
 
 // SetProxy sets the global HTTP proxy. Use "" to clear.
@@ -486,16 +456,6 @@ func (c *Client) GetProxy(ctx context.Context, serial string) (string, error) {
 
 // firstNLines returns at most the first n lines of s. Used in place of the
 // `head` utility, which is absent on stripped ROMs.
-func firstNLines(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) > n {
-		lines = lines[:n]
-	}
-	return strings.Join(lines, "\n")
-}
 
 // matchHostsLines parses the "@@FILE@@ <path>" + file-contents stream emitted by
 // DNSLookup and returns "<ip>  (<file>)" for every hosts entry that maps the

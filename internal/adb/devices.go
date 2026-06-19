@@ -247,13 +247,4 @@ func parseWifiSSID(out string) string {
 	return ""
 }
 
-// firstLine returns the first non-empty line of s, trimmed.
-func firstLine(s string) string {
-	for _, ln := range strings.Split(s, "\n") {
-		ln = strings.TrimSpace(ln)
-		if ln != "" {
-			return ln
-		}
-	}
-	return ""
-}
+// (firstLine and other shared string helpers live in strutil.go)
