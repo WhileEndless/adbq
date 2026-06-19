@@ -65,11 +65,16 @@ func (c *Client) startTcpdumpDNS(ctx context.Context, serial, tcpdumpPath string
 	if err != nil {
 		return nil, err
 	}
-	// `su -c 'sh -c "<tcpdump cmd>"'` so the line-buffered text output streams
-	// to our stdout pipe over `adb shell`. `-l` is critical — without it
-	// tcpdump block-buffers and the UI sees nothing for minutes.
+	// `-l` is critical — without it tcpdump block-buffers and the UI sees
+	// nothing for minutes. Route through rootWrap so the correct su form (or
+	// bare uid-0) is used, matching the live-capture path; a hardcoded `su -c`
+	// silently produced zero events on AOSP-style su devices.
 	inner := tcpdumpPath + " -i any -l -n -tttt -s 0 'udp port 53'"
-	args := []string{"-s", serial, "shell", "su", "-c", inner}
+	wrapped, err := c.rootWrap(ctx, serial, inner)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"-s", serial, "shell", wrapped}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

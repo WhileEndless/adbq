@@ -314,17 +314,26 @@ func (c *Client) StartLiveCapture(ctx context.Context, serial, iface, bpf string
 // for but the device doesn't list it (some stripped ROMs), we fall back to
 // the first wireless/cellular iface that's available.
 func (c *Client) resolveCaptureIface(ctx context.Context, serial, tcpdumpPath, requested string) (string, error) {
+	// When the `tcpdump -D` probe can't be used (no root for it, empty output,
+	// or an old tcpdump that lacks -D), don't launch a blind `-i any`: old
+	// tcpdump/libpcap may not support the `any` pseudo-device. Fall back to a
+	// real interface read from procfs, which needs no tcpdump at all.
+	fallback := func() (string, error) {
+		if requested == "any" || requested == "" {
+			if ifc := c.firstCaptureIface(ctx, serial); ifc != "" {
+				return ifc, nil
+			}
+		}
+		return requested, nil
+	}
+
 	remote, werr := c.rootWrap(ctx, serial, tcpdumpPath+" -D 2>&1")
 	if werr != nil {
-		// Root not available for the probe — let the real tcpdump start surface
-		// the precise failure rather than second-guessing the iface here.
-		return requested, nil
+		return fallback()
 	}
 	out, err := c.Shell(ctx, serial, remote)
 	if err != nil || out == "" {
-		// Probe failed — caller will see the real failure when tcpdump
-		// actually starts. Don't second-guess here.
-		return requested, nil
+		return fallback()
 	}
 	avail := make([]string, 0, 8)
 	for _, line := range strings.Split(out, "\n") {
@@ -344,7 +353,7 @@ func (c *Client) resolveCaptureIface(ctx context.Context, serial, tcpdumpPath, r
 		}
 	}
 	if len(avail) == 0 {
-		return requested, nil
+		return fallback()
 	}
 	if contains(avail, requested) {
 		return requested, nil
@@ -359,6 +368,41 @@ func (c *Client) resolveCaptureIface(ctx context.Context, serial, tcpdumpPath, r
 		return avail[0], nil
 	}
 	return "", fmt.Errorf("interface %q not available on device — try one of: %s", requested, strings.Join(avail, ", "))
+}
+
+// firstCaptureIface picks a sensible capture interface from /proc/net/dev (which
+// exists on every Android kernel, no tcpdump needed), preferring common
+// upstreams and avoiding loopback unless nothing else is up.
+func (c *Client) firstCaptureIface(ctx context.Context, serial string) string {
+	out, err := c.Shell(ctx, serial, "cat /proc/net/dev")
+	if err != nil {
+		return ""
+	}
+	avail := make([]string, 0, 8)
+	for _, line := range strings.Split(out, "\n") {
+		// "  wlan0: 12345 67 ..." — the iface name is the token before ':'.
+		name, _, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			continue
+		}
+		if name = strings.TrimSpace(name); name != "" && name != "Inter-|" {
+			avail = append(avail, name)
+		}
+	}
+	for _, pref := range []string{"wlan0", "rmnet_data0", "rmnet0", "eth0"} {
+		if contains(avail, pref) {
+			return pref
+		}
+	}
+	for _, name := range avail {
+		if name != "lo" {
+			return name
+		}
+	}
+	if contains(avail, "lo") {
+		return "lo"
+	}
+	return ""
 }
 
 func contains(xs []string, v string) bool {

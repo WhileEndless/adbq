@@ -150,22 +150,36 @@ type TcpdumpAutoPlan struct {
 // reports whether the verified binary is already in the local cache. Does
 // not touch the network; safe to call before the user confirms.
 func (c *Client) PlanTcpdumpAutoInstall(ctx context.Context, serial string) (*TcpdumpAutoPlan, error) {
-	abi, err := c.Shell(ctx, serial, "getprop ro.product.cpu.abi")
-	if err != nil {
-		return nil, fmt.Errorf("read device abi: %w", err)
+	// Try the primary ABI first, then any secondary ABI from abilist: an
+	// arm64-v8a device that also lists armeabi-v7a can run the 32-bit build, so
+	// it shouldn't be forced down the file-picker path.
+	caps := c.Capabilities(ctx, serial)
+	candidates := append([]string{caps.ABI}, caps.ABIList...)
+	var b *TcpdumpBuild
+	primaryABI := ""
+	for _, abi := range candidates {
+		abi = strings.TrimSpace(abi)
+		if abi == "" {
+			continue
+		}
+		if primaryABI == "" {
+			primaryABI = abi
+		}
+		if hit := tcpdumpBuildFor(abi); hit != nil {
+			b = hit
+			break
+		}
 	}
-	abi = strings.TrimSpace(abi)
-	if abi == "" {
+	if primaryABI == "" {
 		return nil, fmt.Errorf("could not determine device ABI (ro.product.cpu.abi is empty)")
 	}
-	b := tcpdumpBuildFor(abi)
 	if b == nil {
-		return nil, fmt.Errorf("no pinned tcpdump build for ABI %q — use \"Install from file\" with your own binary", abi)
+		return nil, fmt.Errorf("no pinned tcpdump build for ABI %q — use \"Install from file\" with your own binary", primaryABI)
 	}
 	if b.SHA256 == "" {
-		return nil, fmt.Errorf("manifest is not yet pinned for ABI %q (SHA256 missing); use \"Install from file\" until the next adbq release", abi)
+		return nil, fmt.Errorf("manifest is not yet pinned for ABI %q (SHA256 missing); use \"Install from file\" until the next adbq release", b.Abi)
 	}
-	plan := &TcpdumpAutoPlan{Abi: abi, URL: b.URL, SHA256: b.SHA256, Source: b.Source, Size: b.Size}
+	plan := &TcpdumpAutoPlan{Abi: b.Abi, URL: b.URL, SHA256: b.SHA256, Source: b.Source, Size: b.Size}
 	if path, ok := tcpdumpCachedPath(b.SHA256); ok {
 		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
 			plan.Cached = true
@@ -313,10 +327,13 @@ func (c *Client) InstallTcpdump(ctx context.Context, serial, localPath string) (
 		return remote, fmt.Errorf("chmod failed: %w", err)
 	}
 	// Sanity check: does it actually run? Many users push x86 binaries to
-	// arm64 devices and only find out when capture silently fails.
-	out, err := c.Shell(ctx, serial, remote+" --version 2>&1 | head -1")
-	if err != nil || strings.Contains(strings.ToLower(out), "not executable") || strings.Contains(strings.ToLower(out), "exec format error") {
-		return remote, fmt.Errorf("pushed file is not executable on this device (wrong arch?): %s", strings.TrimSpace(out))
+	// arm64 devices and only find out when capture silently fails. Read the
+	// full output and take the first line host-side — `head` is absent on the
+	// stripped ROMs this tool targets.
+	out, err := c.Shell(ctx, serial, remote+" --version 2>&1")
+	low := strings.ToLower(out)
+	if err != nil || strings.Contains(low, "not executable") || strings.Contains(low, "exec format error") {
+		return remote, fmt.Errorf("pushed file is not executable on this device (wrong arch?): %s", firstLine(strings.TrimSpace(out)))
 	}
 	return remote, nil
 }
