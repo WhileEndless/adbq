@@ -1,8 +1,8 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../wailsjs/go/models';
 import * as API from '../wailsjs/go/main/App';
 import {Icon} from './icons';
-import {Badge, ConfirmHost, IconBtn, Modal, PromptHost, ToastHost, showToast, useTheme, ThemeMode} from './ui';
+import {Badge, ConfirmHost, IconBtn, Modal, PromptHost, ToastHost, showToast, promptDialog, useTheme, ThemeMode} from './ui';
 import {StoreProvider} from './store';
 import {TasksTray} from './tasks';
 import {Screen} from './types';
@@ -17,6 +17,7 @@ import {NetworkScreen} from './screens/Network';
 import {CaptureScreen} from './screens/Capture';
 import {IptablesScreen} from './screens/Iptables';
 import {ProcessesScreen} from './screens/Processes';
+import {ProfileSelector, ProfileEditor, ApplyConfirm, PastDevices} from './screens/Profiles';
 
 const ACCENTS = ['#a07cf7', '#7aa2ff', '#5ed29a', '#e9b454', '#ec6a73', '#c5a3ff'];
 
@@ -37,6 +38,29 @@ function AppInner() {
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectAddr, setConnectAddr] = useState('192.168.1.10:5555');
   const [counts, setCounts] = useState<{forwards: number; apps: number}>({forwards: 0, apps: 0});
+
+  // ─── Device profiles ──────────────────────────────────────────────────────
+  const [profilesVersion, setProfilesVersion] = useState(0);
+  const [editor, setEditor] = useState<{profile: adb.Profile | null} | null>(null);
+  const [pastOpen, setPastOpen] = useState(false);
+  const [apply, setApply] = useState<{serial: string; profileId: string} | null>(null);
+  const prevOnline = useRef<Record<string, boolean>>({});
+  const pendingApply = useRef<Set<string>>(new Set());
+
+  const bump = () => setProfilesVersion(v => v + 1);
+  const switchProfile = useCallback((serial: string, profileId: string) => {
+    API.BindDeviceProfile(serial, profileId).then(bump).catch(() => {});
+    setApply({serial, profileId});
+  }, []);
+  const captureProfile = useCallback((serial: string, suggested: string) => {
+    promptDialog({title: 'Capture profile from device', label: 'Profile name', defaultValue: suggested})
+      .then(name => {
+        if (!name) return;
+        API.CaptureProfileFromDevice(serial, name)
+          .then(p => { bump(); setEditor({profile: p}); showToast({title: 'Captured current settings', kind: 'ok'}); })
+          .catch(e => showToast({title: 'Capture failed', body: String(e), kind: 'err'}));
+      });
+  }, []);
 
   const reload = useCallback(() => {
     API.ListDevices()
@@ -76,6 +100,28 @@ function AppInner() {
     const t = setInterval(reload, 5000);
     return () => clearInterval(t);
   }, [reload]);
+
+  // Profile auto-apply: on a genuine offline→online transition, if the device
+  // has a bound profile, prompt to apply it (confirm-first, never silent). Also
+  // keep the device history fresh. First sight (undefined→online) only records
+  // state — we don't prompt on app launch for already-connected devices.
+  useEffect(() => {
+    for (const d of devices) {
+      const key = d.hardwareSerial || d.id;
+      API.RegisterDevice(d).catch(() => {});
+      const was = prevOnline.current[key];
+      if (d.online && was === false && !pendingApply.current.has(key) && !apply) {
+        pendingApply.current.add(key);
+        API.LookupDeviceProfile(key)
+          .then(pid => {
+            if (pid) setApply({serial: d.id, profileId: pid});
+            else pendingApply.current.delete(key);
+          })
+          .catch(() => pendingApply.current.delete(key));
+      }
+      prevOnline.current[key] = d.online;
+    }
+  }, [devices, apply]);
 
   const device = useMemo(() => devices.find(d => d.id === activeId) || devices[0], [devices, activeId]);
 
@@ -124,7 +170,15 @@ function AppInner() {
 
   return (
     <div className='app'>
-      <Titlebar theme={theme} setTheme={setTheme} onOpenSettings={() => setSettingsOpen(true)} themeMode={themeMode}/>
+      <Titlebar theme={theme} setTheme={setTheme} onOpenSettings={() => setSettingsOpen(true)} themeMode={themeMode}
+                profileSelector={
+                  <ProfileSelector device={device} refreshKey={profilesVersion}
+                                   onSwitch={switchProfile}
+                                   onEdit={p => setEditor({profile: p})}
+                                   onNew={() => setEditor({profile: null})}
+                                   onCapture={() => device && captureProfile(device.id, (device.model || 'Device') + ' profile')}
+                                   onManage={() => setPastOpen(true)}/>
+                }/>
       <DeviceTabs devices={devices} activeId={activeId} onSelect={setActiveId}
                   onAdd={() => setConnectOpen(true)}
                   onClose={(id) => API.DisconnectDevice(id).then(reload)}/>
@@ -160,6 +214,26 @@ function AppInner() {
         </div>
       </Modal>
 
+      {editor && (
+        <ProfileEditor initial={editor.profile} device={device}
+                       onClose={() => setEditor(null)}
+                       onSaved={bump}/>
+      )}
+      {apply && (
+        <ApplyConfirm serial={apply.serial} profileId={apply.profileId}
+                      reload={reload}
+                      onApplied={bump}
+                      onClose={() => {
+                        const k = devices.find(d => d.id === apply.serial)?.hardwareSerial || apply.serial;
+                        pendingApply.current.delete(k);
+                        setApply(null);
+                      }}/>
+      )}
+      {pastOpen && (
+        <PastDevices onClose={() => setPastOpen(false)}
+                     onApply={(serial, profileId) => setApply({serial, profileId})}/>
+      )}
+
       <ToastHost/>
       <ConfirmHost/>
       <PromptHost/>
@@ -168,7 +242,7 @@ function AppInner() {
   );
 }
 
-function Titlebar({theme, setTheme, themeMode, onOpenSettings}: {theme: string; themeMode: ThemeMode; setTheme: (t: ThemeMode) => void; onOpenSettings: () => void}) {
+function Titlebar({theme, setTheme, themeMode, onOpenSettings, profileSelector}: {theme: string; themeMode: ThemeMode; setTheme: (t: ThemeMode) => void; onOpenSettings: () => void; profileSelector?: React.ReactNode}) {
   const [v, setV] = useState('');
   useEffect(() => { API.Version().then(setV).catch(() => {}); }, []);
   return (
@@ -177,6 +251,7 @@ function Titlebar({theme, setTheme, themeMode, onOpenSettings}: {theme: string; 
       <span className='meta-line muted'>ADB Manager</span>
       {v && <span className='mono subtle' style={{fontSize: 10.5, marginLeft: 6}}>{v}</span>}
       <div className='titlebar-spacer'/>
+      {profileSelector}
       <IconBtn title={`Theme: ${themeMode}`} onClick={() => setTheme(themeMode === 'dark' ? 'light' : themeMode === 'light' ? 'system' : 'dark')}>
         {theme === 'dark' ? <Icon.Moon width={14} height={14}/> : <Icon.Sun width={14} height={14}/>}
       </IconBtn>
