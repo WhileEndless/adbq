@@ -440,8 +440,10 @@ func (c *Client) PathOfApp(ctx context.Context, serial, pkg string) (string, err
 // "Success" or "Failure [REASON]" and frequently exits 0 even on failure, so a
 // non-error return from Run can still be a failed operation.
 func pmResultErr(out string, err error) error {
-	if _, after, ok := strings.Cut(out, "Failure"); ok {
-		return fmt.Errorf("Failure%s", firstLine(after))
+	for _, ln := range strings.Split(out, "\n") {
+		if t := strings.TrimSpace(ln); strings.HasPrefix(t, "Failure") {
+			return fmt.Errorf("%s", t)
+		}
 	}
 	return err
 }

@@ -322,6 +322,11 @@ func (c *Client) Connect(ctx context.Context, addr string) (string, error) {
 
 // Disconnect detaches a TCP device or all if addr is empty.
 func (c *Client) Disconnect(ctx context.Context, addr string) (string, error) {
+	// Drop cached per-device state so a later reconnect re-probes (a device may
+	// come back rooted, with a different SELinux mode, etc.).
+	if addr != "" {
+		c.InvalidateCapabilities(addr)
+	}
 	args := []string{"disconnect"}
 	if addr != "" {
 		args = append(args, addr)

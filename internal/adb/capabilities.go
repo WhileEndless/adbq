@@ -65,12 +65,19 @@ func (c *Client) Capabilities(ctx context.Context, serial string) *Capabilities 
 
 	caps := parseCapabilities(c.probeCapabilitiesRaw(ctx, serial))
 
-	c.capMu.Lock()
-	if c.caps == nil {
-		c.caps = map[string]*Capabilities{}
+	// Only cache a probe that actually returned something. A transient failure
+	// (device briefly offline, root not yet granted, slow USB) yields an
+	// all-zero struct; caching it would permanently convince callers the device
+	// has no ABI/binaries, with no recovery. Leaving it uncached lets the next
+	// call re-probe.
+	if caps.SDK > 0 || caps.ABI != "" || len(caps.Has) > 0 {
+		c.capMu.Lock()
+		if c.caps == nil {
+			c.caps = map[string]*Capabilities{}
+		}
+		c.caps[serial] = caps
+		c.capMu.Unlock()
 	}
-	c.caps[serial] = caps
-	c.capMu.Unlock()
 	return caps
 }
 
