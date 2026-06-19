@@ -121,16 +121,23 @@ Her faz: küçük commit'ler; her commit `gofmt`/`go vet ./...`/`go test ./...`
 - Faz 4: `FeatureNotice` primitive (iptables'a bağlandı); global hata
   susturucusu daraltıldı; sessiz loader'lara hata toast'ı; iptables read-only UX.
 
-**Kalan / bilinçli ertelenen:**
-- **P3** Processes "User" kolonu ve gerçek `Cmdline` boş — düzgün doldurmak ya
-  per-PID round-trip (perf) ya `tr`/`printf` (stripped ROM'da yok) gerektiriyor;
-  minimal-ROM hedefiyle çeliştiği için ertelendi. UI'da kolon kaldırılabilir.
-- **FR-2** frida `comm`(15ch) vs `cmdline` ayrımı; **FR-3** SELinux exec-deny
-  mesajı (arch yerine); **A2** path'siz `package:` satırı (düşük etki, `-f` hep
-  veriliyor); **P2** API24+ hidepid'e özel banner; **H4** hosts tmpfs overlay.
-- **Yapısal temizlik:** `ShellSU` İngilizce-substring sınıflandırması → tipli
-  hata (O1); `iptablesGlobal` paket-global → `*Client`; `strutil.go` birleştirme;
-  `Capabilities`'in SDK/SELinux/Has alanlarını daha çok tüketen kullanım;
-  interaktif shell'in `su root`'u suStyleFor'a bağlama (shell.go).
-- `Capabilities` foundation hazır ama şimdilik yalnızca ABI tüketiliyor — yeni
-  ihtiyaçta SDK/SELinux/Has oradan okunmalı (tekrar prob açmadan).
+**Sonradan tamamlananlar (2. tur):**
+- **P3** Processes "User" kolonu — `/proc/PID/status` Uid'i saf shell builtin'le
+  (tr/printf'siz) okunup dolduruluyor; uid→isim eşlemesi host-side.
+- **FR-2** frida `cmdline` argv[0] ile `comm`(15ch) ayrımı; **FR-3** SELinux
+  exec-deny mesajı; **A2** path'siz `package:` satırı korunuyor.
+- **H4** hosts bind-mount kaynağına `system_file` SELinux context'i (tam
+  /system/etc tmpfs overlay'i risk nedeniyle bilinçli eklenmedi).
+- **Yapısal:** `iptablesGlobal`→`*Client.ipt`; `strutil.go` birleştirme;
+  interaktif shell `suStyleFor`'a bağlandı; `dumpsys wifi | grep` tümüyle kalktı.
+
+**Hâlâ bilinçli ertelenen (compat açığı değil, stil/iyileştirme):**
+- **O1** `ShellSU`'nun `(string, bool, error)` imzası + İngilizce-substring
+  sınıflandırması → tipli hata (`ErrRootUnavailable`). ~30 çağrı yerini etkiler;
+  tek gerçek tüketici (processes fallback) zaten doğru çalışıyor, bu yüzden
+  churn/regresyon riski faydadan büyük. Gelecekte FeatureNotice kontratı
+  genişlerken yapılabilir.
+- **P2** API24+ hidepid'e özel ayrı banner (mevcut "limited view" zaten "Android
+  7+" diyor).
+- `Capabilities`'in SDK/SELinux/Has alanları şimdilik az tüketiliyor (ABI aktif
+  kullanımda) — yeni ihtiyaçta oradan okunmalı (tekrar prob açmadan).
