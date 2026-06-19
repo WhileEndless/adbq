@@ -3,30 +3,28 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, Modal, Switch, confirmDialog, promptDialog, showToast} from '../ui';
+import {useDeviceData} from '../cache';
 
 const ROOTS = ['/', '/sdcard', '/storage/emulated/0', '/data/local/tmp', '/data', '/system'];
 
 export function FilesScreen({device}: {device: adb.Device}) {
   const [path, setPath] = useState('/');
-  const [entries, setEntries] = useState<adb.FileEntry[]>([]);
   // Auto-enable root usage on rooted devices so /data and /system_ext browsing works out of the box.
   const [asRoot, setAsRoot] = useState<boolean>(!!device?.root);
   const [sel, setSel] = useState<adb.FileEntry | null>(null);
-  const [busy, setBusy] = useState(false);
   const [treeExpanded, setTreeExpanded] = useState<Record<string, boolean>>({'/': true});
   const [pushOpen, setPushOpen] = useState(false);
   const [pushMode, setPushMode] = useState('');
   const [pushOwner, setPushOwner] = useState('');
 
-  const load = (p: string = path) => {
-    if (!device?.id) return;
-    setBusy(true); setSel(null);
-    API.ListDir(device.id, p, asRoot)
-      .then(e => { setEntries(e || []); setPath(p); })
-      .catch(e => showToast({title: 'List failed', body: String(e), kind: 'err'}))
-      .finally(() => setBusy(false));
-  };
-  useEffect(() => { load(); }, [device?.id, asRoot]);
+  // Cached per (device, root, path) so revisiting a directory is instant; a
+  // background revalidate then refreshes it. Navigation just changes `path`.
+  const dirKey = device?.id ? `dir:${device.id}:${asRoot ? 'r' : 'u'}:${path}` : null;
+  const {data, loading, refreshing, error, refresh} = useDeviceData(
+    dirKey, () => API.ListDir(device.id, path, asRoot), {staleMs: 20000},
+  );
+  const entries = data || [];
+  const load = (p: string = path) => { setSel(null); if (p === path) refresh(); else setPath(p); };
 
   function navigate(e: adb.FileEntry) {
     if (e.type === 'up') {
@@ -96,7 +94,7 @@ export function FilesScreen({device}: {device: adb.Device}) {
           <Icon.Upload/>Push
         </button>
         <button className='btn' onClick={doMkdir}><Icon.Plus/>New folder</button>
-        <button className='btn' onClick={() => load()}><Icon.Refresh/></button>
+        <button className='btn' onClick={() => load()}><Icon.Refresh className={refreshing ? 'spin' : ''}/></button>
       </div>
 
       <div className='path-bar'>{crumbs()}</div>
@@ -111,7 +109,11 @@ export function FilesScreen({device}: {device: adb.Device}) {
         </div>
         <div className='files-main'>
           <div style={{flex: 1, minHeight: 0, overflow: 'auto'}}>
-            {busy && <div className='muted' style={{padding: 16}}>Loading…</div>}
+            {loading
+              ? <div className='muted' style={{padding: 16}}>Loading…</div>
+              : (error && entries.length === 0)
+                ? <div className='muted' style={{padding: 16, color: 'var(--err)'}}>{String(error)}</div>
+                : null}
             <table className='table'>
               <thead><tr><th>Name</th><th>Size</th><th>Perms</th><th>Owner</th><th>Modified</th><th className='actions'></th></tr></thead>
               <tbody>

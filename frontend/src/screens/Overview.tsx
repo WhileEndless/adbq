@@ -3,17 +3,22 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, Dropdown, confirmDialog, showToast} from '../ui';
+import {getCached, mutateData} from '../cache';
 
 export function OverviewScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
-  const [stats, setStats] = useState<adb.Stats | null>(null);
+  // Seed from cache for an instant first paint when reopening Overview; the poll
+  // below keeps it live and writes each sample back to the cache.
+  const [stats, setStats] = useState<adb.Stats | null>(() => getCached<adb.Stats>(`stats:${device?.id}`) ?? null);
   const [history, setHistory] = useState<{cpu: number[]; mem: number[]; batt: number[]}>({cpu: [], mem: [], batt: []});
 
   useEffect(() => {
     if (!device?.id) return;
     let alive = true;
+    setStats(getCached<adb.Stats>(`stats:${device.id}`) ?? null);
     const tick = () => API.GetStats(device.id).then(s => {
       if (!alive) return;
       setStats(s);
+      mutateData(`stats:${device.id}`, s);
       const memPct = s.memTotalKb > 0 ? (1 - s.memAvailKb / s.memTotalKb) * 100 : 0;
       setHistory(h => ({
         cpu: [...h.cpu.slice(-29), s.cpuPercent || 0],

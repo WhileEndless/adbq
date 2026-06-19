@@ -31,6 +31,7 @@ function prefetchDeviceData(d: adb.Device) {
     return {fwd: f || [], rev: r || []};
   });
   prefetchData(`net-info:${id}`, () => API.GetNetworkInfo(id));
+  prefetchData(`stats:${id}`, () => API.GetStats(id));
   prefetchData(`iptables:${id}:ipv4:filter`, async () => {
     const pb = await API.ProbeIptables(id, 'ipv4');
     if (!pb?.available || !d.root) return {info: pb, snap: null};

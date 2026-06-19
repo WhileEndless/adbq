@@ -70,6 +70,12 @@ export function mutateData<T>(key: string, data: T): void {
   notify(key);
 }
 
+// getCached reads a cached value without subscribing — handy to seed a
+// component's initial state (e.g. a polling dashboard) for an instant first paint.
+export function getCached<T>(key: string): T | undefined {
+  return store.get(key)?.data as T | undefined;
+}
+
 // invalidateData drops cached entries whose key starts with prefix.
 export function invalidateData(prefix: string): void {
   for (const k of Array.from(store.keys())) {
