@@ -104,3 +104,33 @@ kalıntıları: `iptables.go` (head -1), `tcpdump.go` (InstallTcpdump head -1),
 
 Her faz: küçük commit'ler; her commit `gofmt`/`go vet ./...`/`go test ./...`
 (ADBQ_SKIP_DEVICE=1) yeşil. Cihaz-bağımlı doğrulama gerçek cihaz/emülatörlerde.
+
+---
+
+## Durum (2026-06-19) — tamamlanan & kalan
+
+**Tamamlandı (commit'li, test'li, push'lu; 3 tur bağımsız agent validasyonu):**
+- Faz 0: root modeli (suBareRoot/su0/AOSP) + merkezi `Capabilities` registry.
+- Faz 1: processes non-root procfs fallback; logcat yıl/UTC-offset parser +
+  stderr + `*:V`; files `ls -la` + BSD tarih; network ifconfig/netcfg/proc-route.
+- Faz 2: iptables ShellSU + nft salt-okunur + temiz "kullanılamaz"; capture
+  rootWrap/head/iface/ABI fallback.
+- Faz 3: screenshot doğrulama+shell fallback; stats MemAvailable+battery sysfs;
+  frida arch fallback + grep'siz listeleme; apps split APK + Success/Failure;
+  scrcpy v1 uyumu; dumpsys-wifi grep kaldırıldı.
+- Faz 4: `FeatureNotice` primitive (iptables'a bağlandı); global hata
+  susturucusu daraltıldı; sessiz loader'lara hata toast'ı; iptables read-only UX.
+
+**Kalan / bilinçli ertelenen:**
+- **P3** Processes "User" kolonu ve gerçek `Cmdline` boş — düzgün doldurmak ya
+  per-PID round-trip (perf) ya `tr`/`printf` (stripped ROM'da yok) gerektiriyor;
+  minimal-ROM hedefiyle çeliştiği için ertelendi. UI'da kolon kaldırılabilir.
+- **FR-2** frida `comm`(15ch) vs `cmdline` ayrımı; **FR-3** SELinux exec-deny
+  mesajı (arch yerine); **A2** path'siz `package:` satırı (düşük etki, `-f` hep
+  veriliyor); **P2** API24+ hidepid'e özel banner; **H4** hosts tmpfs overlay.
+- **Yapısal temizlik:** `ShellSU` İngilizce-substring sınıflandırması → tipli
+  hata (O1); `iptablesGlobal` paket-global → `*Client`; `strutil.go` birleştirme;
+  `Capabilities`'in SDK/SELinux/Has alanlarını daha çok tüketen kullanım;
+  interaktif shell'in `su root`'u suStyleFor'a bağlama (shell.go).
+- `Capabilities` foundation hazır ama şimdilik yalnızca ABI tüketiliyor — yeni
+  ihtiyaçta SDK/SELinux/Has oradan okunmalı (tekrar prob açmadan).
