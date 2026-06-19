@@ -28,8 +28,8 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
 
   const reload = () => {
     if (!device?.id) return;
-    API.ListForwards(device.id).then(f => setFwd(f || [])).catch(() => {});
-    API.ListReverses(device.id).then(f => setRev(f || [])).catch(() => {});
+    API.ListForwards(device.id).then(f => setFwd(f || [])).catch(e => showToast({title: 'List forwards failed', body: String(e), kind: 'err'}));
+    API.ListReverses(device.id).then(f => setRev(f || [])).catch(e => showToast({title: 'List reverses failed', body: String(e), kind: 'err'}));
   };
   useEffect(reload, [device?.id]);
 

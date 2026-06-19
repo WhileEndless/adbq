@@ -75,7 +75,7 @@ export function FridaScreen({device}: {device: adb.Device}) {
       setServers(arr);
       const act = arr.find(x => x.active);
       if (act && act.port) setPort(act.port);
-    });
+    }).catch(e => showToast({title: 'Listing frida-server failed', body: String(e), kind: 'err'}));
   };
   useEffect(() => { reload(); }, [device?.id]);
 

@@ -11,7 +11,9 @@ export function NetworkScreen({device}: {device: adb.Device}) {
   const [tab, setTab] = useState<Tab>('overview');
   const [info, setInfo] = useState<adb.NetworkInfo | null>(null);
 
-  const reload = () => { if (device?.id) API.GetNetworkInfo(device.id).then(setInfo); };
+  const reload = () => {
+    if (device?.id) API.GetNetworkInfo(device.id).then(setInfo).catch(e => showToast({title: 'Network info failed', body: String(e), kind: 'err'}));
+  };
   useEffect(() => { reload(); }, [device?.id]);
 
   const tabs: {id: Tab; label: string; icon: React.ReactNode}[] = [
