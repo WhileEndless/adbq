@@ -32,9 +32,13 @@ func (c *Client) ListDir(ctx context.Context, serial, path string, asRoot bool) 
 
 	out, err := c.runLs(ctx, serial, "ls -lAp "+q, asRoot)
 	parsed, content := countLsRows(out)
-	// Format/flag mismatch (e.g. toolbox ls): output arrived but nothing parsed.
-	// Retry with the portable form before giving up.
-	if parsed == 0 && content > 0 {
+	// Retry with the portable `ls -la` when the preferred form didn't yield a
+	// usable listing. Two failure modes warrant a retry: (a) output arrived but
+	// nothing parsed (format mismatch), or (b) toolbox `ls` rejected the
+	// -A/-p flags outright — exiting non-zero with empty stdout. A
+	// permission-denied error is neither and must not trigger a pointless retry.
+	flagRejected := err != nil && strings.TrimSpace(out) == "" && !isPermissionDenied(errString(err))
+	if (parsed == 0 && content > 0) || flagRejected {
 		if out2, err2 := c.runLs(ctx, serial, "ls -la "+q, asRoot); err2 == nil || out2 != "" {
 			out, err = out2, err2
 		}

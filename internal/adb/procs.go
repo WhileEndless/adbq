@@ -305,17 +305,17 @@ type procStat struct {
 func parseProcStatLine(line string) (procStat, bool) {
 	line = strings.TrimSpace(line)
 	open := strings.IndexByte(line, '(')
-	close := strings.LastIndexByte(line, ')')
-	if open < 0 || close < 0 || close < open {
+	end := strings.LastIndexByte(line, ')')
+	if open < 0 || end < 0 || end < open {
 		return procStat{}, false
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(line[:open]))
 	if err != nil {
 		return procStat{}, false
 	}
-	comm := line[open+1 : close]
+	comm := line[open+1 : end]
 
-	rest := strings.Fields(strings.TrimSpace(line[close+1:]))
+	rest := strings.Fields(strings.TrimSpace(line[end+1:]))
 	if len(rest) < 22 {
 		return procStat{}, false
 	}

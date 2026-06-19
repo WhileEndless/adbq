@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // LogEntry is a parsed `logcat -v threadtime` row.
@@ -28,6 +29,7 @@ type LogcatStream struct {
 	stderr   *bytes.Buffer
 	ch       chan LogEntry
 	stopOnce sync.Once
+	stopped  atomic.Bool // set by Stop(); suppresses the stderr-on-exit entry
 	done     chan struct{}
 }
 
@@ -108,8 +110,9 @@ func (s *LogcatStream) pump() {
 	_ = s.cmd.Wait()
 	// If the process produced diagnostics on stderr (a rejected flag, missing
 	// buffer, permission denial), surface them so the stream doesn't just end
-	// silently with no logs and no explanation.
-	if s.stderr != nil {
+	// silently with no logs and no explanation. Skip this when the user stopped
+	// the stream — a kill can leave benign teardown noise on stderr.
+	if s.stderr != nil && !s.stopped.Load() {
 		if msg := strings.TrimSpace(s.stderr.String()); msg != "" {
 			s.ch <- LogEntry{Level: "E", Tag: "adbq", Msg: "logcat: " + firstLine(msg)}
 		}
@@ -120,6 +123,7 @@ func (s *LogcatStream) Lines() <-chan LogEntry { return s.ch }
 
 func (s *LogcatStream) Stop() {
 	s.stopOnce.Do(func() {
+		s.stopped.Store(true)
 		if s.cmd != nil && s.cmd.Process != nil {
 			_ = s.cmd.Process.Kill()
 		}
