@@ -12,7 +12,7 @@ export function NetworkScreen({device}: {device: adb.Device}) {
   const [tab, setTab] = useState<Tab>('overview');
 
   // Cached-first: show the last network snapshot instantly, revalidate quietly.
-  const {data: info, refreshing, refresh: reload} = useDeviceData(
+  const {data: info, refreshing, error, refresh: reload} = useDeviceData(
     device?.id ? `net-info:${device.id}` : null,
     () => API.GetNetworkInfo(device.id),
     {staleMs: 10000},
@@ -33,6 +33,7 @@ export function NetworkScreen({device}: {device: adb.Device}) {
       <div className='screen-header'>
         <h1>Network</h1>
         <span className='subtitle mono'>{info?.wifiSsid || '—'} · {info?.ip || device.ip} · {info?.mac || device.mac}</span>
+        {!!error && <span style={{color: 'var(--err)', fontSize: 11}}>load failed</span>}
         <div className='spacer' style={{flex: 1}}/>
         <button className='btn' onClick={reload}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Refresh</button>
       </div>

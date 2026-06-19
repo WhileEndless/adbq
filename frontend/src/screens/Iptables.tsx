@@ -3,7 +3,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, FeatureNotice, SearchInput, confirmDialog, showToast} from '../ui';
-import {useDeviceData, mutateData} from '../cache';
+import {useDeviceData, mutateData, getCached} from '../cache';
 
 type Family = 'ipv4' | 'ipv6';
 type Table = 'filter' | 'nat' | 'mangle' | 'raw';
@@ -36,8 +36,13 @@ export function IptablesScreen({device}: {device: adb.Device}) {
   );
   const info = data?.info || null;
   const snap = data?.snap || null;
-  // Apply a mutation's returned snapshot straight into the cache (no re-list).
-  const applySnap = (sn: adb.IPTSnapshot) => { if (cacheKey) mutateData(cacheKey, {info, snap: sn}); };
+  // Apply a mutation's returned snapshot straight into the cache (no re-list),
+  // preserving the freshest backend info (read from the cache, not a stale closure).
+  const applySnap = (sn: adb.IPTSnapshot) => {
+    if (!cacheKey) return;
+    const latest = getCached<{info: adb.IPTBackendInfo | null; snap: adb.IPTSnapshot | null}>(cacheKey);
+    mutateData(cacheKey, {info: latest?.info ?? info, snap: sn});
+  };
 
   useEffect(() => {
     if (snap?.chains?.length && !snap.chains.some(c => c.name === chain)) {

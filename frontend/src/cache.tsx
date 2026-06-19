@@ -118,7 +118,10 @@ export function useDeviceData<T>(key: string | null, fetcher: () => Promise<T>, 
   const hasData = e?.data !== undefined;
   return {
     data: e?.data,
-    loading: !!e?.loading && !hasData,
+    // "key set but no entry yet" counts as loading so screens show a spinner on
+    // the first frame (before the effect kicks off the fetch) rather than a
+    // one-render flash of the empty state.
+    loading: (!!key && !e) || (!!e?.loading && !hasData),
     refreshing: !!e?.loading && hasData,
     error: e?.error,
     refresh,

@@ -25,7 +25,7 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
   const [aRemote, setARemote] = useState('tcp:8080');
   const [showCmds, setShowCmds] = useState(false);
 
-  const {data, refreshing, refresh} = useDeviceData(
+  const {data, refreshing, error, refresh} = useDeviceData(
     device?.id ? `forwards:${device.id}` : null,
     async () => {
       const [f, r] = await Promise.all([API.ListForwards(device.id), API.ListReverses(device.id)]);
@@ -73,6 +73,7 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
     <div className='screen'>
       <div className='screen-header'>
         <h1>ADB Forwards <span className='subtitle mono'>{fwd.length} fwd · {rev.length} rev</span></h1>
+        {!!error && <span style={{color: 'var(--err)', fontSize: 11}}>load failed</span>}
         <div className='spacer' style={{flex: 1}}/>
         <button className={`btn sm${showCmds ? ' primary' : ''}`} onClick={() => setShowCmds(v => !v)} title='Toggle equivalent adb commands'>
           <Icon.Terminal/>Show commands
