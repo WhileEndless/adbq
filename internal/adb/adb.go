@@ -31,19 +31,31 @@ type Client struct {
 	suStyles map[string]suStyle
 }
 
-// suStyle records how a device's `su` parses `-c`. Devices differ: Magisk and
-// most modern su run the argument through a shell (so `su -c 'cmd arg1 arg2'`
-// works), whereas AOSP-style su (older emulators, some ROMs) execs the whole
-// argument as a single program path — there `su -c 'tcpdump --version'` fails
-// with "exec failed for tcpdump --version: No such file or directory" and you
-// must spell out the shell yourself via `su -c sh -c '...'`. We probe once and
-// cache the working form so every root caller (capture, frida, …) just works.
+// suStyle records how a device grants root. Devices differ widely:
+//   - Magisk / most modern su run `-c`'s argument through a shell, so
+//     `su -c 'cmd arg1 arg2'` works (suSimple).
+//   - AOSP-style su (older emulators, some ROMs) execs the whole argument as a
+//     single program path — there `su -c 'tcpdump --version'` fails with "exec
+//     failed for tcpdump --version: No such file or directory" and you must
+//     spell out the shell yourself via `su -c sh -c '...'` (suShWrap).
+//   - Some Superuser/KernelSU/APatch configs only word-split with the uid
+//     positional form `su 0 -c '...'` / `su 0 sh -c '...'` (suZero*).
+//   - userdebug/eng builds and `adb root` emulators run the adb shell as uid 0
+//     with NO `su` binary at all; there the command must run directly, unwrapped
+//     (suBareRoot). Without this, every root feature wrongly reports "root
+//     unavailable" on the single most common dev/pentest target.
+//
+// We probe once and cache the working form so every root caller (capture,
+// frida, hosts, certs, …) just works.
 type suStyle int
 
 const (
-	suUnknown suStyle = iota
-	suSimple          // su -c '<cmd>'        (Magisk / modern)
-	suShWrap          // su -c sh -c '<cmd>'  (AOSP-style)
+	suUnknown    suStyle = iota
+	suBareRoot           // shell already uid 0; run <cmd> directly (adbd root / userdebug)
+	suSimple             // su -c '<cmd>'         (Magisk / modern)
+	suShWrap             // su -c sh -c '<cmd>'   (AOSP-style)
+	suZeroSimple         // su 0 -c '<cmd>'       (uid-positional)
+	suZeroShWrap         // su 0 sh -c '<cmd>'    (uid-positional, AOSP-style)
 )
 
 func NewClient() *Client { return &Client{} }
@@ -146,10 +158,17 @@ func (c *Client) rootWrap(ctx context.Context, serial, inner string) (string, er
 		return "", err
 	}
 	switch style {
+	case suBareRoot:
+		// Shell is already uid 0 (adbd root / userdebug); no `su` needed.
+		return inner, nil
 	case suSimple:
 		return "su -c " + shQuote(inner), nil
 	case suShWrap:
 		return "su -c sh -c " + shQuote(inner), nil
+	case suZeroSimple:
+		return "su 0 -c " + shQuote(inner), nil
+	case suZeroShWrap:
+		return "su 0 sh -c " + shQuote(inner), nil
 	}
 	return "", fmt.Errorf("root unavailable on %s", serial)
 }
@@ -167,6 +186,14 @@ func (c *Client) suStyleFor(ctx context.Context, serial string) (suStyle, error)
 	}
 	c.suMu.Unlock()
 
+	// (0) Already root? userdebug/eng builds and `adb root` emulators run the
+	// adb shell as uid 0 with no `su` binary. `id` exists on every Android
+	// toolbox/toybox; a uid=0 line means we can run commands unwrapped.
+	if out, _ := c.Shell(ctx, serial, "id"); hasUID0(out) {
+		c.setSuStyle(serial, suBareRoot)
+		return suBareRoot, nil
+	}
+
 	// The marker echo carries an argument on purpose: AOSP-style su fails the
 	// simple form precisely because it can't word-split `echo ADBQ_SU_OK`.
 	//
@@ -175,17 +202,36 @@ func (c *Client) suStyleFor(ctx context.Context, serial string) (suStyle, error)
 	// ("su: exec failed for echo ADBQ_SU_OK …") echoes the command — so a naive
 	// Contains check would see the marker inside the error and wrongly conclude
 	// the simple form worked.
+	//
+	// Order matters: the simple/shWrap forms match first on Magisk-style su (su0
+	// would also work there), so the uid-positional forms are only reached on
+	// the Superuser/KernelSU configs that actually need them.
 	const marker = "ADBQ_SU_OK"
 	probe := "echo " + marker
-	if out, _ := c.Shell(ctx, serial, "su -c "+shQuote(probe)); hasMarkerLine(out, marker) {
-		c.setSuStyle(serial, suSimple)
-		return suSimple, nil
-	}
-	if out, _ := c.Shell(ctx, serial, "su -c sh -c "+shQuote(probe)); hasMarkerLine(out, marker) {
-		c.setSuStyle(serial, suShWrap)
-		return suShWrap, nil
+	for _, cand := range []struct {
+		style suStyle
+		cmd   string
+	}{
+		{suSimple, "su -c " + shQuote(probe)},
+		{suShWrap, "su -c sh -c " + shQuote(probe)},
+		{suZeroSimple, "su 0 -c " + shQuote(probe)},
+		{suZeroShWrap, "su 0 sh -c " + shQuote(probe)},
+	} {
+		if out, _ := c.Shell(ctx, serial, cand.cmd); hasMarkerLine(out, marker) {
+			c.setSuStyle(serial, cand.style)
+			return cand.style, nil
+		}
 	}
 	return suUnknown, fmt.Errorf("root unavailable: `su` did not run a command on %s (device not rooted, or su denied)", serial)
+}
+
+// hasUID0 reports whether `id` output describes uid 0 (root). It matches the
+// `uid=0(` / `uid=0 ` prefix rather than a bare "uid=0" substring so uids like
+// 1000 followed by a gid list (e.g. "uid=1000(system) … groups=…,0(root)")
+// can't be misread as root.
+func hasUID0(idOut string) bool {
+	s := strings.TrimSpace(idOut)
+	return strings.HasPrefix(s, "uid=0(") || strings.HasPrefix(s, "uid=0 ") || s == "uid=0"
 }
 
 // hasMarkerLine reports whether any line of out, trimmed, equals marker.

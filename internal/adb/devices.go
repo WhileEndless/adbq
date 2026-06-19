@@ -155,30 +155,38 @@ func (c *Client) detectRoot(ctx context.Context, serial string) (bool, string) {
 	// Shortest path first: on userdebug builds and emulators with `adb root`
 	// already applied, the shell uid is 0 — invoking su would needlessly
 	// fail on devices that don't ship it.
-	if id, _ := c.Shell(ctx, serial, "id"); strings.Contains(id, "uid=0") {
-		return true, "AOSP userdebug"
+	if id, _ := c.Shell(ctx, serial, "id"); hasUID0(id) {
+		return true, "adb root"
 	}
-	// Magisk markers next (cheap stat).
+	// Magisk markers next (cheap stat) — recorded but not trusted on their own,
+	// since the dirs can linger after a hide/uninstall.
+	magisk := false
 	if out, _ := c.Shell(ctx, serial, "ls -d /sbin/.magisk /data/adb/magisk /data/adb/modules 2>/dev/null"); strings.TrimSpace(out) != "" {
-		// Confirm su actually elevates — Magisk dirs can linger after a
-		// hide/uninstall and we don't want to claim root we can't use.
-		if idOut, err := c.Shell(ctx, serial, "su -c id 2>/dev/null"); err == nil && strings.Contains(idOut, "uid=0") {
+		magisk = true
+	} else if out, _ := c.Shell(ctx, serial, "magisk -V 2>/dev/null"); strings.TrimSpace(out) != "" {
+		magisk = true
+	}
+	// Authoritative test: does ANY su form actually run a command as root?
+	// suStyleFor probes the simple / sh-wrap / uid-positional forms and caches
+	// the winner, so this both decides root status the same way every privileged
+	// caller (ShellSU) will, and primes that cache. This replaces the old
+	// `which su` probe (which is absent on stripped ROMs) and the simple-form-only
+	// check (which mislabeled AOSP-style-su devices as unrooted).
+	if style, err := c.suStyleFor(ctx, serial); err == nil && style != suUnknown {
+		if magisk {
 			return true, "Magisk"
 		}
-		return true, "Magisk"
-	}
-	if out, _ := c.Shell(ctx, serial, "magisk -V 2>/dev/null"); strings.TrimSpace(out) != "" {
-		return true, "Magisk"
-	}
-	if out, _ := c.Shell(ctx, serial, "which su"); strings.TrimSpace(out) != "" {
-		idOut, err := c.Shell(ctx, serial, "su -c id 2>/dev/null")
-		if err == nil && strings.Contains(idOut, "uid=0") {
-			tags, _ := c.Shell(ctx, serial, "getprop ro.build.tags")
-			if strings.Contains(tags, "test-keys") {
-				return true, "AOSP userdebug"
-			}
-			return true, "su"
+		tags, _ := c.Shell(ctx, serial, "getprop ro.build.tags")
+		if strings.Contains(tags, "test-keys") {
+			return true, "su (test-keys)"
 		}
+		return true, "su"
+	}
+	// su did not elevate. Magisk dirs present means a grant may be pending or
+	// denied — report rooted optimistically so the UI lets the user retry after
+	// approving the prompt (the negative su probe is intentionally not cached).
+	if magisk {
+		return true, "Magisk (grant su)"
 	}
 	return false, ""
 }
