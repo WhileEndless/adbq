@@ -83,11 +83,13 @@ type fridaProc struct {
 // the 15-char comm ambiguity between e.g. frida-server-16.x and -16.y.
 func (p fridaProc) matches(path, name string) bool {
 	if p.exe != "" {
-		return p.exe == path
+		return p.exe == path // authoritative when readable
 	}
-	if p.cmd0 != "" {
-		return p.cmd0 == path
+	if p.cmd0 != "" && p.cmd0 == path {
+		return true
 	}
+	// exe unreadable and cmdline argv[0] didn't match (or a shell that strips
+	// NULs mangled it) → fall back to the truncated comm prefix.
 	return p.comm != "" && strings.HasPrefix(name, p.comm)
 }
 
@@ -166,10 +168,11 @@ func (c *Client) StartFrida(ctx context.Context, serial, serverPath, iface strin
 	out, _, err := c.ShellSU(ctx, serial, cmd)
 	// SELinux frequently blocks executing binaries from /data/local/tmp on
 	// enforcing stock ROMs. Surface that distinctly so the UI stops blaming an
-	// arch mismatch for what is really a policy denial.
+	// arch mismatch for what is really a policy denial. Match the SELinux exec
+	// markers specifically — a bare "permission denied" might just be a chmod
+	// failure, which this message would mislabel.
 	if low := strings.ToLower(out); strings.Contains(low, "avc: denied") ||
-		(strings.Contains(low, "denied") && strings.Contains(low, "execute")) ||
-		strings.Contains(low, "permission denied") {
+		(strings.Contains(low, "denied") && strings.Contains(low, "execute")) {
 		return out, fmt.Errorf("SELinux blocked executing frida-server from %s — push it to a Magisk-allowed path (e.g. /data/adb/…) or set the domain permissive: %s", serverPath, firstLine(strings.TrimSpace(out)))
 	}
 	return out, err

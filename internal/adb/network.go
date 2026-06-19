@@ -454,9 +454,6 @@ func (c *Client) GetProxy(ctx context.Context, serial string) (string, error) {
 	return out, nil
 }
 
-// firstNLines returns at most the first n lines of s. Used in place of the
-// `head` utility, which is absent on stripped ROMs.
-
 // matchHostsLines parses the "@@FILE@@ <path>" + file-contents stream emitted by
 // DNSLookup and returns "<ip>  (<file>)" for every hosts entry that maps the
 // given host. Done host-side because awk is absent on stripped ROMs.
