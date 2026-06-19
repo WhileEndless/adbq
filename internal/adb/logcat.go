@@ -1,6 +1,7 @@
 package adb
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os/exec"
@@ -24,6 +25,7 @@ type LogEntry struct {
 type LogcatStream struct {
 	cmd      *exec.Cmd
 	stdout   io.ReadCloser
+	stderr   *bytes.Buffer
 	ch       chan LogEntry
 	stopOnce sync.Once
 	done     chan struct{}
@@ -40,6 +42,10 @@ func (c *Client) StartLogcat(ctx context.Context, serial string, pid int, buffer
 	if tailLines > 0 {
 		args = append(args, "-T", strconv.Itoa(tailLines))
 	}
+	// Explicit `*:V` filterspec so verbosity is decided here, not by whatever
+	// ANDROID_LOG_TAGS the device's shell environment happens to export (some
+	// ROMs/CI images default to a restrictive level, silently dropping V/D).
+	args = append(args, "*:V")
 	bin, err := c.Binary()
 	if err != nil {
 		return nil, err
@@ -49,14 +55,18 @@ func (c *Client) StartLogcat(ctx context.Context, serial string, pid int, buffer
 	if err != nil {
 		return nil, err
 	}
-	cmd.Stderr = nil
+	// Capture stderr so a failed invocation (e.g. `--pid` rejected by pre-API-24
+	// logcat, an unknown buffer, or a permission error) surfaces to the user
+	// instead of producing a silent empty stream.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 	if buffer <= 0 {
 		buffer = 1024
 	}
-	s := &LogcatStream{cmd: cmd, stdout: stdout, ch: make(chan LogEntry, buffer), done: make(chan struct{})}
+	s := &LogcatStream{cmd: cmd, stdout: stdout, stderr: &stderr, ch: make(chan LogEntry, buffer), done: make(chan struct{})}
 	go s.pump()
 	return s, nil
 }
@@ -74,14 +84,18 @@ func (s *LogcatStream) pump() {
 			last = &cp
 			continue
 		}
-		// Non-threadtime line is a continuation (e.g. ART stacktrace). Attach
-		// to the previous record's message as a new logical line.
 		t := strings.TrimRight(line, " \r")
-		if t == "" || last == nil {
+		// logcat prints buffer-switch banners like "--------- beginning of
+		// main"; they are not continuations of the previous entry, so drop them
+		// rather than splicing them into an unrelated message.
+		if t == "" || strings.HasPrefix(strings.TrimLeft(t, " "), "--------- beginning of") {
 			continue
 		}
-		// Emit as a synthetic continuation row at same level so the user still
-		// sees the stack frames inline.
+		if last == nil {
+			continue
+		}
+		// Genuine continuation (e.g. ART stacktrace). Attach to the previous
+		// record as a new logical line at the same level.
 		s.ch <- LogEntry{
 			Time:  last.Time,
 			PID:   last.PID,
@@ -92,6 +106,14 @@ func (s *LogcatStream) pump() {
 		}
 	}
 	_ = s.cmd.Wait()
+	// If the process produced diagnostics on stderr (a rejected flag, missing
+	// buffer, permission denial), surface them so the stream doesn't just end
+	// silently with no logs and no explanation.
+	if s.stderr != nil {
+		if msg := strings.TrimSpace(s.stderr.String()); msg != "" {
+			s.ch <- LogEntry{Level: "E", Tag: "adbq", Msg: "logcat: " + firstLine(msg)}
+		}
+	}
 }
 
 func (s *LogcatStream) Lines() <-chan LogEntry { return s.ch }
@@ -105,55 +127,89 @@ func (s *LogcatStream) Stop() {
 	<-s.done
 }
 
-// parseThreadtime parses lines of form:
+// parseThreadtime parses a `logcat -v threadtime` line. The canonical shape is:
 //
 //	05-22 12:18:04.123  1582 1612 I ActivityManager: msg here
+//
+// but the leading timestamp columns vary across Android versions and logd
+// settings and threadtime gives no flag to pin them: a year may be prefixed
+// (`2026-05-22`, API 24+), a UTC offset token may follow the time (`+0000`),
+// or the whole stamp may be monotonic (`1234.567`). Rather than assume fixed
+// column offsets we scan for the PID/TID/level triple — the first place where
+// two consecutive all-digit tokens are followed by a single log-level letter —
+// and treat everything before it as the timestamp and everything after the
+// level as "Tag: message".
 func parseThreadtime(line string) (LogEntry, bool) {
-	if len(line) < 28 {
-		return LogEntry{}, false
-	}
-	// time = first two tokens
-	parts := strings.SplitN(strings.TrimLeft(line, " "), " ", 6)
-	// "05-22" "12:18:04.123" "1582" "1612" "I" "Tag: msg"
-	// In practice, multiple spaces collapse — re-split more carefully.
 	fields := strings.Fields(line)
-	if len(fields) < 6 {
+	if len(fields) < 5 {
 		return LogEntry{}, false
 	}
-	date := fields[0]
-	time := fields[1]
-	pid, err1 := strconv.Atoi(fields[2])
-	tid, err2 := strconv.Atoi(fields[3])
-	lvl := fields[4]
-	if err1 != nil || err2 != nil || len(lvl) != 1 {
-		return LogEntry{}, false
+	// i starts at 1 so at least one timestamp token precedes the PID column.
+	for i := 1; i+2 < len(fields); i++ {
+		if !isAllDigits(fields[i]) || !isAllDigits(fields[i+1]) {
+			continue
+		}
+		lvl := fields[i+2]
+		if len(lvl) != 1 || !isLogLevel(lvl[0]) {
+			continue
+		}
+		pid, _ := strconv.Atoi(fields[i])
+		tid, _ := strconv.Atoi(fields[i+1])
+		// Rest of the original line after the leading (i+3) tokens, preserving
+		// the message's internal spacing.
+		rest := strings.TrimSpace(skipFields(line, i+3))
+		tag := rest
+		msg := ""
+		if before, after, found := strings.Cut(rest, ": "); found {
+			tag = strings.TrimSpace(before)
+			msg = after
+		}
+		return LogEntry{
+			Time:  strings.Join(fields[:i], " "),
+			PID:   pid,
+			TID:   tid,
+			Level: lvl,
+			Tag:   tag,
+			Msg:   msg,
+		}, true
 	}
-	// Remainder: "Tag: message" — find first ": " after the level token
-	idx := indexAfter(line, fields[4])
-	rest := strings.TrimSpace(line[idx:])
-	tag := rest
-	msg := ""
-	if i := strings.Index(rest, ": "); i >= 0 {
-		tag = strings.TrimSpace(rest[:i])
-		msg = rest[i+2:]
-	}
-	_ = parts
-	return LogEntry{
-		Time:  date + " " + time,
-		PID:   pid,
-		TID:   tid,
-		Level: lvl,
-		Tag:   tag,
-		Msg:   msg,
-	}, true
+	return LogEntry{}, false
 }
 
-func indexAfter(s, tok string) int {
-	i := strings.Index(s, " "+tok+" ")
-	if i < 0 {
-		return len(s)
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
 	}
-	return i + len(tok) + 2
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isLogLevel reports whether b is an Android log priority letter.
+func isLogLevel(b byte) bool {
+	switch b {
+	case 'V', 'D', 'I', 'W', 'E', 'F', 'A', 'S':
+		return true
+	}
+	return false
+}
+
+// skipFields returns the remainder of line after the first n whitespace-
+// separated fields, keeping the remainder's own internal spacing intact.
+func skipFields(line string, n int) string {
+	s := line
+	for range n {
+		s = strings.TrimLeft(s, " \t")
+		i := strings.IndexAny(s, " \t")
+		if i < 0 {
+			return ""
+		}
+		s = s[i:]
+	}
+	return strings.TrimLeft(s, " \t")
 }
 
 // PidOf returns the PID of the named package or 0 if not running.
