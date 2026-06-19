@@ -34,6 +34,10 @@ type Client struct {
 	// SELinux, ABI, binary presence) — see capabilities.go.
 	capMu sync.Mutex
 	caps  map[string]*Capabilities
+
+	// ipt holds the per-(serial, family) iptables undo ring (see iptables.go).
+	// Per-Client so multiple clients / tests don't share undo history.
+	ipt iptablesState
 }
 
 // suStyle records how a device grants root. Devices differ widely:

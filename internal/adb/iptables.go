@@ -128,9 +128,6 @@ func (s *iptablesState) popUndo(k undoKey) (string, bool) {
 	return blob, true
 }
 
-// Iptables is the per-Client state holder for undo snapshots. Lazy-init.
-var iptablesGlobal = &iptablesState{}
-
 // ProbeIptables reports whether the requested family is usable on the device
 // and what backend mode it's in. Never returns an error for "missing" — the
 // Available flag covers that case.
@@ -591,7 +588,7 @@ func (c *Client) UndoIptables(ctx context.Context, serial string, fam IPFamily) 
 		return nil, err
 	}
 	k := undoKey{Serial: serial, Family: fam}
-	blob, ok := iptablesGlobal.popUndo(k)
+	blob, ok := c.ipt.popUndo(k)
 	if !ok {
 		return nil, errors.New("no undo snapshot available")
 	}
@@ -628,7 +625,7 @@ func (c *Client) snapshotForUndo(ctx context.Context, serial string, fam IPFamil
 	if err != nil || strings.TrimSpace(blob) == "" {
 		return nil
 	}
-	iptablesGlobal.pushUndo(undoKey{Serial: serial, Family: fam}, blob)
+	c.ipt.pushUndo(undoKey{Serial: serial, Family: fam}, blob)
 	return nil
 }
 

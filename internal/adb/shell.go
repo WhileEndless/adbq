@@ -66,29 +66,46 @@ func (c *Client) StartShell(ctx context.Context, serial, id string, root bool) (
 	}
 	go s.pump()
 	if root {
-		// `su root` is the explicit form Magisk + most su implementations honor;
-		// it requests a shell as uid=0 specifically. Bare `su` is ambiguous on
-		// some Magisk configs (may prompt or default to a non-root user under
-		// MagiskHide-like setups). Devices whose `su` ignores the username
-		// argument fall back to the default behavior, which is also root.
-		//
-		// Important: we MUST wait until the device-side shell has rendered its
-		// first prompt before writing — otherwise the bytes arrive before
-		// adb's PTY is interactive and get dropped on the floor (this is the
-		// "su root yazmadı gibi" symptom). We listen for the first PTY output
-		// chunk (the original $ prompt) and inject `su root\n` shortly after.
-		go func() {
-			select {
-			case <-s.firstData:
-			case <-time.After(3 * time.Second):
-			}
-			// Brief settle delay so the shell isn't in the middle of writing
-			// its prompt when we type — avoids interleaving artifacts.
-			time.Sleep(120 * time.Millisecond)
-			_, _ = ptyFile.Write([]byte("su root\n"))
-		}()
+		// Pick the elevation command from the same probe every other privileged
+		// path uses, so the interactive shell agrees with ShellSU: skip su
+		// entirely when the shell is already uid 0 (adbd root / userdebug), use
+		// the uid-positional `su 0` form where that's what works, else `su root`.
+		elevate := c.interactiveElevateCmd(ctx, serial)
+		if elevate != "" {
+			// We MUST wait until the device-side shell has rendered its first
+			// prompt before writing — otherwise the bytes arrive before adb's
+			// PTY is interactive and get dropped (the "su root yazmadı gibi"
+			// symptom). Listen for the first PTY output chunk, then inject.
+			go func() {
+				select {
+				case <-s.firstData:
+				case <-time.After(3 * time.Second):
+				}
+				// Brief settle delay so the shell isn't mid-prompt when we type.
+				time.Sleep(120 * time.Millisecond)
+				_, _ = ptyFile.Write([]byte(elevate + "\n"))
+			}()
+		}
 	}
 	return s, nil
+}
+
+// interactiveElevateCmd returns the command to type into an interactive shell to
+// become root, based on the device's probed su style. Returns "" when the shell
+// is already root (no su needed).
+func (c *Client) interactiveElevateCmd(ctx context.Context, serial string) string {
+	style, _ := c.suStyleFor(ctx, serial)
+	switch style {
+	case suBareRoot:
+		return ""
+	case suZeroSimple, suZeroShWrap:
+		return "su 0"
+	default:
+		// su / sh-wrap / unknown: `su root` is the form Magisk and standard su
+		// honor; an unknown style still best-effort tries it so the user sees
+		// the device's own su error in the terminal if it's not granted.
+		return "su root"
+	}
 }
 
 func (s *ShellSession) pump() {
