@@ -443,6 +443,7 @@ export namespace adb {
 	    mode: string;
 	    hasSave: boolean;
 	    needsRoot: boolean;
+	    readOnly: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new IPTBackendInfo(source);
@@ -457,6 +458,7 @@ export namespace adb {
 	        this.mode = source["mode"];
 	        this.hasSave = source["hasSave"];
 	        this.needsRoot = source["needsRoot"];
+	        this.readOnly = source["readOnly"];
 	    }
 	}
 	export class IPTRule {

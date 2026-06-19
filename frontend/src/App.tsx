@@ -61,7 +61,10 @@ function AppInner() {
   useEffect(() => {
     const onRej = (e: PromiseRejectionEvent) => {
       const msg = String(e.reason || '');
-      if (msg.includes('device offline') || msg.includes('not found') || msg.includes('closed')) {
+      // Only swallow adb *transport* drops so the UI stays alive when a device
+      // disconnects. A bare "not found" must NOT be swallowed — that hides real
+      // feature errors like "iptables not found" that screens should surface.
+      if (msg.includes('device offline') || /device( '[^']*')? not found/.test(msg) || msg.includes('connection closed')) {
         e.preventDefault();
       }
     };

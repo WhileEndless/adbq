@@ -363,3 +363,34 @@ export function useClickOutside<T extends HTMLElement>(active: boolean, onClose:
   }, [active, onClose]);
   return ref;
 }
+
+// FeatureState describes why a screen can't render its normal content, so each
+// screen shows a consistent, honest state (loading / empty / unavailable /
+// requires-root / error) instead of a blank panel or a vanishing toast.
+export type FeatureState =
+  | {kind: 'loading'}
+  | {kind: 'empty'; hint?: string}
+  | {kind: 'unavailable'; reason: string}
+  | {kind: 'requires-root'; what?: string}
+  | {kind: 'error'; message: string; retry?: () => void};
+
+export function FeatureNotice({state}: {state: FeatureState}) {
+  if (state.kind === 'loading')
+    return <div className='muted' style={{padding: 28, textAlign: 'center'}}>Loading…</div>;
+  if (state.kind === 'empty')
+    return <div className='muted' style={{padding: 28, textAlign: 'center'}}>{state.hint || 'Nothing here yet.'}</div>;
+  const title = state.kind === 'requires-root' ? 'Root required'
+    : state.kind === 'unavailable' ? 'Not available on this device'
+      : 'Something went wrong';
+  const body = state.kind === 'requires-root'
+    ? `${state.what || 'This feature'} needs root (su) on the device.`
+    : state.kind === 'unavailable' ? state.reason : state.message;
+  return (
+    <div className='card' style={{margin: 24, padding: 16, maxWidth: 560}}>
+      <strong>{title}</strong>
+      <div className='muted' style={{fontSize: 13, marginTop: 6, lineHeight: 1.5}}>{body}</div>
+      {state.kind === 'error' && state.retry &&
+        <button className='btn sm' style={{marginTop: 12}} onClick={state.retry}>Retry</button>}
+    </div>
+  );
+}

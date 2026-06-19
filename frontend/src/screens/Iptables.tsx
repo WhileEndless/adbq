@@ -26,11 +26,16 @@ export function IptablesScreen({device}: {device: adb.Device}) {
     if (!device?.id) return;
     setLoading(true);
     try {
-      const [pb, sn] = await Promise.all([
-        API.ProbeIptables(device.id, family),
-        API.ListIptables(device.id, family, table),
-      ]);
+      // Probe first; only list when a backend (iptables or read-only nft) is
+      // actually present, so a device without it shows a clean "not available"
+      // banner instead of a scary "List failed" error toast.
+      const pb = await API.ProbeIptables(device.id, family);
       setInfo(pb);
+      if (!pb?.available) {
+        setSnap(null);
+        return;
+      }
+      const sn = await API.ListIptables(device.id, family, table);
       setSnap(sn);
       if (sn?.chains?.length && !sn.chains.some(c => c.name === chain)) {
         setChain(sn.chains[0].name);
@@ -180,7 +185,13 @@ export function IptablesScreen({device}: {device: adb.Device}) {
 
       {info && !info.available && (
         <div className='card' style={{margin: '0 18px 12px', padding: 10, borderColor: 'var(--err)'}}>
-          <strong>iptables not found on device.</strong> Most Android 10+ ROMs ship it at <span className='mono'>/system/bin/iptables</span>; if yours doesn't, install via Magisk module.
+          <strong>iptables not found on device.</strong> Most Android 10+ ROMs ship it at <span className='mono'>/system/bin/iptables</span>; if yours doesn't, install via Magisk module. (No <span className='mono'>nft</span> either, so the ruleset can't be read.)
+        </div>
+      )}
+
+      {info?.readOnly && (
+        <div className='card' style={{margin: '0 18px 12px', padding: 10, borderColor: 'var(--warn)'}}>
+          <strong>Read-only (nftables).</strong> This device has no iptables binary, so the ruleset is shown via <span className='mono'>nft list ruleset</span>. Viewing works; adding, deleting and flushing rules are disabled.
         </div>
       )}
 
