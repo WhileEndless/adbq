@@ -29,9 +29,12 @@ type FridaProcess struct {
 
 // ListFridaServers scans /data/local/tmp for frida-server* binaries.
 func (c *Client) ListFridaServers(ctx context.Context, serial string) ([]FridaServer, error) {
-	out, err := c.Shell(ctx, serial, "ls -l /data/local/tmp/ 2>/dev/null | grep -i frida-server || true")
+	// Glob inside the dir (so names are basenames) instead of `ls | grep` —
+	// `grep` is absent on stripped ROMs. A non-matching glob just yields empty
+	// output. parseLsLine tolerates both ISO and BSD/toolbox date columns.
+	out, err := c.Shell(ctx, serial, "cd /data/local/tmp 2>/dev/null && ls -l *frida-server* 2>/dev/null")
 	if err != nil && out == "" {
-		return nil, err
+		return []FridaServer{}, nil
 	}
 	res := []FridaServer{}
 	running := c.runningFrida(ctx, serial)

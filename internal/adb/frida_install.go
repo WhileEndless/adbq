@@ -68,10 +68,17 @@ type FridaArchInfo struct {
 
 // FridaArchInfo reports the device ABIs and the frida-server arches it can run.
 func (c *Client) FridaArchInfo(ctx context.Context, serial string) (*FridaArchInfo, error) {
-	abi := strings.TrimSpace(firstNonEmpty(c.Shell(ctx, serial, "getprop ro.product.cpu.abi")))
-	abilist := strings.TrimSpace(firstNonEmpty(c.Shell(ctx, serial, "getprop ro.product.cpu.abilist")))
-	abilist64 := strings.TrimSpace(firstNonEmpty(c.Shell(ctx, serial, "getprop ro.product.cpu.abilist64")))
-	info := &FridaArchInfo{ABI: abi, ABIList: abilist, Bits64: abilist64 != "", Primary: fridaArchForABI(abi)}
+	caps := c.Capabilities(ctx, serial)
+	abi := caps.ABI
+	if abi == "" && len(caps.ABIList) > 0 {
+		abi = caps.ABIList[0]
+	}
+	info := &FridaArchInfo{
+		ABI:     abi,
+		ABIList: strings.Join(caps.ABIList, ","),
+		Bits64:  caps.Bits64,
+		Primary: c.detectFridaArch(ctx, serial),
+	}
 
 	seen := map[string]bool{}
 	add := func(a string) {
@@ -81,13 +88,43 @@ func (c *Client) FridaArchInfo(ctx context.Context, serial string) (*FridaArchIn
 		}
 	}
 	add(info.Primary)
-	for _, x := range strings.Split(abilist, ",") {
+	for _, x := range caps.ABIList {
 		add(fridaArchForABI(strings.TrimSpace(x)))
 	}
 	return info, nil
 }
 
-func firstNonEmpty(s string, _ error) string { return s }
+// detectFridaArch resolves the frida-server arch token for the device's primary
+// ABI, falling back to the abilist and then `uname -m` so a device with an empty
+// ro.product.cpu.abi (some emulators/odd ROMs) still resolves instead of erroring.
+func (c *Client) detectFridaArch(ctx context.Context, serial string) string {
+	caps := c.Capabilities(ctx, serial)
+	if a := fridaArchForABI(caps.ABI); a != "" {
+		return a
+	}
+	for _, x := range caps.ABIList {
+		if a := fridaArchForABI(strings.TrimSpace(x)); a != "" {
+			return a
+		}
+	}
+	out, _ := c.Shell(ctx, serial, "uname -m")
+	return fridaArchForABI(unameToABI(strings.TrimSpace(out)))
+}
+
+// unameToABI maps a `uname -m` machine string to the equivalent Android ABI.
+func unameToABI(m string) string {
+	switch m {
+	case "aarch64", "arm64":
+		return "arm64-v8a"
+	case "armv7l", "armv8l", "armv7", "arm":
+		return "armeabi-v7a"
+	case "x86_64", "amd64":
+		return "x86_64"
+	case "i686", "i386", "x86":
+		return "x86"
+	}
+	return ""
+}
 
 // ListFridaReleases returns the frida-server versions installable on the device,
 // newest first, each flagged if already on the device. When arch is empty it is
@@ -95,14 +132,9 @@ func firstNonEmpty(s string, _ error) string { return s }
 // ("arm64"/"arm"/"x86_64"/"x86") to override.
 func (c *Client) ListFridaReleases(ctx context.Context, serial, arch string) ([]FridaRelease, error) {
 	if arch == "" {
-		abi, err := c.Shell(ctx, serial, "getprop ro.product.cpu.abi")
-		if err != nil {
-			return nil, fmt.Errorf("read device abi: %w", err)
-		}
-		abi = strings.TrimSpace(abi)
-		arch = fridaArchForABI(abi)
+		arch = c.detectFridaArch(ctx, serial)
 		if arch == "" {
-			return nil, fmt.Errorf("no frida-server build for device ABI %q", abi)
+			return nil, fmt.Errorf("could not determine a frida-server arch for this device — pick one manually")
 		}
 	}
 
