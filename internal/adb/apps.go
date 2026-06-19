@@ -2,6 +2,9 @@ package adb
 
 import (
 	"context"
+	"fmt"
+	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -407,19 +410,40 @@ func (c *Client) ListPackageUIDs(ctx context.Context, serial string) (map[int]st
 	return m, nil
 }
 
-// PathOfApp returns base.apk path on device.
-func (c *Client) PathOfApp(ctx context.Context, serial, pkg string) (string, error) {
+// PathsOfApp returns every APK path for the package — base plus any config /
+// density / language split APKs (App Bundle apps). Order is as `pm path`
+// reports it, base first in practice.
+func (c *Client) PathsOfApp(ctx context.Context, serial, pkg string) ([]string, error) {
 	out, err := c.Shell(ctx, serial, "pm path "+pkg)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	var paths []string
 	for _, ln := range strings.Split(out, "\n") {
-		ln = strings.TrimSpace(ln)
-		if strings.HasPrefix(ln, "package:") {
-			return strings.TrimPrefix(ln, "package:"), nil
+		if p, ok := strings.CutPrefix(strings.TrimSpace(ln), "package:"); ok && p != "" {
+			paths = append(paths, p)
 		}
 	}
-	return "", nil
+	return paths, nil
+}
+
+// PathOfApp returns the first (base) APK path on device.
+func (c *Client) PathOfApp(ctx context.Context, serial, pkg string) (string, error) {
+	paths, err := c.PathsOfApp(ctx, serial, pkg)
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
+}
+
+// pmResultErr maps adb install/uninstall output to an error. adb prints
+// "Success" or "Failure [REASON]" and frequently exits 0 even on failure, so a
+// non-error return from Run can still be a failed operation.
+func pmResultErr(out string, err error) error {
+	if _, after, ok := strings.Cut(out, "Failure"); ok {
+		return fmt.Errorf("Failure%s", firstLine(after))
+	}
+	return err
 }
 
 // InstallAPK runs `adb install -r <localPath>`.
@@ -428,7 +452,8 @@ func (c *Client) InstallAPK(ctx context.Context, serial, localPath string) (stri
 	if err != nil {
 		return "", err
 	}
-	return Run(cmd)
+	out, err := Run(cmd)
+	return out, pmResultErr(out, err)
 }
 
 // UninstallApp runs `adb uninstall <pkg>`.
@@ -437,7 +462,8 @@ func (c *Client) UninstallApp(ctx context.Context, serial, pkg string) (string, 
 	if err != nil {
 		return "", err
 	}
-	return Run(cmd)
+	out, err := Run(cmd)
+	return out, pmResultErr(out, err)
 }
 
 // ClearApp wipes user data via `pm clear`.
@@ -542,13 +568,36 @@ func (c *Client) LaunchApp(ctx context.Context, serial, pkg string) (string, err
 	return c.Shell(ctx, serial, "monkey -p "+pkg+" -c android.intent.category.LAUNCHER 1")
 }
 
-// PullAPK copies base.apk to localPath.
+// PullAPK copies the base APK to localPath. For split-APK (App Bundle) apps it
+// also pulls the split APKs into the same directory, so the export is complete
+// and reinstallable (a base-only export fails later with INSTALL_FAILED_MISSING_SPLIT).
 func (c *Client) PullAPK(ctx context.Context, serial, pkg, localPath string) (string, error) {
-	remote, err := c.PathOfApp(ctx, serial, pkg)
-	if err != nil || remote == "" {
+	paths, err := c.PathsOfApp(ctx, serial, pkg)
+	if err != nil {
 		return "", err
 	}
-	cmd, err := c.DeviceCommand(ctx, serial, "pull", remote, localPath)
+	if len(paths) == 0 {
+		return "", fmt.Errorf("no APK path found for %s", pkg)
+	}
+	if out, err := c.pullOne(ctx, serial, paths[0], localPath); err != nil {
+		return out, err
+	}
+	if len(paths) == 1 {
+		return localPath, nil
+	}
+	// Pull splits next to the base, keeping their on-device filenames.
+	dir := filepath.Dir(localPath)
+	for _, p := range paths[1:] {
+		dst := filepath.Join(dir, path.Base(p))
+		if out, err := c.pullOne(ctx, serial, p, dst); err != nil {
+			return out, fmt.Errorf("pulled base but a split failed (%s): %w", path.Base(p), err)
+		}
+	}
+	return fmt.Sprintf("%s (+%d split APK(s) in %s)", localPath, len(paths)-1, dir), nil
+}
+
+func (c *Client) pullOne(ctx context.Context, serial, remote, local string) (string, error) {
+	cmd, err := c.DeviceCommand(ctx, serial, "pull", remote, local)
 	if err != nil {
 		return "", err
 	}
