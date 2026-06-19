@@ -41,11 +41,15 @@ const (
 type IPTBackendInfo struct {
 	Family    IPFamily `json:"family"`
 	Available bool     `json:"available"`
-	Path      string   `json:"path"`    // resolved path (e.g. /system/bin/iptables)
+	Path      string   `json:"path"`    // resolved path (e.g. /system/bin/iptables, or nft when ReadOnly)
 	Version   string   `json:"version"` // `iptables --version` first line
-	Mode      string   `json:"mode"`    // "legacy" | "nft" | "unknown"
+	Mode      string   `json:"mode"`    // "legacy" | "nft" | "nft-native" | "unknown"
 	HasSave   bool     `json:"hasSave"` // iptables-save present
 	NeedsRoot bool     `json:"needsRoot"`
+	// ReadOnly is set when there is no iptables binary but the kernel ruleset is
+	// still viewable via `nft list ruleset`. Rules can be listed but not edited
+	// (translating the iptables UI's specs to nftables is out of scope).
+	ReadOnly bool `json:"readOnly"`
 }
 
 // IPTRule is one rule line from `iptables -t <table> -nvL --line-numbers`.
@@ -133,28 +137,38 @@ var iptablesGlobal = &iptablesState{}
 func (c *Client) ProbeIptables(ctx context.Context, serial string, fam IPFamily) (*IPTBackendInfo, error) {
 	bin := iptablesBinary(fam)
 	info := &IPTBackendInfo{Family: fam, NeedsRoot: true}
-	out, err := c.Shell(ctx, serial, "command -v "+bin)
-	if err == nil {
-		info.Path = strings.TrimSpace(out)
+	if out, err := c.Shell(ctx, serial, "command -v "+bin); err == nil {
+		info.Path = firstLine(strings.TrimSpace(out))
 	}
-	// PATH lookup misses Magisk modules. Probe the well-known module tree as
-	// a fallback — many privacy/firewall modules ship their own iptables.
+	// PATH lookup misses Magisk modules. Probe the well-known module tree as a
+	// fallback — many privacy/firewall modules ship their own iptables.
 	if info.Path == "" {
-		probe := "for f in /data/adb/modules/*/system/bin/" + bin + " /data/adb/modules/*/system/xbin/" + bin + "; do [ -f \"$f\" ] && echo \"$f\" && exit 0; done"
-		if out, _ := c.Shell(ctx, serial, "su -c '"+probe+"'"); strings.TrimSpace(out) != "" {
-			info.Path = strings.TrimSpace(out)
+		probe := "for f in /data/adb/modules/*/system/bin/" + bin + " /data/adb/modules/*/system/xbin/" + bin + "; do [ -f \"$f\" ] && echo \"$f\" && break; done"
+		if out, _, _ := c.ShellSU(ctx, serial, probe); strings.TrimSpace(out) != "" {
+			info.Path = firstLine(strings.TrimSpace(out))
 		}
 	}
 	if info.Path == "" {
+		// No iptables binary. Modern/GKI ROMs may ship only nftables; if `nft`
+		// is present we can still make the ruleset *viewable* (read-only).
+		if out, err := c.Shell(ctx, serial, "command -v nft"); err == nil && strings.TrimSpace(out) != "" {
+			info.Path = firstLine(strings.TrimSpace(out))
+			info.Mode = "nft-native"
+			info.Available = true
+			info.ReadOnly = true
+		}
 		return info, nil
 	}
 	info.Available = true
-	// Try --version both as user and via su; OEMs lock down iptables to root.
-	v, _ := c.Shell(ctx, serial, "su -c '"+info.Path+" --version' 2>&1 | head -1")
-	v = strings.TrimSpace(v)
+	// Try --version via su (OEMs lock iptables to root), then as the shell user.
+	// Read full output and take the first line host-side — `head` is absent on
+	// stripped ROMs.
+	v, _, _ := c.ShellSU(ctx, serial, info.Path+" --version 2>&1")
+	v = firstLine(strings.TrimSpace(v))
 	if v == "" || strings.Contains(v, "Permission denied") {
-		v, _ = c.Shell(ctx, serial, info.Path+" --version 2>&1 | head -1")
-		v = strings.TrimSpace(v)
+		if nv, _ := c.Shell(ctx, serial, info.Path+" --version 2>&1"); nv != "" {
+			v = firstLine(strings.TrimSpace(nv))
+		}
 	}
 	info.Version = v
 	switch {
@@ -168,7 +182,7 @@ func (c *Client) ProbeIptables(ctx context.Context, serial string, fam IPFamily)
 		info.Mode = "unknown"
 	}
 	saveBin := strings.TrimSuffix(bin, "tables") + "tables-save"
-	if _, err := c.Shell(ctx, serial, "command -v "+saveBin); err == nil {
+	if out, err := c.Shell(ctx, serial, "command -v "+saveBin); err == nil && strings.TrimSpace(out) != "" {
 		info.HasSave = true
 	}
 	return info, nil
@@ -199,12 +213,19 @@ func iptablesRestoreBinary(fam IPFamily) string {
 // parses the result into a snapshot. Also captures iptables-save output for
 // the Raw mode + undo ring.
 func (c *Client) ListIptables(ctx context.Context, serial string, fam IPFamily, table IPTable) (*IPTSnapshot, error) {
-	bin := iptablesBinary(fam)
 	tbl := string(table)
 	if tbl == "" {
 		tbl = string(TableFilter)
 	}
-	list, err := c.Shell(ctx, serial, "su -c '"+bin+" -t "+tbl+" -nvL --line-numbers'")
+	probe, _ := c.ProbeIptables(ctx, serial, fam)
+	// nftables-only device: there is no iptables binary, so present the kernel
+	// ruleset read-only via `nft`.
+	if probe != nil && probe.Mode == "nft-native" {
+		return c.listNftRuleset(ctx, serial, fam, IPTable(tbl))
+	}
+
+	bin := iptablesBinary(fam)
+	list, _, err := c.ShellSU(ctx, serial, bin+" -t "+tbl+" -nvL --line-numbers")
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
 	}
@@ -212,12 +233,25 @@ func (c *Client) ListIptables(ctx context.Context, serial string, fam IPFamily, 
 	snap.Chains = parseIptablesL(list)
 	// iptables-save gives us a transaction blob for import/export/undo. Errors
 	// here are non-fatal (some devices restrict the binary harder than -L).
-	if save, err := c.Shell(ctx, serial, "su -c '"+iptablesSaveBinary(fam)+" -t "+tbl+"'"); err == nil {
+	if save, _, err := c.ShellSU(ctx, serial, iptablesSaveBinary(fam)+" -t "+tbl); err == nil {
 		snap.Restore = save
 	}
-	if probe, _ := c.ProbeIptables(ctx, serial, fam); probe != nil {
+	if probe != nil {
 		snap.Mode = probe.Mode
 	}
+	return snap, nil
+}
+
+// listNftRuleset renders the kernel nftables ruleset (read-only) for devices
+// with no iptables binary. Rules are shown verbatim; the iptables column model
+// doesn't map onto nft syntax, so each rule's text is kept in Raw/Extra.
+func (c *Client) listNftRuleset(ctx context.Context, serial string, fam IPFamily, table IPTable) (*IPTSnapshot, error) {
+	out, _, err := c.ShellSU(ctx, serial, "nft -nn list ruleset")
+	if err != nil {
+		return nil, fmt.Errorf("nft list: %w", err)
+	}
+	snap := &IPTSnapshot{Family: fam, Table: table, Mode: "nft-native", Restore: out}
+	snap.Chains = parseNftRuleset(out, fam)
 	return snap, nil
 }
 
@@ -325,6 +359,90 @@ func parseIptablesRule(ln string) (IPTRule, bool) {
 	return r, true
 }
 
+// parseNftRuleset parses `nft -nn list ruleset` into the iptables chain model
+// for read-only display. nft groups chains under tables by address family
+// (ip/ip6/inet/...); we surface chains belonging to the requested family plus
+// the dual `inet` family. Each rule is kept verbatim (its text doesn't map onto
+// the iptables column layout).
+func parseNftRuleset(out string, fam IPFamily) []IPTChain {
+	wantFam := "ip"
+	if fam == IPv6 {
+		wantFam = "ip6"
+	}
+	var chains []IPTChain
+	var cur *IPTChain
+	tableFam := ""
+	num := 0
+	flush := func() {
+		if cur != nil {
+			chains = append(chains, *cur)
+			cur = nil
+		}
+	}
+	for _, raw := range strings.Split(out, "\n") {
+		ln := strings.TrimSpace(raw)
+		switch {
+		case ln == "":
+			continue
+		case strings.HasPrefix(ln, "table "):
+			// "table inet filter {"
+			if fs := strings.Fields(ln); len(fs) >= 2 {
+				tableFam = fs[1]
+			}
+		case strings.HasPrefix(ln, "chain "):
+			flush()
+			if tableFam == wantFam || tableFam == "inet" {
+				name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(ln, "chain "), "{"))
+				cur = &IPTChain{Name: name, Policy: "-"}
+				num = 0
+			}
+		case ln == "}":
+			flush()
+		case cur == nil:
+			continue
+		case strings.HasPrefix(ln, "type ") && strings.Contains(ln, "policy "):
+			if _, after, ok := strings.Cut(ln, "policy "); ok {
+				if fs := strings.Fields(after); len(fs) > 0 {
+					cur.Policy = strings.ToUpper(strings.TrimSuffix(fs[0], ";"))
+				}
+			}
+		default:
+			num++
+			cur.Rules = append(cur.Rules, IPTRule{Num: num, Raw: ln, Extra: ln, Target: nftVerdict(ln)})
+		}
+	}
+	flush()
+	return chains
+}
+
+// nftVerdict returns the rule's terminal verdict (ACCEPT/DROP/...) when present,
+// for display in the Target column.
+func nftVerdict(rule string) string {
+	for _, f := range strings.Fields(rule) {
+		switch f {
+		case "accept", "drop", "reject", "return", "queue", "continue", "jump", "goto":
+			return strings.ToUpper(f)
+		}
+	}
+	return ""
+}
+
+// assertIptablesWritable refuses mutations on devices where the ruleset is
+// read-only (nftables-only, no iptables binary) or iptables is missing entirely.
+func (c *Client) assertIptablesWritable(ctx context.Context, serial string, fam IPFamily) error {
+	probe, _ := c.ProbeIptables(ctx, serial, fam)
+	if probe == nil {
+		return nil
+	}
+	if probe.ReadOnly {
+		return errors.New("this device has no iptables binary (nftables-only); rules are read-only")
+	}
+	if !probe.Available {
+		return errors.New("iptables is not available on this device")
+	}
+	return nil
+}
+
 // IptablesSpec is one well-formed rule specification. We accept it as a slice
 // of strings (the same way iptables takes argv) so we can validate each piece
 // individually and never glue a shell string together.
@@ -361,12 +479,12 @@ func (c *Client) DeleteIptablesRule(ctx context.Context, serial string, fam IPFa
 	if num <= 0 {
 		return nil, fmt.Errorf("rule number must be >= 1, got %d", num)
 	}
-	if err := c.snapshotForUndo(ctx, serial, fam); err != nil {
+	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return nil, err
 	}
 	bin := iptablesBinary(fam)
 	cmd := fmt.Sprintf("%s -t %s -D %s %d", bin, table, chain, num)
-	if out, err := c.Shell(ctx, serial, "su -c '"+cmd+"'"); err != nil {
+	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return nil, fmt.Errorf("delete: %w (%s)", err, strings.TrimSpace(out))
 	}
 	return c.ListIptables(ctx, serial, fam, table)
@@ -375,7 +493,7 @@ func (c *Client) DeleteIptablesRule(ctx context.Context, serial string, fam IPFa
 // FlushIptables clears one chain when chain != "", or the whole table when
 // chain == "". Snapshots first.
 func (c *Client) FlushIptables(ctx context.Context, serial string, fam IPFamily, table IPTable, chain string) (*IPTSnapshot, error) {
-	if err := c.snapshotForUndo(ctx, serial, fam); err != nil {
+	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return nil, err
 	}
 	bin := iptablesBinary(fam)
@@ -385,7 +503,7 @@ func (c *Client) FlushIptables(ctx context.Context, serial string, fam IPFamily,
 	} else {
 		cmd = fmt.Sprintf("%s -t %s -F %s", bin, table, chain)
 	}
-	if out, err := c.Shell(ctx, serial, "su -c '"+cmd+"'"); err != nil {
+	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return nil, fmt.Errorf("flush: %w (%s)", err, strings.TrimSpace(out))
 	}
 	return c.ListIptables(ctx, serial, fam, table)
@@ -398,12 +516,12 @@ func (c *Client) SetIptablesPolicy(ctx context.Context, serial string, fam IPFam
 	if policy != "ACCEPT" && policy != "DROP" && policy != "REJECT" {
 		return fmt.Errorf("invalid policy %q (want ACCEPT/DROP/REJECT)", policy)
 	}
-	if err := c.snapshotForUndo(ctx, serial, fam); err != nil {
+	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return err
 	}
 	bin := iptablesBinary(fam)
 	cmd := fmt.Sprintf("%s -t %s -P %s %s", bin, table, chain, policy)
-	if out, err := c.Shell(ctx, serial, "su -c '"+cmd+"'"); err != nil {
+	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return fmt.Errorf("policy: %w (%s)", err, strings.TrimSpace(out))
 	}
 	return nil
@@ -414,12 +532,12 @@ func (c *Client) CreateIptablesChain(ctx context.Context, serial string, fam IPF
 	if !looksLikeIdent(chain) {
 		return fmt.Errorf("invalid chain name %q", chain)
 	}
-	if err := c.snapshotForUndo(ctx, serial, fam); err != nil {
+	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return err
 	}
 	bin := iptablesBinary(fam)
 	cmd := fmt.Sprintf("%s -t %s -N %s", bin, table, chain)
-	if out, err := c.Shell(ctx, serial, "su -c '"+cmd+"'"); err != nil {
+	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return fmt.Errorf("create chain: %w (%s)", err, strings.TrimSpace(out))
 	}
 	return nil
@@ -430,12 +548,12 @@ func (c *Client) DeleteIptablesChain(ctx context.Context, serial string, fam IPF
 	if !looksLikeIdent(chain) {
 		return fmt.Errorf("invalid chain name %q", chain)
 	}
-	if err := c.snapshotForUndo(ctx, serial, fam); err != nil {
+	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return err
 	}
 	bin := iptablesBinary(fam)
 	cmd := fmt.Sprintf("%s -t %s -X %s", bin, table, chain)
-	if out, err := c.Shell(ctx, serial, "su -c '"+cmd+"'"); err != nil {
+	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return fmt.Errorf("delete chain: %w (%s)", err, strings.TrimSpace(out))
 	}
 	return nil
@@ -443,12 +561,13 @@ func (c *Client) DeleteIptablesChain(ctx context.Context, serial string, fam IPF
 
 // ExportIptables returns the full `iptables-save` blob across all tables.
 func (c *Client) ExportIptables(ctx context.Context, serial string, fam IPFamily) (string, error) {
-	return c.Shell(ctx, serial, "su -c '"+iptablesSaveBinary(fam)+"'")
+	out, _, err := c.ShellSU(ctx, serial, iptablesSaveBinary(fam))
+	return out, err
 }
 
 // ImportIptables applies a `iptables-restore` blob. Snapshots before applying.
 func (c *Client) ImportIptables(ctx context.Context, serial string, fam IPFamily, blob string) error {
-	if err := c.snapshotForUndo(ctx, serial, fam); err != nil {
+	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return err
 	}
 	// We can't pass multi-line input through `adb shell`'s `su -c '...'` form
@@ -459,7 +578,7 @@ func (c *Client) ImportIptables(ctx context.Context, serial string, fam IPFamily
 		return fmt.Errorf("stage blob: %w", err)
 	}
 	cmd := iptablesRestoreBinary(fam) + " < " + tmp
-	if out, err := c.Shell(ctx, serial, "su -c '"+cmd+"'"); err != nil {
+	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return fmt.Errorf("restore: %w (%s)", err, strings.TrimSpace(out))
 	}
 	_, _ = c.Shell(ctx, serial, "rm -f "+tmp)
@@ -468,6 +587,9 @@ func (c *Client) ImportIptables(ctx context.Context, serial string, fam IPFamily
 
 // UndoIptables pops the last snapshot for (serial, fam) and restores it.
 func (c *Client) UndoIptables(ctx context.Context, serial string, fam IPFamily) (*IPTSnapshot, error) {
+	if err := c.assertIptablesWritable(ctx, serial, fam); err != nil {
+		return nil, err
+	}
 	k := undoKey{Serial: serial, Family: fam}
 	blob, ok := iptablesGlobal.popUndo(k)
 	if !ok {
@@ -480,11 +602,21 @@ func (c *Client) UndoIptables(ctx context.Context, serial string, fam IPFamily) 
 		return nil, err
 	}
 	cmd := iptablesRestoreBinary(fam) + " < " + tmp
-	if out, err := c.Shell(ctx, serial, "su -c '"+cmd+"'"); err != nil {
+	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return nil, fmt.Errorf("undo restore: %w (%s)", err, strings.TrimSpace(out))
 	}
 	_, _ = c.Shell(ctx, serial, "rm -f "+tmp)
 	return c.ListIptables(ctx, serial, fam, TableFilter)
+}
+
+// beginIptablesMutation is the shared preamble for every rule-changing op: it
+// refuses mutations on read-only (nftables-only) devices, then snapshots the
+// current ruleset onto the undo ring.
+func (c *Client) beginIptablesMutation(ctx context.Context, serial string, fam IPFamily) error {
+	if err := c.assertIptablesWritable(ctx, serial, fam); err != nil {
+		return err
+	}
+	return c.snapshotForUndo(ctx, serial, fam)
 }
 
 // snapshotForUndo captures iptables-save output and pushes it onto the per-
@@ -509,7 +641,7 @@ func (c *Client) runIptablesMutation(ctx context.Context, serial string, fam IPF
 	if !looksLikeIdent(chain) {
 		return nil, fmt.Errorf("invalid chain name %q", chain)
 	}
-	if err := c.snapshotForUndo(ctx, serial, fam); err != nil {
+	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return nil, err
 	}
 	bin := iptablesBinary(fam)
@@ -519,7 +651,7 @@ func (c *Client) runIptablesMutation(ctx context.Context, serial string, fam IPF
 	} else {
 		cmd = fmt.Sprintf("%s -t %s %s %s %s", bin, table, op, chain, strings.Join(spec, " "))
 	}
-	if out, err := c.Shell(ctx, serial, "su -c '"+cmd+"'"); err != nil {
+	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return nil, fmt.Errorf("%s: %w (%s)", op, err, strings.TrimSpace(out))
 	}
 	return c.ListIptables(ctx, serial, fam, table)
