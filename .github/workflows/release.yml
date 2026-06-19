@@ -1,0 +1,140 @@
+name: release
+
+# Build native binaries for macOS, Windows, and Linux on their own runners
+# (Wails cannot reliably cross-compile a webview app between OSes) and attach
+# them to a GitHub Release. Triggered by pushing a semver tag, e.g. `v0.1.0-beta`.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and release"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  WAILS_VERSION: v2.12.0
+
+jobs:
+  # Guard the single source of truth: the pushed tag must equal the literal in
+  # internal/version/version.go. This keeps that file the only place a version
+  # is ever edited.
+  verify-version:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match internal/version/version.go
+        run: |
+          file_ver=$(awk -F'"' '/Version = "/{print $2; exit}' internal/version/version.go)
+          tag_ver="${GITHUB_REF_NAME}"
+          echo "file=$file_ver tag=$tag_ver"
+          if [ "$file_ver" != "$tag_ver" ]; then
+            echo "::error::Tag ($tag_ver) does not match version.go ($file_ver). Bump the file and retag."
+            exit 1
+          fi
+
+  build:
+    needs: [verify-version]
+    # workflow_dispatch has no verify-version job, so don't hard-require it.
+    if: always() && (needs.verify-version.result == 'success' || needs.verify-version.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin/universal
+            artifact: adbq-macos-universal
+          - os: windows-latest
+            platform: windows/amd64
+            artifact: adbq-windows-amd64
+          - os: ubuntu-22.04
+            platform: linux/amd64
+            artifact: adbq-linux-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Resolve version from source of truth
+        id: ver
+        shell: bash
+        run: |
+          v=$(awk -F'"' '/Version = "/{print $2; exit}' internal/version/version.go)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        shell: bash
+        run: |
+          wails build -platform ${{ matrix.platform }} -clean -trimpath \
+            -ldflags "-s -w -X adbq/internal/version.Version=${{ steps.ver.outputs.version }}"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd build/bin
+          ditto -c -k --keepParent adbq.app "../../${{ matrix.artifact }}.zip"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd build/bin
+          chmod +x adbq
+          tar -czf "../../${{ matrix.artifact }}.tar.gz" adbq
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path build/bin/adbq.exe -DestinationPath "${{ matrix.artifact }}.zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}.tar.gz
+          if-no-files-found: ignore
+
+  release:
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create or update the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "adbq ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --prerelease \
+            dist/* \
+          || gh release upload "${GITHUB_REF_NAME}" dist/* --clobber

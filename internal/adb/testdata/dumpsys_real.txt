@@ -1,0 +1,111 @@
+Activity Resolver Table:
+  Non-Data Actions:
+      android.intent.action.MAIN:
+        2345c55 com.github.uiautomator/.MainActivity filter 8dd59fe
+          Action: "android.intent.action.MAIN"
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.LAUNCHER"
+      android.intent.action.VIEW:
+        2345c55 com.github.uiautomator/.MainActivity filter 8dd59fe
+          Action: "android.intent.action.MAIN"
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.LAUNCHER"
+      com.github.uiautomator.ACTION_IDENTIFY:
+        32b666a com.github.uiautomator/.IdentifyActivity filter 9f651b9
+          Action: "com.github.uiautomator.ACTION_IDENTIFY"
+          Category: "android.intent.category.DEFAULT"
+
+Receiver Resolver Table:
+  Non-Data Actions:
+      send.mock:
+        2ab175b com.github.uiautomator/.AdbBroadcastReceiver filter 45bb780
+          Action: "send.mock"
+          Action: "stop.mock"
+      stop.mock:
+        2ab175b com.github.uiautomator/.AdbBroadcastReceiver filter 45bb780
+          Action: "send.mock"
+          Action: "stop.mock"
+
+Service Resolver Table:
+  Non-Data Actions:
+      android.intent.action.MAIN:
+        f58dbf8 com.github.uiautomator/.Service filter 9bda4b2
+          Action: "com.github.uiautomator.ACTION_START"
+          Action: "com.github.uiautomator.ACTION_STOP"
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.LAUNCHER"
+          mPriority=10000, mOrder=0, mHasPartialTypes=false
+      com.github.uiautomator.ACTION_START:
+        f58dbf8 com.github.uiautomator/.Service filter 9bda4b2
+          Action: "com.github.uiautomator.ACTION_START"
+          Action: "com.github.uiautomator.ACTION_STOP"
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.LAUNCHER"
+          mPriority=10000, mOrder=0, mHasPartialTypes=false
+      android.view.InputMethod:
+        5ab68d1 com.github.uiautomator/.AdbKeyboard filter 1998c03 permission android.permission.BIND_INPUT_METHOD
+          Action: "android.view.InputMethod"
+      com.github.uiautomator.ACTION_STOP:
+        f58dbf8 com.github.uiautomator/.Service filter 9bda4b2
+          Action: "com.github.uiautomator.ACTION_START"
+          Action: "com.github.uiautomator.ACTION_STOP"
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.LAUNCHER"
+          mPriority=10000, mOrder=0, mHasPartialTypes=false
+
+Key Set Manager:
+  [com.github.uiautomator]
+      Signing KeySets: 271
+
+Packages:
+  Package [com.github.uiautomator] (6917f36):
+    userId=10366
+    pkg=Package{83bbfa4 com.github.uiautomator}
+    codePath=/data/app/com.github.uiautomator-EA7TPH9n4uHjmugnD1TIqA==
+    resourcePath=/data/app/com.github.uiautomator-EA7TPH9n4uHjmugnD1TIqA==
+    legacyNativeLibraryDir=/data/app/com.github.uiautomator-EA7TPH9n4uHjmugnD1TIqA==/lib
+    primaryCpuAbi=null
+    secondaryCpuAbi=null
+    versionCode=2004001 minSdk=19 targetSdk=32
+    versionName=2.4.0
+    splits=[base]
+    apkSigningVersion=2
+    applicationInfo=ApplicationInfo{36e58c2 com.github.uiautomator}
+    flags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ]
+    dataDir=/data/user/0/com.github.uiautomator
+    supportsScreens=[small, medium, large, xlarge, resizeable, anyDensity]
+    timeStamp=2026-06-09 10:19:55
+    firstInstallTime=2026-06-09 10:19:58
+    lastUpdateTime=2026-06-09 10:19:58
+    signatures=PackageSignatures{d1316d3 version:2, signatures:[e6b92d01], past signatures:[]}
+    installPermissionsFixed=true
+    pkgFlags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    requested permissions:
+      android.permission.ACCESS_MOCK_LOCATION
+      android.permission.INTERNET
+      android.permission.DISABLE_KEYGUARD
+      android.permission.WAKE_LOCK
+      android.permission.ACCESS_NETWORK_STATE
+      android.permission.GET_ACCOUNTS
+      android.permission.MANAGE_ACCOUNTS
+      android.permission.CHANGE_WIFI_STATE
+      android.permission.ACCESS_WIFI_STATE
+      android.permission.FOREGROUND_SERVICE
+      android.permission.SYSTEM_ALERT_WINDOW
+      android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+    install permissions:
+      android.permission.MANAGE_ACCOUNTS: granted=true
+      android.permission.FOREGROUND_SERVICE: granted=true
+      android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: granted=true
+      android.permission.INTERNET: granted=true
+      android.permission.CHANGE_WIFI_STATE: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.DISABLE_KEYGUARD: granted=true
+      android.permission.ACCESS_WIFI_STATE: granted=true
+      android.permission.WAKE_LOCK: granted=true
+    User 0: ceDataInode=2122650 installed=true hidden=false suspended=false stopped=false notLaunched=false enabled=0 instant=false virtual=false
+      gids=[3003]
+
+# (fixture trimmed to the com.github.uiautomator block used by the test;
+#  the device-specific package dump and install history were removed)

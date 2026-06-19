@@ -1,0 +1,39 @@
+# --- Build output ---
+build/bin/
+frontend/dist/
+# stray local binaries from `go build` at the repo root
+/adbq
+/adbq.exe
+
+# --- Dependencies ---
+node_modules/
+
+# --- Go test/coverage artifacts ---
+*.test
+*.out
+coverage.*
+
+# --- Environment & secrets (never commit) ---
+.env
+.env.*
+!.env.example
+*.local
+
+# --- OS / editor metadata ---
+.DS_Store
+**/.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- Runtime artifacts adbq writes to the host (captured device data) ---
+# The app saves live/pulled captures, exported APKs and screenshots with an
+# `adbq-` prefix. These can contain real device/network data — keep them out of
+# the repo. NOTE: this deliberately does NOT match internal/adb/testdata/*.pcap,
+# which are synthetic decoder fixtures and must stay tracked.
+adbq-*.pcap
+adbq-*.apk
+adbq-*.png
+*.keystore
