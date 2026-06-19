@@ -104,10 +104,15 @@ func (c *Client) ApplyHostsRobust(ctx context.Context, serial, content string) (
 				stagePath, hostsPath),
 		},
 		{
+			// File-level live override for read-only /system (A10+ non-Magisk
+			// root) — the single-file equivalent of the certs tmpfs overlay.
+			// Label the bind source with the hosts file's SELinux type first so
+			// the overlay presents the right context on enforcing devices;
+			// otherwise apps reading /system/etc/hosts hit an avc denial.
 			name: "bind-mount",
 			cmd: fmt.Sprintf(
-				"mount --bind %s %s 2>&1 && echo OK",
-				stagePath, hostsPath),
+				"chcon u:object_r:system_file:s0 %s 2>/dev/null; mount --bind %s %s 2>&1 && echo OK",
+				stagePath, stagePath, hostsPath),
 		},
 	}
 
