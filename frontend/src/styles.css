@@ -120,8 +120,11 @@ input, select, textarea { font: inherit; color: inherit; }
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
-  overflow: hidden;
+  /* visible (not hidden) so the profile/theme dropdowns can open below the bar;
+     z-index lifts the bar + its dropdowns above the content rows. */
+  overflow: visible;
   position: relative;
+  z-index: 20;
 }
 .titlebar .meta-line { font-family: var(--font-mono); font-size: 11px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .titlebar .traffic {
@@ -1116,6 +1119,11 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
+/* Spinning refresh indicator — shown on a screen's Reload button while a
+   background revalidation is in flight. */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.8s linear infinite; transform-origin: center; }
+
 /* ─── Capture (live packet viewer) ──────────────────────────────────────── */
 .capture-toolbar {
   display: flex; align-items: center; gap: 6px;
@@ -1140,6 +1148,9 @@ input, select, textarea { font: inherit; color: inherit; }
   align-items: center;
   cursor: pointer;
   white-space: nowrap;
+  /* fixed height so the packet list can be virtualized (CAPTURE_ROW_H in Capture.tsx) */
+  height: 22px;
+  box-sizing: border-box;
 }
 .capture-row > span {
   overflow: hidden; text-overflow: ellipsis;

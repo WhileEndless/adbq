@@ -10,6 +10,9 @@ import {CapturePacket, useStore} from '../store';
 interface LiveLayer { name: string; bytes: number; offset: number; fields: {k: string; v: string}[] }
 interface LiveDetail extends CapturePacket { layersFull: LiveLayer[]; rawHex: string }
 
+// Fixed packet-row height (must match .capture-row in styles.css) so the list
+// can be virtualized — rendering every row froze the UI on large buffers.
+const CAPTURE_ROW_H = 22;
 const IFACES = ['any', 'wlan0', 'rmnet0', 'rmnet_data0', 'eth0', 'lo'];
 const MAX_PACKETS_OPTIONS = [
   {label: '5k packets',   value: 5000,   mirror: 50 * 1024 * 1024},
@@ -43,6 +46,9 @@ export function CaptureScreen({device}: {device: adb.Device}) {
   const [tail, setTail] = useState(true);
   const [tdAvailable, setTdAvailable] = useState<boolean | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Virtualization window: render only the visible packet rows.
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewH, setViewH] = useState(0);
 
   // Status poll + tcpdump probe. The packet stream itself is owned by the
   // store, so we don't subscribe here — packets keep arriving across screen
@@ -67,6 +73,17 @@ export function CaptureScreen({device}: {device: adb.Device}) {
     listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [packets, tail]);
 
+  // Track the list viewport height so the virtual window covers it.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const measure = () => setViewH(el.clientHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     if (!selected) { setDetail(null); return; }
     let cancelled = false;
@@ -81,6 +98,14 @@ export function CaptureScreen({device}: {device: adb.Device}) {
   // doesn't hide the whole list.
   const parsed = useMemo(() => parseFilter(displayFilter), [displayFilter]);
   const filtered = useMemo(() => packets.filter(parsed.pred), [packets, parsed]);
+
+  // Virtual window over `filtered`. The sticky header occupies the first row, so
+  // offset the inner scroll position by one row height.
+  const total = filtered.length;
+  const innerTop = Math.max(0, scrollTop - CAPTURE_ROW_H);
+  const winStart = Math.max(0, Math.floor(innerTop / CAPTURE_ROW_H) - 16);
+  const winEnd = Math.min(total, Math.ceil((innerTop + (viewH || 600)) / CAPTURE_ROW_H) + 16);
+  const visible = filtered.slice(winStart, winEnd);
 
   const mirrorOpt = MAX_PACKETS_OPTIONS.find(o => o.value === maxPackets) || MAX_PACKETS_OPTIONS[1];
 
@@ -225,21 +250,29 @@ export function CaptureScreen({device}: {device: adb.Device}) {
       )}
 
       <div className='capture-layout'>
-        <div className='capture-list' ref={listRef}>
+        <div className='capture-list' ref={listRef}
+             onScroll={e => { setScrollTop(e.currentTarget.scrollTop); setViewH(e.currentTarget.clientHeight); }}>
           <div className='capture-row capture-head'>
             <span>No</span><span>Time</span><span>Source</span><span>Destination</span><span>Proto</span><span>Len</span><span>Info</span>
           </div>
-          {filtered.map(p => (
-            <div key={p.no} className={`capture-row${selected?.no === p.no ? ' selected' : ''}`} onClick={() => setSelected(p)}>
-              <span className='mono'>{p.no}</span>
-              <span className='mono'>{fmtTime(p.ts)}</span>
-              <span className='mono' title={`${p.srcIP}:${p.srcPort}`}>{p.srcIP}{p.srcPort ? ':' + p.srcPort : ''}</span>
-              <span className='mono' title={`${p.dstIP}:${p.dstPort}`}>{p.dstIP}{p.dstPort ? ':' + p.dstPort : ''}</span>
-              <span><Badge kind={protoBadge(p.proto)}>{p.proto}</Badge></span>
-              <span className='mono'>{p.length}</span>
-              <span className='truncate' title={p.info}>{p.info}</span>
-            </div>
-          ))}
+          <div style={{position: 'relative', height: total * CAPTURE_ROW_H}}>
+            {visible.map((p, idx) => {
+              const i = winStart + idx;
+              return (
+                <div key={p.no} className={`capture-row${selected?.no === p.no ? ' selected' : ''}`}
+                     style={{position: 'absolute', top: i * CAPTURE_ROW_H, left: 0, right: 0}}
+                     onClick={() => setSelected(p)}>
+                  <span className='mono'>{p.no}</span>
+                  <span className='mono'>{fmtTime(p.ts)}</span>
+                  <span className='mono' title={`${p.srcIP}:${p.srcPort}`}>{p.srcIP}{p.srcPort ? ':' + p.srcPort : ''}</span>
+                  <span className='mono' title={`${p.dstIP}:${p.dstPort}`}>{p.dstIP}{p.dstPort ? ':' + p.dstPort : ''}</span>
+                  <span><Badge kind={protoBadge(p.proto)}>{p.proto}</Badge></span>
+                  <span className='mono'>{p.length}</span>
+                  <span className='truncate' title={p.info}>{p.info}</span>
+                </div>
+              );
+            })}
+          </div>
           {filtered.length === 0 && (
             <div className='muted' style={{padding: 16, fontSize: 12}}>
               {active ? 'Waiting for packets…' : packets.length > 0 ? `Display filter matches 0 of ${packets.length.toLocaleString()} packets.` : 'Press Start to begin capturing.'}
