@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +19,12 @@ type ScrcpyManager struct {
 	mu      sync.Mutex
 	procs   map[string]*exec.Cmd // serial → running process
 	binPath string
+	major   int // cached scrcpy major version (0 = not yet probed/unknown)
 }
+
+// scrcpyV2OnlyFlags are options the v1.x CLI rejects; they're stripped unless we
+// confirm scrcpy is v2+. Add future version-gated flags here.
+var scrcpyV2OnlyFlags = map[string]bool{"--video-codec": true}
 
 func NewScrcpyManager() *ScrcpyManager {
 	return &ScrcpyManager{procs: map[string]*exec.Cmd{}}
@@ -160,7 +166,7 @@ func (m *ScrcpyManager) Start(ctx context.Context, serial string, extraArgs []st
 	if err != nil {
 		return err
 	}
-	args := append([]string{"-s", serial}, extraArgs...)
+	args := append([]string{"-s", serial}, m.filterUnsupportedArgs(extraArgs)...)
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin = nil
 	cmd.Stdout = nil
@@ -208,6 +214,62 @@ func (m *ScrcpyManager) Start(ctx context.Context, serial string, extraArgs []st
 	case <-time.After(400 * time.Millisecond):
 		return nil
 	}
+}
+
+// filterUnsupportedArgs drops v2-only flags (and their values) when scrcpy is
+// not confirmed to be v2+. The defaults these flags request (e.g. h264) are
+// already scrcpy's defaults, so v1.x loses nothing but a fatal "unknown option".
+func (m *ScrcpyManager) filterUnsupportedArgs(args []string) []string {
+	if m.majorVersion() >= 2 {
+		return args
+	}
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if scrcpyV2OnlyFlags[args[i]] {
+			i++ // also skip the flag's value
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
+}
+
+// majorVersion returns scrcpy's major version (2 for "scrcpy 2.4"), or 0 when it
+// can't be determined. Cached after the first successful probe.
+func (m *ScrcpyManager) majorVersion() int {
+	m.mu.Lock()
+	cached := m.major
+	m.mu.Unlock()
+	if cached != 0 {
+		return cached
+	}
+	bin, err := m.Binary()
+	if err != nil {
+		return 0
+	}
+	out, _ := exec.Command(bin, "--version").CombinedOutput()
+	v := parseScrcpyMajor(string(out))
+	if v > 0 {
+		m.mu.Lock()
+		m.major = v
+		m.mu.Unlock()
+	}
+	return v
+}
+
+// parseScrcpyMajor extracts the major version from `scrcpy --version` output
+// (first line like "scrcpy 2.4 <https://...>").
+func parseScrcpyMajor(out string) int {
+	fields := strings.Fields(out)
+	for i, f := range fields {
+		if strings.EqualFold(f, "scrcpy") && i+1 < len(fields) {
+			major, _, _ := strings.Cut(fields[i+1], ".")
+			if n, err := strconv.Atoi(major); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // Stop terminates the tracked scrcpy for the serial.
