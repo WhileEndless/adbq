@@ -1,6 +1,9 @@
 # --- Build output ---
 build/bin/
-frontend/dist/
+# Ignore built frontend assets but keep the dir present (via .gitkeep) so the
+# `//go:embed all:frontend/dist` in main.go compiles without a frontend build.
+frontend/dist/*
+!frontend/dist/.gitkeep
 # stray local binaries from `go build` at the repo root
 /adbq
 /adbq.exe
