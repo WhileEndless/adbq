@@ -65,8 +65,9 @@ Tepsi/menü bar / arkaplana gizleme: [`docs/tray-and-background.md`](docs/tray-a
 
 Kısa kurallar:
 
-- Wails CLI **sadece** resmi yolla kurulur:
-  `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- Wails CLI **sadece** resmi yolla ve **pinli sürümle** (CI ile aynı) kurulur:
+  `go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0`
+  (`@latest` kullanma — pinsiz kurulum, ele geçmiş bir release'i çalıştırma riskidir.)
 - Yeni proje açarken yalnızca resmi şablonlar (`vanilla`, `react-ts`, `svelte-ts`, `vue-ts`) kullanılır.
 - `wails.json`, `go.mod`, `frontend/package.json` değişikliklerinin gerekçesi commit mesajında.
 - macOS için `mac.Options{}`, Windows için `windows.Options{}`, Linux için `linux.Options{}` ayrı ayrı yapılandırılır — tek bir blok ile platformlar harmanlanmaz.

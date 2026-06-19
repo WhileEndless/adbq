@@ -32,8 +32,8 @@ Bu komut eksik bağımlılıkları listeler ve nasıl kuracağını söyler. Ye�
 ## 3. Kurulum
 
 ```bash
-# Wails CLI
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# Wails CLI — pinli sürüm (CI ile aynı; @latest pinsizdir, kullanma)
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
 # PATH kontrolü (zsh)
 echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc
