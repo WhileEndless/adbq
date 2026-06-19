@@ -342,13 +342,19 @@ func (a *App) applyFrida(serial string, d *adb.Device, step adb.FridaStep, note 
 		}
 		version = releases[0].Version
 	}
-	// Reuse an already-installed matching server if present.
+	// Reuse an already-installed matching server if present, and note whether a
+	// frida-server is already running so we don't start a second instance.
 	path := ""
+	var running *adb.FridaServer
 	if servers, err := a.client.ListFridaServers(a.ctx, serial); err == nil {
-		for _, s := range servers {
-			if s.Version == version && (s.Arch == "" || s.Arch == arch) {
+		for i := range servers {
+			s := servers[i]
+			if path == "" && s.Version == version && (s.Arch == "" || s.Arch == arch) {
 				path = s.Path
-				break
+			}
+			if s.Active {
+				sc := s
+				running = &sc
 			}
 		}
 	}
@@ -362,6 +368,12 @@ func (a *App) applyFrida(serial string, d *adb.Device, step adb.FridaStep, note 
 	}
 	if !step.Start {
 		return adb.StepResult{Name: "frida", Status: "ok", Message: "installed " + version + " (" + arch + ")"}
+	}
+	// Already up — don't launch a second instance (it would just collide on the
+	// port). Idempotent: "apply" on a device that already has frida running is a
+	// no-op for this step.
+	if running != nil {
+		return adb.StepResult{Name: "frida", Status: "ok", Message: fmt.Sprintf("already running: %s (pid %d, port %d)", running.Name, running.PID, running.Port)}
 	}
 	if !d.Root {
 		return adb.StepResult{Name: "frida", Status: "skip", Message: "installed " + version + "; starting needs root"}

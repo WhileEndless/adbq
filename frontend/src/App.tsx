@@ -164,10 +164,12 @@ function AppInner() {
     return () => clearInterval(t);
   }, [reload]);
 
-  // Profile auto-apply: on a genuine offline→online transition, if the device
-  // has a bound profile, prompt to apply it (confirm-first, never silent). Also
-  // keep the device history fresh. First sight (undefined→online) only records
-  // state — we don't prompt on app launch for already-connected devices.
+  // Profile auto-apply: whenever a device becomes available (plugged in,
+  // reconnected, or already connected when the app opened), if it has a bound
+  // profile, prompt to apply it (confirm-first — never silent, always
+  // dismissable). `was !== true` = "wasn't already known-online", covering a
+  // freshly plugged device (first appearance `undefined`) as well as a
+  // reconnect (`false`); the steady state (`true`) is left alone.
   useEffect(() => {
     for (const d of devices) {
       const key = deviceKey(d);
@@ -177,19 +179,19 @@ function AppInner() {
       if (was === undefined || was !== d.online) {
         API.RegisterDevice(d).catch(() => {});
       }
-      // Warm the cache once when a device appears online (first sight or
-      // reconnect), so the cacheable screens open instantly later.
-      if (d.online && (was === undefined || was === false)) {
+      if (d.online && was !== true) {
+        // Warm the cacheable screens for an instant open later.
         prefetchDeviceData(d);
-      }
-      if (d.online && was === false && !pendingApply.current.has(key)) {
-        pendingApply.current.add(key);
-        API.LookupDeviceProfile(key)
-          .then(pid => {
-            if (pid) enqueueApply(d.id, pid, key);
-            else pendingApply.current.delete(key);
-          })
-          .catch(() => pendingApply.current.delete(key));
+        // Prompt to apply the bound profile, if any.
+        if (!pendingApply.current.has(key)) {
+          pendingApply.current.add(key);
+          API.LookupDeviceProfile(key)
+            .then(pid => {
+              if (pid) enqueueApply(d.id, pid, key);
+              else pendingApply.current.delete(key);
+            })
+            .catch(() => pendingApply.current.delete(key));
+        }
       }
       prevOnline.current[key] = d.online;
     }
