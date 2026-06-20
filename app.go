@@ -1264,6 +1264,64 @@ func (a *App) SetFridaManagedEnabled(v bool) error {
 	return a.frida.SetManagedEnabled(v)
 }
 
+// ─── Frida script library + per-app bindings ───────────────────────────────
+
+// ListFridaScripts returns script metadata (no source), newest-updated first.
+func (a *App) ListFridaScripts() []adb.FridaScript {
+	if a.frida == nil {
+		return nil
+	}
+	return a.frida.ListScripts()
+}
+
+// GetFridaScript returns one script including its source body.
+func (a *App) GetFridaScript(id string) (adb.FridaScript, error) {
+	if a.frida == nil {
+		return adb.FridaScript{}, fmt.Errorf("frida store unavailable")
+	}
+	return a.frida.GetScript(id)
+}
+
+// SaveFridaScript creates (empty id) or updates a script and returns the saved entry.
+func (a *App) SaveFridaScript(s adb.FridaScript) (adb.FridaScript, error) {
+	if a.frida == nil {
+		return adb.FridaScript{}, fmt.Errorf("frida store unavailable")
+	}
+	return a.frida.SaveScript(s)
+}
+
+// DeleteFridaScript removes a script and detaches it from every app binding.
+func (a *App) DeleteFridaScript(id string) error {
+	if a.frida == nil {
+		return fmt.Errorf("frida store unavailable")
+	}
+	return a.frida.DeleteScript(id)
+}
+
+// GetAppFridaScripts returns the scripts bound to a package (device-independent).
+func (a *App) GetAppFridaScripts(pkg string) adb.AppScripts {
+	if a.frida == nil {
+		return adb.AppScripts{Package: pkg, Mode: "spawn", ScriptIDs: []string{}}
+	}
+	return a.frida.GetAppScripts(pkg)
+}
+
+// SetAppFridaScripts replaces a package's script binding (mode: spawn|attach).
+func (a *App) SetAppFridaScripts(pkg string, scriptIDs []string, mode, venvVer string) error {
+	if a.frida == nil {
+		return fmt.Errorf("frida store unavailable")
+	}
+	return a.frida.SetAppScripts(pkg, scriptIDs, mode, venvVer)
+}
+
+// ListAppFridaScripts returns every package→scripts binding for the App Scripts view.
+func (a *App) ListAppFridaScripts() []adb.AppScripts {
+	if a.frida == nil {
+		return nil
+	}
+	return a.frida.ListAppScripts()
+}
+
 // ─── Network ─────────────────────────────────────────────────────────────
 
 func (a *App) GetNetworkInfo(serial string) (*adb.NetworkInfo, error) {

@@ -272,21 +272,31 @@ type fridaRuntimeConfig struct {
 	External       []FridaRuntime `json:"external"`
 }
 
-// FridaStore persists host-runtime config (runtime.json) and owns managed-venv
-// discovery/creation. Script-library state is added by a later phase.
+// FridaStore persists host-runtime config (runtime.json), the script library
+// (scripts.json + .js sidecars), and per-app script bindings (app-scripts.json),
+// and owns managed-venv discovery/creation. All state is guarded by mu.
 type FridaStore struct {
 	mu       sync.Mutex
 	path     string // runtime.json ("" = in-memory)
 	managed  bool
 	external []FridaRuntime
+
+	// script library (frida_scripts.go)
+	scriptsPath    string
+	appScriptsPath string
+	scriptsDir     string
+	scripts        map[string]FridaScript // id → metadata (source lives in sidecars)
+	appScripts     map[string]AppScripts  // package → binding
+	scriptSeq      int
 }
 
-// NewFridaStore loads runtime.json, degrading to an in-memory store if the
-// config dir is unavailable.
+// NewFridaStore loads runtime.json and the script library, degrading to an
+// in-memory store if the config dir is unavailable.
 func NewFridaStore() (*FridaStore, error) {
 	s := &FridaStore{managed: true}
 	dir, err := fridaDataDir()
 	if err != nil {
+		s.initScripts()
 		return s, nil
 	}
 	s.path = filepath.Join(dir, "runtime.json")
@@ -299,6 +309,7 @@ func NewFridaStore() (*FridaStore, error) {
 			}
 		}
 	}
+	s.initScripts()
 	return s, nil
 }
 

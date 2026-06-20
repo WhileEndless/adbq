@@ -37,14 +37,27 @@ func fridaCacheSub(name string) (string, error) {
 	return d, nil
 }
 
-// fridaDataDir holds Frida config/index JSON (runtime.json, and later
-// scripts.json / app-scripts.json). User-authored → ~/.adbq, atomic writes.
+// fridaDataDir holds Frida config/index JSON (runtime.json, scripts.json,
+// app-scripts.json). User-authored → ~/.adbq, atomic writes.
 func fridaDataDir() (string, error) {
 	base, err := configDir()
 	if err != nil {
 		return "", err
 	}
 	d := filepath.Join(base, "frida")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		return "", err
+	}
+	return d, nil
+}
+
+// fridaScriptsDir holds the script library bodies (.js). User-authored → ~/.adbq.
+func fridaScriptsDir() (string, error) {
+	base, err := fridaDataDir()
+	if err != nil {
+		return "", err
+	}
+	d := filepath.Join(base, "scripts")
 	if err := os.MkdirAll(d, 0o755); err != nil {
 		return "", err
 	}

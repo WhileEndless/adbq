@@ -5,6 +5,7 @@ import {EventsOn, EventsOff} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
 import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
+import {CodeEditor} from '../components/CodeEditor';
 
 export function FridaScreen({device}: {device: adb.Device}) {
   const store = useStore();
@@ -13,7 +14,7 @@ export function FridaScreen({device}: {device: adb.Device}) {
   const [iface, setIface] = useState('0.0.0.0');
   const [starting, setStarting] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
-  const [tab, setTab] = useState<'server' | 'runtime'>('server');
+  const [tab, setTab] = useState<'server' | 'runtime' | 'scripts'>('server');
 
   // One-click install modal state.
   const [installOpen, setInstallOpen] = useState(false);
@@ -146,6 +147,7 @@ export function FridaScreen({device}: {device: adb.Device}) {
         <div style={{display: 'flex', gap: 4, marginLeft: 8}}>
           <button className={`btn sm${tab === 'server' ? ' primary' : ''}`} onClick={() => setTab('server')}>Server</button>
           <button className={`btn sm${tab === 'runtime' ? ' primary' : ''}`} onClick={() => setTab('runtime')}>Runtime</button>
+          <button className={`btn sm${tab === 'scripts' ? ' primary' : ''}`} onClick={() => setTab('scripts')}>Scripts</button>
         </div>
         <div className='spacer' style={{flex: 1}}/>
         {tab === 'server' && <>
@@ -249,8 +251,10 @@ export function FridaScreen({device}: {device: adb.Device}) {
             </tbody>
           </table>
         </div>
-        </>) : (
+        </>) : tab === 'runtime' ? (
           <FridaRuntimeTab device={device}/>
+        ) : (
+          <FridaScriptsTab/>
         )}
       </div>
 
@@ -465,6 +469,108 @@ function FridaRuntimeTab({device}: {device: adb.Device}) {
             “Bring your own frida”: install <span className='mono'>frida</span> yourself (e.g. <span className='mono'>pip install frida=={deviceVer || 'X.Y.Z'}</span>) and point adbq at that interpreter — adbq installs nothing.
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// FridaScriptsTab is the device-independent script library: a list on the left,
+// a CodeMirror editor on the right. Create / view / edit / save / delete.
+function FridaScriptsTab() {
+  const [scripts, setScripts] = useState<adb.FridaScript[]>([]);
+  const [selId, setSelId] = useState('');
+  const [draft, setDraft] = useState<adb.FridaScript | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const reload = (select?: string) => {
+    API.ListFridaScripts().then(list => {
+      setScripts(list || []);
+      if (select !== undefined) setSelId(select);
+    }).catch(e => showToast({title: 'List scripts failed', body: String(e), kind: 'err'}));
+  };
+  useEffect(() => { reload(); }, []);
+
+  // Load the selected script's source into the editor (skip while editing an
+  // unsaved new script, which has no id yet).
+  useEffect(() => {
+    if (!selId) return;
+    API.GetFridaScript(selId).then(s => { setDraft(s); setDirty(false); }).catch(() => setDraft(null));
+  }, [selId]);
+
+  function newScript() {
+    setSelId('');
+    setDraft(adb.FridaScript.createFrom({name: 'New script', origin: 'local', trusted: true, source: '// Frida script\n'}));
+    setDirty(true);
+  }
+
+  function save() {
+    if (!draft || !draft.name.trim()) { showToast({title: 'Name required', body: 'Give the script a name before saving.', kind: 'info'}); return; }
+    setSaving(true);
+    API.SaveFridaScript(draft)
+      .then(saved => { showToast({title: 'Saved', body: saved.name, kind: 'ok'}); setDraft(saved); setSelId(saved.id); setDirty(false); reload(); })
+      .catch(e => showToast({title: 'Save failed', body: String(e), kind: 'err'}))
+      .finally(() => setSaving(false));
+  }
+
+  function remove(s: adb.FridaScript) {
+    confirmDialog({title: `Delete “${s.name}”?`, body: 'Removes the script and detaches it from any apps.', confirmLabel: 'Delete', danger: true}).then(ok => {
+      if (!ok) return;
+      API.DeleteFridaScript(s.id).then(() => {
+        if (selId === s.id) { setSelId(''); setDraft(null); }
+        reload();
+      }).catch(e => showToast({title: 'Delete failed', body: String(e), kind: 'err'}));
+    });
+  }
+
+  return (
+    <div style={{height: '100%', display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) minmax(0, 1fr)', gap: 12, minHeight: 0}}>
+      <div style={{display: 'flex', flexDirection: 'column', minHeight: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden'}}>
+        <div style={{display: 'flex', alignItems: 'center', gap: 6, padding: 8, borderBottom: '1px solid var(--border)'}}>
+          <span className='title' style={{fontSize: 12}}>Library</span>
+          <span className='subtle' style={{fontSize: 11}}>{scripts.length}</span>
+          <div style={{flex: 1}}/>
+          <button className='btn sm primary' onClick={newScript}><Icon.Plus width={12} height={12}/>New</button>
+        </div>
+        <div style={{flex: 1, overflow: 'auto', minHeight: 0}}>
+          {scripts.length === 0 && <div className='muted' style={{padding: 12, fontSize: 12}}>No scripts yet. Click <strong>New</strong> to create one.</div>}
+          {scripts.map(s => (
+            <div key={s.id} onClick={() => setSelId(s.id)}
+                 style={{padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', background: selId === s.id ? 'var(--accent-soft)' : undefined}}>
+              <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+                <span style={{fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{s.name}</span>
+                {s.origin === 'codeshare' && <Badge>CS</Badge>}
+              </div>
+              {s.description && <div className='subtle' style={{fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{s.description}</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{display: 'flex', flexDirection: 'column', minHeight: 0, gap: 8}}>
+        {draft ? (<>
+          <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+            <input className='input' style={{flex: 1, fontWeight: 600}} value={draft.name} placeholder='Script name'
+                   onChange={e => { setDraft({...draft, name: e.target.value} as adb.FridaScript); setDirty(true); }}/>
+            <button className='btn primary' onClick={save} disabled={saving || !dirty}>{saving ? '…saving' : <><Icon.Check/>Save</>}</button>
+            {draft.id !== '' && <button className='btn danger' onClick={() => remove(draft)} title='Delete'><Icon.Trash/></button>}
+          </div>
+          <input className='input' style={{fontSize: 12}} value={draft.description} placeholder='Short description (optional)'
+                 onChange={e => { setDraft({...draft, description: e.target.value} as adb.FridaScript); setDirty(true); }}/>
+          {draft.origin === 'codeshare' && draft.codeshareOwner && (
+            <div className='muted' style={{fontSize: 11, display: 'flex', alignItems: 'center', gap: 6}}>
+              From CodeShare: <span className='mono'>@{draft.codeshareOwner}/{draft.codeshareSlug}</span>
+              {!draft.trusted && <Badge kind='warn'>untrusted</Badge>}
+            </div>
+          )}
+          <div style={{flex: 1, minHeight: 0}}>
+            <CodeEditor value={draft.source || ''} onChange={v => { setDraft(d => d ? ({...d, source: v} as adb.FridaScript) : d); setDirty(true); }}/>
+          </div>
+        </>) : (
+          <div className='muted' style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13}}>
+            Select a script, or click&nbsp;<strong>New</strong>&nbsp;to create one.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -53,6 +53,8 @@ export function DNSLookup(arg1:string,arg2:string):Promise<string>;
 
 export function DeleteFile(arg1:string,arg2:string,arg3:boolean,arg4:boolean):Promise<string>;
 
+export function DeleteFridaScript(arg1:string):Promise<void>;
+
 export function DeleteIptablesChain(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function DeleteIptablesRule(arg1:string,arg2:string,arg3:string,arg4:string,arg5:number):Promise<adb.IPTSnapshot>;
@@ -91,6 +93,10 @@ export function FridaHost():Promise<adb.FridaHostInfo>;
 
 export function FridaManagedEnabled():Promise<boolean>;
 
+export function GetAppFridaScripts(arg1:string):Promise<adb.AppScripts>;
+
+export function GetFridaScript(arg1:string):Promise<adb.FridaScript>;
+
 export function GetNetworkInfo(arg1:string):Promise<adb.NetworkInfo>;
 
 export function GetProfile(arg1:string):Promise<adb.Profile>;
@@ -123,6 +129,8 @@ export function KillExternalCapture(arg1:string):Promise<adb.CaptureState>;
 
 export function LaunchApp(arg1:string,arg2:string):Promise<string>;
 
+export function ListAppFridaScripts():Promise<Array<adb.AppScripts>>;
+
 export function ListApps(arg1:string,arg2:boolean):Promise<Array<adb.App>>;
 
 export function ListCACerts(arg1:string):Promise<Array<adb.CACert>>;
@@ -140,6 +148,8 @@ export function ListForwards(arg1:string):Promise<Array<adb.Forward>>;
 export function ListFridaReleases(arg1:string,arg2:string):Promise<Array<adb.FridaRelease>>;
 
 export function ListFridaRuntimes():Promise<Array<adb.FridaRuntime>>;
+
+export function ListFridaScripts():Promise<Array<adb.FridaScript>>;
 
 export function ListFridaServers(arg1:string):Promise<Array<adb.FridaServer>>;
 
@@ -217,6 +227,8 @@ export function RunCommand(arg1:string,arg2:string):Promise<string>;
 
 export function RunCommandRoot(arg1:string,arg2:string):Promise<string>;
 
+export function SaveFridaScript(arg1:adb.FridaScript):Promise<adb.FridaScript>;
+
 export function SaveHostsConfig(arg1:string,arg2:string):Promise<void>;
 
 export function SaveLivePcap(arg1:string):Promise<string>;
@@ -230,6 +242,8 @@ export function ScrcpyActive(arg1:string):Promise<boolean>;
 export function ScrcpyAvailable():Promise<boolean>;
 
 export function ScreenRecord(arg1:string,arg2:number):Promise<string>;
+
+export function SetAppFridaScripts(arg1:string,arg2:Array<string>,arg3:string,arg4:string):Promise<void>;
 
 export function SetFridaManagedEnabled(arg1:boolean):Promise<void>;
 

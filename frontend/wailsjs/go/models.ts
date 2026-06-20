@@ -146,6 +146,24 @@ export namespace adb {
 	        this.pid = source["pid"];
 	    }
 	}
+	export class AppScripts {
+	    package: string;
+	    scriptIds: string[];
+	    mode: string;
+	    venvVer?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppScripts(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.package = source["package"];
+	        this.scriptIds = source["scriptIds"];
+	        this.mode = source["mode"];
+	        this.venvVer = source["venvVer"];
+	    }
+	}
 	export class StepResult {
 	    name: string;
 	    status: string;
@@ -592,6 +610,38 @@ export namespace adb {
 	        this.fridaVersion = source["fridaVersion"];
 	        this.pythonVersion = source["pythonVersion"];
 	        this.addedAt = source["addedAt"];
+	    }
+	}
+	export class FridaScript {
+	    id: string;
+	    name: string;
+	    description: string;
+	    origin: string;
+	    codeshareOwner?: string;
+	    codeshareSlug?: string;
+	    sourceSha?: string;
+	    trusted: boolean;
+	    createdAt: number;
+	    updatedAt: number;
+	    source?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FridaScript(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.origin = source["origin"];
+	        this.codeshareOwner = source["codeshareOwner"];
+	        this.codeshareSlug = source["codeshareSlug"];
+	        this.sourceSha = source["sourceSha"];
+	        this.trusted = source["trusted"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.source = source["source"];
 	    }
 	}
 	export class FridaServer {

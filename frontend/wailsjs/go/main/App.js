@@ -102,6 +102,10 @@ export function DeleteFile(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['DeleteFile'](arg1, arg2, arg3, arg4);
 }
 
+export function DeleteFridaScript(arg1) {
+  return window['go']['main']['App']['DeleteFridaScript'](arg1);
+}
+
 export function DeleteIptablesChain(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['DeleteIptablesChain'](arg1, arg2, arg3, arg4);
 }
@@ -178,6 +182,14 @@ export function FridaManagedEnabled() {
   return window['go']['main']['App']['FridaManagedEnabled']();
 }
 
+export function GetAppFridaScripts(arg1) {
+  return window['go']['main']['App']['GetAppFridaScripts'](arg1);
+}
+
+export function GetFridaScript(arg1) {
+  return window['go']['main']['App']['GetFridaScript'](arg1);
+}
+
 export function GetNetworkInfo(arg1) {
   return window['go']['main']['App']['GetNetworkInfo'](arg1);
 }
@@ -242,6 +254,10 @@ export function LaunchApp(arg1, arg2) {
   return window['go']['main']['App']['LaunchApp'](arg1, arg2);
 }
 
+export function ListAppFridaScripts() {
+  return window['go']['main']['App']['ListAppFridaScripts']();
+}
+
 export function ListApps(arg1, arg2) {
   return window['go']['main']['App']['ListApps'](arg1, arg2);
 }
@@ -276,6 +292,10 @@ export function ListFridaReleases(arg1, arg2) {
 
 export function ListFridaRuntimes() {
   return window['go']['main']['App']['ListFridaRuntimes']();
+}
+
+export function ListFridaScripts() {
+  return window['go']['main']['App']['ListFridaScripts']();
 }
 
 export function ListFridaServers(arg1) {
@@ -430,6 +450,10 @@ export function RunCommandRoot(arg1, arg2) {
   return window['go']['main']['App']['RunCommandRoot'](arg1, arg2);
 }
 
+export function SaveFridaScript(arg1) {
+  return window['go']['main']['App']['SaveFridaScript'](arg1);
+}
+
 export function SaveHostsConfig(arg1, arg2) {
   return window['go']['main']['App']['SaveHostsConfig'](arg1, arg2);
 }
@@ -456,6 +480,10 @@ export function ScrcpyAvailable() {
 
 export function ScreenRecord(arg1, arg2) {
   return window['go']['main']['App']['ScreenRecord'](arg1, arg2);
+}
+
+export function SetAppFridaScripts(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SetAppFridaScripts'](arg1, arg2, arg3, arg4);
 }
 
 export function SetFridaManagedEnabled(arg1) {
