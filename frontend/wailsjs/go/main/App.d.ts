@@ -25,6 +25,8 @@ export function BindDeviceProfile(arg1:string,arg2:string):Promise<void>;
 
 export function BindDeviceProfileByKey(arg1:string,arg2:string):Promise<void>;
 
+export function BrowseCodeshare(arg1:number):Promise<Array<adb.CodeshareProject>>;
+
 export function CancelTask(arg1:string):Promise<void>;
 
 export function CaptureProfileFromDevice(arg1:string,arg2:string):Promise<adb.Profile>;
@@ -95,6 +97,8 @@ export function FridaManagedEnabled():Promise<boolean>;
 
 export function GetAppFridaScripts(arg1:string):Promise<adb.AppScripts>;
 
+export function GetCodeshareScript(arg1:string,arg2:string):Promise<adb.CodeshareScript>;
+
 export function GetFridaScript(arg1:string):Promise<adb.FridaScript>;
 
 export function GetNetworkInfo(arg1:string):Promise<adb.NetworkInfo>;
@@ -108,6 +112,8 @@ export function GetStats(arg1:string):Promise<adb.Stats>;
 export function HostLANIPs(arg1:string):Promise<Array<string>>;
 
 export function HostsDrifted(arg1:string):Promise<boolean>;
+
+export function ImportCodeshareScript(arg1:string,arg2:string):Promise<adb.FridaScript>;
 
 export function ImportIptables(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -242,6 +248,8 @@ export function ScrcpyActive(arg1:string):Promise<boolean>;
 export function ScrcpyAvailable():Promise<boolean>;
 
 export function ScreenRecord(arg1:string,arg2:number):Promise<string>;
+
+export function SearchCodeshare(arg1:string):Promise<Array<adb.CodeshareProject>>;
 
 export function SetAppFridaScripts(arg1:string,arg2:Array<string>,arg3:string,arg4:string):Promise<void>;
 

@@ -482,6 +482,7 @@ function FridaScriptsTab() {
   const [draft, setDraft] = useState<adb.FridaScript | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [csOpen, setCsOpen] = useState(false);
 
   const reload = (select?: string) => {
     API.ListFridaScripts().then(list => {
@@ -530,6 +531,7 @@ function FridaScriptsTab() {
           <span className='title' style={{fontSize: 12}}>Library</span>
           <span className='subtle' style={{fontSize: 11}}>{scripts.length}</span>
           <div style={{flex: 1}}/>
+          <button className='btn sm' onClick={() => setCsOpen(true)} title='Import from Frida CodeShare'><Icon.Globe width={12} height={12}/></button>
           <button className='btn sm primary' onClick={newScript}><Icon.Plus width={12} height={12}/>New</button>
         </div>
         <div style={{flex: 1, overflow: 'auto', minHeight: 0}}>
@@ -572,7 +574,106 @@ function FridaScriptsTab() {
           </div>
         )}
       </div>
+      <CodeshareModal open={csOpen} onClose={() => setCsOpen(false)} onImported={(s) => { reload(s.id); setCsOpen(false); }}/>
     </div>
+  );
+}
+
+// CodeshareModal lets the user search Frida CodeShare, preview a script's source
+// (untrusted — shown read-only, never executed), and import it into the library.
+function CodeshareModal({open, onClose, onImported}: {open: boolean; onClose: () => void; onImported: (s: adb.FridaScript) => void}) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<adb.CodeshareProject[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [preview, setPreview] = useState<adb.CodeshareScript | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  // Load the popular listing when the modal first opens.
+  useEffect(() => {
+    if (open && results.length === 0 && !q) search('');
+    if (!open) { setPreview(null); setErr(''); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  function search(query: string) {
+    setLoading(true);
+    setErr('');
+    API.SearchCodeshare(query)
+      .then(r => setResults(r || []))
+      .catch(e => { setErr(String(e)); setResults([]); })
+      .finally(() => setLoading(false));
+  }
+
+  function openPreview(p: adb.CodeshareProject) {
+    setPreview(null);
+    setErr('');
+    API.GetCodeshareScript(p.owner, p.slug)
+      .then(setPreview)
+      .catch(e => setErr(String(e)));
+  }
+
+  function doImport(p: {owner: string; slug: string}) {
+    setImporting(true);
+    API.ImportCodeshareScript(p.owner, p.slug)
+      .then(s => { showToast({title: 'Imported (untrusted)', body: s.name, kind: 'ok'}); onImported(s); })
+      .catch(e => showToast({title: 'Import failed', body: String(e), kind: 'err'}))
+      .finally(() => setImporting(false));
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title='Frida CodeShare' width={760}
+      footer={<button className='btn' onClick={onClose}>Close</button>}>
+      {!preview ? (
+        <div style={{display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 480}}>
+          <form style={{display: 'flex', gap: 6}} onSubmit={e => { e.preventDefault(); search(q); }}>
+            <SearchInput value={q} onChange={setQ} placeholder='Search CodeShare (e.g. ssl pinning)…'/>
+            <button className='btn primary' type='submit'><Icon.Search/>Search</button>
+          </form>
+          {loading && <div className='muted' style={{padding: 16, textAlign: 'center'}}>Loading…</div>}
+          {err && <div className='card' style={{padding: 10, borderColor: 'var(--err)', fontSize: 12, color: 'var(--err)'}}>{err}</div>}
+          <div style={{display: 'flex', flexDirection: 'column', gap: 4, overflow: 'auto'}}>
+            {!loading && results.length === 0 && !err && (
+              <div className='muted' style={{padding: 16, textAlign: 'center', fontSize: 12}}>
+                No results. CodeShare discovery relies on its website; you can still import by exact <span className='mono'>owner/slug</span> from a project URL.
+              </div>
+            )}
+            {results.map(r => (
+              <div key={`${r.owner}/${r.slug}`} className='frida-server-row' style={{cursor: 'pointer'}} onClick={() => openPreview(r)}>
+                <div style={{minWidth: 0}}>
+                  <div className='meta-row'><strong style={{overflow: 'hidden', textOverflow: 'ellipsis'}}>{r.title || r.slug}</strong></div>
+                  <div className='filename'>@{r.owner}/{r.slug}</div>
+                </div>
+                <div style={{flex: 1}}/>
+                <span className='subtle' style={{fontSize: 11, whiteSpace: 'nowrap'}}>♥ {r.likes || '0'} · 👁 {r.views || '0'}</span>
+                <button className='btn sm' onClick={e => { e.stopPropagation(); openPreview(r); }}>View</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+          <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+            <button className='btn sm' onClick={() => setPreview(null)}>← Back</button>
+            <div style={{minWidth: 0}}>
+              <div style={{fontWeight: 600}}>{preview.projectName || preview.slug}</div>
+              <div className='subtle mono' style={{fontSize: 11}}>@{preview.owner}/{preview.slug}{preview.fridaVersion ? ` · author's frida ${preview.fridaVersion}` : ''}</div>
+            </div>
+            <div style={{flex: 1}}/>
+            <button className='btn primary' onClick={() => doImport(preview)} disabled={importing}>
+              {importing ? '…importing' : <><Icon.Download/>Import</>}
+            </button>
+          </div>
+          {preview.description && <div className='muted' style={{fontSize: 12}}>{preview.description}</div>}
+          <div style={{color: 'var(--warn)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6}}>
+            <Icon.Shield width={13} height={13}/> Untrusted code from a third party. Review it before running it against any app.
+          </div>
+          <div style={{height: 320, minHeight: 0}}>
+            <CodeEditor value={preview.source} readOnly/>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

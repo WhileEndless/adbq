@@ -320,6 +320,52 @@ export namespace adb {
 	        this.subject = source["subject"];
 	    }
 	}
+	export class CodeshareProject {
+	    owner: string;
+	    slug: string;
+	    title: string;
+	    likes: string;
+	    views: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CodeshareProject(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.owner = source["owner"];
+	        this.slug = source["slug"];
+	        this.title = source["title"];
+	        this.likes = source["likes"];
+	        this.views = source["views"];
+	    }
+	}
+	export class CodeshareScript {
+	    owner: string;
+	    slug: string;
+	    projectName: string;
+	    description: string;
+	    fridaVersion: string;
+	    likes: number;
+	    source: string;
+	    sourceSha: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CodeshareScript(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.owner = source["owner"];
+	        this.slug = source["slug"];
+	        this.projectName = source["projectName"];
+	        this.description = source["description"];
+	        this.fridaVersion = source["fridaVersion"];
+	        this.likes = source["likes"];
+	        this.source = source["source"];
+	        this.sourceSha = source["sourceSha"];
+	    }
+	}
 	export class Connection {
 	    proto: string;
 	    local: string;

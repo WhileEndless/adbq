@@ -1322,6 +1322,38 @@ func (a *App) ListAppFridaScripts() []adb.AppScripts {
 	return a.frida.ListAppScripts()
 }
 
+// ─── Frida CodeShare ───────────────────────────────────────────────────────
+
+// SearchCodeshare returns CodeShare discovery results for a query (empty =
+// browse the popular listing). Results carry owner/slug for a follow-up fetch.
+func (a *App) SearchCodeshare(query string) ([]adb.CodeshareProject, error) {
+	return adb.CodeshareSearch(a.ctx, query)
+}
+
+// BrowseCodeshare returns one page of the CodeShare popular/browse listing.
+func (a *App) BrowseCodeshare(page int) ([]adb.CodeshareProject, error) {
+	return adb.CodeshareBrowse(a.ctx, page)
+}
+
+// GetCodeshareScript fetches a CodeShare project's metadata + source (for the
+// review-before-import preview). The source is untrusted until the user saves it.
+func (a *App) GetCodeshareScript(owner, slug string) (*adb.CodeshareScript, error) {
+	return adb.CodeshareGetProject(a.ctx, owner, slug)
+}
+
+// ImportCodeshareScript fetches a CodeShare project and saves it into the library
+// as an untrusted script (updating in place if already imported).
+func (a *App) ImportCodeshareScript(owner, slug string) (adb.FridaScript, error) {
+	if a.frida == nil {
+		return adb.FridaScript{}, fmt.Errorf("frida store unavailable")
+	}
+	cs, err := adb.CodeshareGetProject(a.ctx, owner, slug)
+	if err != nil {
+		return adb.FridaScript{}, err
+	}
+	return a.frida.ImportCodeshare(cs)
+}
+
 // ─── Network ─────────────────────────────────────────────────────────────
 
 func (a *App) GetNetworkInfo(serial string) (*adb.NetworkInfo, error) {

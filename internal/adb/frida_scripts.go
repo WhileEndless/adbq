@@ -1,13 +1,23 @@
 package adb
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
+
+// sha256Hex returns the hex-encoded SHA256 of a string. Used to fingerprint
+// CodeShare script sources so re-fetches can detect upstream changes.
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
 
 // Frida script library: user-authored (or CodeShare-imported) JS instrumentation
 // scripts and the per-app bindings that say which scripts to load when launching
@@ -191,6 +201,44 @@ func (s *FridaStore) DeleteScript(id string) error {
 		_ = s.saveAppScripts()
 	}
 	return s.saveScriptsIndex()
+}
+
+// ImportCodeshare saves a fetched CodeShare project into the library as an
+// untrusted script (the user reviews and trusts it explicitly afterwards). If a
+// script from the same owner/slug already exists, it is updated in place so
+// "check for update" re-imports rather than duplicating.
+func (s *FridaStore) ImportCodeshare(cs *CodeshareScript) (FridaScript, error) {
+	if cs == nil {
+		return FridaScript{}, fmt.Errorf("nil codeshare script")
+	}
+	name := cs.ProjectName
+	if name == "" {
+		name = cs.Slug
+	}
+	desc := cs.Description
+	if cs.FridaVersion != "" {
+		desc = strings.TrimSpace(desc + " (author's frida " + cs.FridaVersion + ")")
+	}
+	s.mu.Lock()
+	var existingID string
+	for id, sc := range s.scripts {
+		if sc.Origin == "codeshare" && sc.CodeshareOwner == cs.Owner && sc.CodeshareSlug == cs.Slug {
+			existingID = id
+			break
+		}
+	}
+	s.mu.Unlock()
+	return s.SaveScript(FridaScript{
+		ID:             existingID,
+		Name:           name,
+		Description:    desc,
+		Origin:         "codeshare",
+		CodeshareOwner: cs.Owner,
+		CodeshareSlug:  cs.Slug,
+		SourceSha:      cs.SourceSha,
+		Trusted:        false, // imported source is untrusted until the user confirms
+		Source:         cs.Source,
+	})
 }
 
 // ─── per-app bindings (package-keyed, device-independent) ───────────────────

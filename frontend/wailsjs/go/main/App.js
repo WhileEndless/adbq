@@ -46,6 +46,10 @@ export function BindDeviceProfileByKey(arg1, arg2) {
   return window['go']['main']['App']['BindDeviceProfileByKey'](arg1, arg2);
 }
 
+export function BrowseCodeshare(arg1) {
+  return window['go']['main']['App']['BrowseCodeshare'](arg1);
+}
+
 export function CancelTask(arg1) {
   return window['go']['main']['App']['CancelTask'](arg1);
 }
@@ -186,6 +190,10 @@ export function GetAppFridaScripts(arg1) {
   return window['go']['main']['App']['GetAppFridaScripts'](arg1);
 }
 
+export function GetCodeshareScript(arg1, arg2) {
+  return window['go']['main']['App']['GetCodeshareScript'](arg1, arg2);
+}
+
 export function GetFridaScript(arg1) {
   return window['go']['main']['App']['GetFridaScript'](arg1);
 }
@@ -212,6 +220,10 @@ export function HostLANIPs(arg1) {
 
 export function HostsDrifted(arg1) {
   return window['go']['main']['App']['HostsDrifted'](arg1);
+}
+
+export function ImportCodeshareScript(arg1, arg2) {
+  return window['go']['main']['App']['ImportCodeshareScript'](arg1, arg2);
 }
 
 export function ImportIptables(arg1, arg2, arg3) {
@@ -480,6 +492,10 @@ export function ScrcpyAvailable() {
 
 export function ScreenRecord(arg1, arg2) {
   return window['go']['main']['App']['ScreenRecord'](arg1, arg2);
+}
+
+export function SearchCodeshare(arg1) {
+  return window['go']['main']['App']['SearchCodeshare'](arg1);
 }
 
 export function SetAppFridaScripts(arg1, arg2, arg3, arg4) {
