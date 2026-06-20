@@ -185,3 +185,36 @@ func (c *Client) StopFrida(ctx context.Context, serial string) (string, error) {
 	out, _, err := c.ShellSU(ctx, serial, script)
 	return out, err
 }
+
+// DetectRunningFridaVersion returns the version of the frida-server currently
+// running on the device. It asks the live binary itself (`<exe> --version`),
+// which is authoritative — unlike the on-disk filename, which a user can rename
+// or which can lie about the real build. The host-side `frida` client must match
+// this version, so it drives the venv pin. Falls back to the active server's
+// filename-derived version only when the probe yields nothing.
+func (c *Client) DetectRunningFridaVersion(ctx context.Context, serial string) (string, error) {
+	procs := c.runningFrida(ctx, serial)
+	for _, p := range procs {
+		bin := p.exe
+		if bin == "" {
+			bin = p.cmd0
+		}
+		if bin == "" {
+			continue
+		}
+		out, _, _ := c.ShellSU(ctx, serial, shQuote(bin)+" --version")
+		if v := parseVersionToken(out); v != "" {
+			return v, nil
+		}
+	}
+	servers, _ := c.ListFridaServers(ctx, serial)
+	for _, s := range servers {
+		if s.Active && s.Version != "" {
+			return s.Version, nil
+		}
+	}
+	if len(procs) == 0 {
+		return "", fmt.Errorf("no running frida-server detected on the device — start one first")
+	}
+	return "", fmt.Errorf("could not determine the running frida-server version")
+}

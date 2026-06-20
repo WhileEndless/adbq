@@ -1,0 +1,61 @@
+{
+  "info": { "version": "17.15.0" },
+  "urls": [
+    {
+      "filename": "frida-17.15.0-cp37-abi3-macosx_10_13_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/aa/frida-17.15.0-cp37-abi3-macosx_10_13_x86_64.whl",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp37",
+      "yanked": false,
+      "digests": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111" }
+    },
+    {
+      "filename": "frida-17.15.0-cp37-abi3-macosx_11_0_arm64.whl",
+      "url": "https://files.pythonhosted.org/packages/bb/frida-17.15.0-cp37-abi3-macosx_11_0_arm64.whl",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp37",
+      "yanked": false,
+      "digests": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222" }
+    },
+    {
+      "filename": "frida-17.15.0-cp37-abi3-manylinux1_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/cc/frida-17.15.0-cp37-abi3-manylinux1_x86_64.whl",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp37",
+      "yanked": false,
+      "digests": { "sha256": "3333333333333333333333333333333333333333333333333333333333333333" }
+    },
+    {
+      "filename": "frida-17.15.0-cp37-abi3-manylinux2014_aarch64.whl",
+      "url": "https://files.pythonhosted.org/packages/dd/frida-17.15.0-cp37-abi3-manylinux2014_aarch64.whl",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp37",
+      "yanked": false,
+      "digests": { "sha256": "4444444444444444444444444444444444444444444444444444444444444444" }
+    },
+    {
+      "filename": "frida-17.15.0-cp37-abi3-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/ee/frida-17.15.0-cp37-abi3-win_amd64.whl",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp37",
+      "yanked": false,
+      "digests": { "sha256": "5555555555555555555555555555555555555555555555555555555555555555" }
+    },
+    {
+      "filename": "frida-17.15.0-cp37-abi3-win32.whl",
+      "url": "https://files.pythonhosted.org/packages/ff/frida-17.15.0-cp37-abi3-win32.whl",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp37",
+      "yanked": true,
+      "digests": { "sha256": "6666666666666666666666666666666666666666666666666666666666666666" }
+    },
+    {
+      "filename": "frida-17.15.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/99/frida-17.15.0.tar.gz",
+      "packagetype": "sdist",
+      "python_version": "source",
+      "yanked": false,
+      "digests": { "sha256": "7777777777777777777777777777777777777777777777777777777777777777" }
+    }
+  ]
+}

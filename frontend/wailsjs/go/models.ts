@@ -528,6 +528,26 @@ export namespace adb {
 	        this.supported = source["supported"];
 	    }
 	}
+	export class FridaHostInfo {
+	    available: boolean;
+	    pythonPath: string;
+	    pythonVersion: string;
+	    hasVenv: boolean;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FridaHostInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.pythonPath = source["pythonPath"];
+	        this.pythonVersion = source["pythonVersion"];
+	        this.hasVenv = source["hasVenv"];
+	        this.error = source["error"];
+	    }
+	}
 	export class FridaRelease {
 	    version: string;
 	    arch: string;
@@ -548,6 +568,30 @@ export namespace adb {
 	        this.size = source["size"];
 	        this.sha256 = source["sha256"];
 	        this.installed = source["installed"];
+	    }
+	}
+	export class FridaRuntime {
+	    id: string;
+	    kind: string;
+	    label: string;
+	    pythonPath: string;
+	    fridaVersion: string;
+	    pythonVersion: string;
+	    addedAt?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FridaRuntime(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.kind = source["kind"];
+	        this.label = source["label"];
+	        this.pythonPath = source["pythonPath"];
+	        this.fridaVersion = source["fridaVersion"];
+	        this.pythonVersion = source["pythonVersion"];
+	        this.addedAt = source["addedAt"];
 	    }
 	}
 	export class FridaServer {

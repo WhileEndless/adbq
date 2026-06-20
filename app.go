@@ -46,6 +46,7 @@ type App struct {
 	sessions *adb.SessionStore
 	icons    *adb.IconCache
 	profiles *adb.ProfileStore
+	frida    *adb.FridaStore
 
 	dnsMu   sync.Mutex
 	dnsSnif map[string]*adb.DNSSnifferStream
@@ -57,6 +58,7 @@ type App struct {
 func NewApp() *App {
 	store, _ := adb.NewSessionStore()
 	profiles, _ := adb.NewProfileStore()
+	frida, _ := adb.NewFridaStore()
 	return &App{
 		client:      adb.NewClient(),
 		tasks:       adb.NewTaskManager(),
@@ -68,6 +70,7 @@ func NewApp() *App {
 		sessions:    store,
 		icons:       adb.NewIconCache(),
 		profiles:    profiles,
+		frida:       frida,
 		dnsSnif:     map[string]*adb.DNSSnifferStream{},
 		procStreams: map[string]*adb.TopStream{},
 	}
@@ -1175,6 +1178,90 @@ func (a *App) StopFrida(serial string) (string, error) {
 		a.sessions.Remove("frida:" + serial)
 	}
 	return out, err
+}
+
+// ─── Frida host runtime (venvs + external interpreters) ────────────────────
+
+// FridaHost reports whether a usable host Python is present, for the Runtime UI.
+func (a *App) FridaHost() adb.FridaHostInfo {
+	return adb.DetectFridaHost()
+}
+
+// ListFridaRuntimes returns every host runtime able to drive Frida — managed
+// venvs and registered external interpreters — each tagged with its frida version.
+func (a *App) ListFridaRuntimes() []adb.FridaRuntime {
+	if a.frida == nil {
+		return nil
+	}
+	return a.frida.ListRuntimes()
+}
+
+// DetectRunningFridaVersion asks the device's live frida-server for its version
+// (authoritative), so the Runtime UI can offer a matching venv.
+func (a *App) DetectRunningFridaVersion(serial string) (string, error) {
+	return a.client.DetectRunningFridaVersion(a.ctx, serial)
+}
+
+// EnsureFridaVenv provisions (or reuses) a managed venv with frida pinned to the
+// given version: it downloads the single host-matching wheel from PyPI, verifies
+// its SHA256, and installs it offline (pip --no-index --no-deps --only-binary).
+// Progress is streamed via the "frida-venv:progress" event.
+func (a *App) EnsureFridaVenv(version string) (adb.FridaRuntime, error) {
+	if a.frida == nil {
+		return adb.FridaRuntime{}, fmt.Errorf("frida store unavailable")
+	}
+	return a.frida.EnsureVenv(a.ctx, version, func(stage string) {
+		runtime.EventsEmit(a.ctx, "frida-venv:progress", map[string]string{"version": version, "stage": stage})
+	})
+}
+
+// RegisterExternalFrida records a user-provided interpreter/venv path that
+// already has frida installed (bring-your-own). adbq installs nothing; it only
+// reads the frida + Python versions from the path.
+func (a *App) RegisterExternalFrida(path string) (adb.FridaRuntime, error) {
+	if a.frida == nil {
+		return adb.FridaRuntime{}, fmt.Errorf("frida store unavailable")
+	}
+	return a.frida.RegisterExternal(path)
+}
+
+// PickExternalFridaInterpreter opens a file picker for a Python interpreter and
+// registers it as an external runtime (empty result = user cancelled).
+func (a *App) PickExternalFridaInterpreter() (adb.FridaRuntime, error) {
+	if a.frida == nil {
+		return adb.FridaRuntime{}, fmt.Errorf("frida store unavailable")
+	}
+	sel, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select a Python interpreter with frida installed (its venv's bin/python)",
+	})
+	if err != nil {
+		return adb.FridaRuntime{}, err
+	}
+	if strings.TrimSpace(sel) == "" {
+		return adb.FridaRuntime{}, nil
+	}
+	return a.frida.RegisterExternal(sel)
+}
+
+// RemoveFridaRuntime deletes a managed venv or forgets an external interpreter.
+func (a *App) RemoveFridaRuntime(id string) error {
+	if a.frida == nil {
+		return fmt.Errorf("frida store unavailable")
+	}
+	return a.frida.RemoveRuntime(id)
+}
+
+// FridaManagedEnabled reports whether adbq may auto-create managed venvs.
+func (a *App) FridaManagedEnabled() bool {
+	return a.frida != nil && a.frida.ManagedEnabled()
+}
+
+// SetFridaManagedEnabled toggles auto-managed venv installs (off = pure BYO).
+func (a *App) SetFridaManagedEnabled(v bool) error {
+	if a.frida == nil {
+		return fmt.Errorf("frida store unavailable")
+	}
+	return a.frida.SetManagedEnabled(v)
 }
 
 // ─── Network ─────────────────────────────────────────────────────────────

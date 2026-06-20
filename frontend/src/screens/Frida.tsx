@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
+import {EventsOn, EventsOff} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
 import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
@@ -12,6 +13,7 @@ export function FridaScreen({device}: {device: adb.Device}) {
   const [iface, setIface] = useState('0.0.0.0');
   const [starting, setStarting] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [tab, setTab] = useState<'server' | 'runtime'>('server');
 
   // One-click install modal state.
   const [installOpen, setInstallOpen] = useState(false);
@@ -140,15 +142,21 @@ export function FridaScreen({device}: {device: adb.Device}) {
   return (
     <div className='screen'>
       <div className='screen-header'>
-        <h1>Frida {active && <Badge kind='accent'>active</Badge>}</h1>
-        <span className='subtitle mono'>/data/local/tmp · {servers.length} binar{servers.length === 1 ? 'y' : 'ies'}</span>
+        <h1>Frida {active && tab === 'server' && <Badge kind='accent'>active</Badge>}</h1>
+        <div style={{display: 'flex', gap: 4, marginLeft: 8}}>
+          <button className={`btn sm${tab === 'server' ? ' primary' : ''}`} onClick={() => setTab('server')}>Server</button>
+          <button className={`btn sm${tab === 'runtime' ? ' primary' : ''}`} onClick={() => setTab('runtime')}>Runtime</button>
+        </div>
         <div className='spacer' style={{flex: 1}}/>
-        <button className='btn primary' onClick={openInstall}><Icon.Download/>Install server</button>
-        <button className='btn' onClick={pushBinary}><Icon.Upload/>Push binary</button>
-        <button className='btn' onClick={reload}><Icon.Refresh/></button>
-        {active && <button className='btn danger' onClick={stop} disabled={stopping}>{stopping ? '…stopping' : <><Icon.Stop/>Stop</>}</button>}
+        {tab === 'server' && <>
+          <button className='btn primary' onClick={openInstall}><Icon.Download/>Install server</button>
+          <button className='btn' onClick={pushBinary}><Icon.Upload/>Push binary</button>
+          <button className='btn' onClick={reload}><Icon.Refresh/></button>
+          {active && <button className='btn danger' onClick={stop} disabled={stopping}>{stopping ? '…stopping' : <><Icon.Stop/>Stop</>}</button>}
+        </>}
       </div>
       <div className='screen-body'>
+        {tab === 'server' ? (<>
         {/* Active session card */}
         <div className={`card${active ? '' : ''}`} style={{marginBottom: 14, borderColor: active ? 'var(--accent)' : undefined}}>
           <div className='card-header'>
@@ -241,6 +249,9 @@ export function FridaScreen({device}: {device: adb.Device}) {
             </tbody>
           </table>
         </div>
+        </>) : (
+          <FridaRuntimeTab device={device}/>
+        )}
       </div>
 
       <Modal open={installOpen} onClose={() => setInstallOpen(false)} title='Install frida-server' width={620}
@@ -298,6 +309,163 @@ export function FridaScreen({device}: {device: adb.Device}) {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+// FridaRuntimeTab manages the HOST side of Frida: the Python runtime(s) that
+// actually drive instrumentation. Two modes — adbq-managed venvs (pinned to the
+// device's server version, verified wheel, offline install) and user-registered
+// external interpreters ("bring your own frida", adbq installs nothing).
+function FridaRuntimeTab({device}: {device: adb.Device}) {
+  const [host, setHost] = useState<adb.FridaHostInfo | null>(null);
+  const [runtimes, setRuntimes] = useState<adb.FridaRuntime[]>([]);
+  const [deviceVer, setDeviceVer] = useState('');
+  const [detecting, setDetecting] = useState(false);
+  const [installing, setInstalling] = useState('');
+  const [stage, setStage] = useState('');
+  const [extPath, setExtPath] = useState('');
+  const [managed, setManaged] = useState(true);
+
+  const reload = () => {
+    API.ListFridaRuntimes().then(r => setRuntimes(r || [])).catch(() => {});
+    API.FridaManagedEnabled().then(setManaged).catch(() => {});
+  };
+  useEffect(() => {
+    API.FridaHost().then(setHost).catch(() => setHost(null));
+    reload();
+  }, []);
+  useEffect(() => { setDeviceVer(''); }, [device?.id]);
+
+  function detect() {
+    if (!device?.id) return;
+    setDetecting(true);
+    API.DetectRunningFridaVersion(device.id)
+      .then(setDeviceVer)
+      .catch(e => { setDeviceVer(''); showToast({title: 'No running frida-server', body: String(e), kind: 'info'}); })
+      .finally(() => setDetecting(false));
+  }
+
+  function ensure(version: string) {
+    if (!version) return;
+    setInstalling(version);
+    setStage('starting');
+    // Stream install progress; the version pins the event so concurrent
+    // installs don't cross-update each other's stage label.
+    const ev = 'frida-venv:progress';
+    EventsOn(ev, (p: {version: string; stage: string}) => { if (p?.version === version) setStage(p.stage); });
+    API.EnsureFridaVenv(version)
+      .then(rt => { showToast({title: 'Host venv ready', body: `frida ${rt.fridaVersion}`, kind: 'ok', mono: true}); reload(); })
+      .catch(e => showToast({title: 'Venv setup failed', body: String(e), kind: 'err'}))
+      .finally(() => { EventsOff(ev); setInstalling(''); setStage(''); });
+  }
+
+  function addExternal() {
+    const p = extPath.trim();
+    const call = p ? API.RegisterExternalFrida(p) : API.PickExternalFridaInterpreter();
+    call.then(rt => {
+      if (rt && rt.id) { showToast({title: 'Interpreter added', body: `frida ${rt.fridaVersion}`, kind: 'ok', mono: true}); setExtPath(''); reload(); }
+    }).catch(e => showToast({title: 'Could not add interpreter', body: String(e), kind: 'err'}));
+  }
+
+  function remove(rt: adb.FridaRuntime) {
+    confirmDialog({
+      title: rt.kind === 'managed' ? 'Delete managed venv?' : 'Forget interpreter?',
+      body: rt.kind === 'managed' ? `Removes adbq's venv for frida ${rt.fridaVersion}.` : rt.pythonPath,
+      confirmLabel: rt.kind === 'managed' ? 'Delete' : 'Forget', danger: true,
+    }).then(ok => {
+      if (!ok) return;
+      API.RemoveFridaRuntime(rt.id).then(reload).catch(e => showToast({title: 'Remove failed', body: String(e), kind: 'err'}));
+    });
+  }
+
+  function toggleManaged() {
+    const next = !managed;
+    setManaged(next);
+    API.SetFridaManagedEnabled(next).catch(() => setManaged(!next));
+  }
+
+  return (
+    <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+      <div className='card'>
+        <div className='card-header'>
+          <span className='title'>Host Python</span>
+          <div style={{flex: 1}}/>
+          <button className='btn sm' onClick={() => API.FridaHost().then(setHost).catch(() => {})} title='Recheck'><Icon.Refresh/></button>
+        </div>
+        <div className='card-body' style={{fontSize: 12}}>
+          {host?.available ? (
+            <div style={{display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'}}>
+              <Badge kind='ok'>Python {host.pythonVersion}</Badge>
+              <span className='mono subtle'>{host.pythonPath}</span>
+              {!host.hasVenv && <Badge kind='warn'>venv module missing</Badge>}
+            </div>
+          ) : (
+            <div style={{color: 'var(--warn)'}}>{host?.error || 'Checking for a host Python…'}</div>
+          )}
+        </div>
+      </div>
+
+      <div className='card'>
+        <div className='card-header'>
+          <span className='title'>Device frida-server</span>
+          <div style={{flex: 1}}/>
+          <button className='btn sm' onClick={detect} disabled={detecting || !device?.id}>{detecting ? '…detecting' : <><Icon.Refresh/>Detect</>}</button>
+        </div>
+        <div className='card-body' style={{fontSize: 12}}>
+          {deviceVer ? (
+            <div style={{display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'}}>
+              <span>Running server:</span><Badge kind='accent'>frida {deviceVer}</Badge>
+              <div style={{flex: 1}}/>
+              {host?.available && managed && (
+                <button className='btn sm primary' onClick={() => ensure(deviceVer)} disabled={!!installing}>
+                  {installing === deviceVer ? `…${stage || 'installing'}` : <><Icon.Download/>Create matching venv</>}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className='muted'>Click <strong>Detect</strong> to read the running frida-server's version, then create a host venv pinned to it (needs a running server on the device).</div>
+          )}
+        </div>
+      </div>
+
+      <div className='card'>
+        <div className='card-header'>
+          <span className='title'>Host runtimes</span>
+          <span className='subtle' style={{marginLeft: 8, fontSize: 11}}>{runtimes.length} available</span>
+          <div style={{flex: 1}}/>
+          <label className='muted' style={{display: 'flex', alignItems: 'center', gap: 6, fontSize: 11}}>
+            <input type='checkbox' checked={managed} onChange={toggleManaged}/> allow managed installs
+          </label>
+        </div>
+        <div className='card-body' style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+          {runtimes.length === 0 && <div className='muted' style={{fontSize: 12}}>No host runtimes yet. Create a managed venv above, or add your own interpreter below.</div>}
+          {runtimes.map(rt => (
+            <div key={rt.id} className='frida-server-row'>
+              <div>
+                <div className='meta-row'>
+                  <strong>frida {rt.fridaVersion || '?'}</strong>
+                  <Badge kind={rt.kind === 'managed' ? 'accent' : undefined}>{rt.kind}</Badge>
+                  {rt.pythonVersion && <Badge>py {rt.pythonVersion}</Badge>}
+                </div>
+                <div className='filename'>{rt.pythonPath}</div>
+              </div>
+              <div style={{flex: 1}}/>
+              <button className='btn sm danger' onClick={() => remove(rt)} title={rt.kind === 'managed' ? 'Delete venv' : 'Forget'}>
+                <Icon.Trash width={11} height={11}/>
+              </button>
+            </div>
+          ))}
+          <div style={{display: 'flex', gap: 6, marginTop: 6, alignItems: 'center'}}>
+            <input className='input mono' style={{flex: 1}} placeholder='/path/to/venv (or its bin/python) with frida installed'
+                   value={extPath} onChange={e => setExtPath(e.target.value)}/>
+            <button className='btn sm' onClick={addExternal}>{extPath.trim() ? 'Add path' : <><Icon.Upload/>Browse…</>}</button>
+          </div>
+          <div className='muted' style={{fontSize: 11}}>
+            “Bring your own frida”: install <span className='mono'>frida</span> yourself (e.g. <span className='mono'>pip install frida=={deviceVer || 'X.Y.Z'}</span>) and point adbq at that interpreter — adbq installs nothing.
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

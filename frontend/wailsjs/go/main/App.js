@@ -122,6 +122,10 @@ export function DescribeLivePacket(arg1, arg2) {
   return window['go']['main']['App']['DescribeLivePacket'](arg1, arg2);
 }
 
+export function DetectRunningFridaVersion(arg1) {
+  return window['go']['main']['App']['DetectRunningFridaVersion'](arg1);
+}
+
 export function DeviceDetails(arg1) {
   return window['go']['main']['App']['DeviceDetails'](arg1);
 }
@@ -132,6 +136,10 @@ export function DeviceKey(arg1) {
 
 export function DisconnectDevice(arg1) {
   return window['go']['main']['App']['DisconnectDevice'](arg1);
+}
+
+export function EnsureFridaVenv(arg1) {
+  return window['go']['main']['App']['EnsureFridaVenv'](arg1);
 }
 
 export function ExportAPK(arg1, arg2) {
@@ -160,6 +168,14 @@ export function ForceStopApp(arg1, arg2) {
 
 export function FridaArchInfo(arg1) {
   return window['go']['main']['App']['FridaArchInfo'](arg1);
+}
+
+export function FridaHost() {
+  return window['go']['main']['App']['FridaHost']();
+}
+
+export function FridaManagedEnabled() {
+  return window['go']['main']['App']['FridaManagedEnabled']();
 }
 
 export function GetNetworkInfo(arg1) {
@@ -258,6 +274,10 @@ export function ListFridaReleases(arg1, arg2) {
   return window['go']['main']['App']['ListFridaReleases'](arg1, arg2);
 }
 
+export function ListFridaRuntimes() {
+  return window['go']['main']['App']['ListFridaRuntimes']();
+}
+
 export function ListFridaServers(arg1) {
   return window['go']['main']['App']['ListFridaServers'](arg1);
 }
@@ -318,6 +338,10 @@ export function PickAndInstallAPK(arg1) {
   return window['go']['main']['App']['PickAndInstallAPK'](arg1);
 }
 
+export function PickExternalFridaInterpreter() {
+  return window['go']['main']['App']['PickExternalFridaInterpreter']();
+}
+
 export function PlanTcpdumpAutoInstall(arg1) {
   return window['go']['main']['App']['PlanTcpdumpAutoInstall'](arg1);
 }
@@ -370,8 +394,16 @@ export function RegisterDevice(arg1) {
   return window['go']['main']['App']['RegisterDevice'](arg1);
 }
 
+export function RegisterExternalFrida(arg1) {
+  return window['go']['main']['App']['RegisterExternalFrida'](arg1);
+}
+
 export function RemoveForward(arg1, arg2) {
   return window['go']['main']['App']['RemoveForward'](arg1, arg2);
+}
+
+export function RemoveFridaRuntime(arg1) {
+  return window['go']['main']['App']['RemoveFridaRuntime'](arg1);
 }
 
 export function RemoveReverse(arg1, arg2) {
@@ -424,6 +456,10 @@ export function ScrcpyAvailable() {
 
 export function ScreenRecord(arg1, arg2) {
   return window['go']['main']['App']['ScreenRecord'](arg1, arg2);
+}
+
+export function SetFridaManagedEnabled(arg1) {
+  return window['go']['main']['App']['SetFridaManagedEnabled'](arg1);
 }
 
 export function SetIptablesPolicy(arg1, arg2, arg3, arg4, arg5) {

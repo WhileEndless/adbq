@@ -63,11 +63,15 @@ export function DescribeApp(arg1:string,arg2:string):Promise<adb.AppDetail>;
 
 export function DescribeLivePacket(arg1:string,arg2:number):Promise<adb.LivePacketDetail>;
 
+export function DetectRunningFridaVersion(arg1:string):Promise<string>;
+
 export function DeviceDetails(arg1:string):Promise<adb.Device>;
 
 export function DeviceKey(arg1:string):Promise<string>;
 
 export function DisconnectDevice(arg1:string):Promise<string>;
+
+export function EnsureFridaVenv(arg1:string):Promise<adb.FridaRuntime>;
 
 export function ExportAPK(arg1:string,arg2:string):Promise<string>;
 
@@ -82,6 +86,10 @@ export function FlushIptables(arg1:string,arg2:string,arg3:string,arg4:string):P
 export function ForceStopApp(arg1:string,arg2:string):Promise<string>;
 
 export function FridaArchInfo(arg1:string):Promise<adb.FridaArchInfo>;
+
+export function FridaHost():Promise<adb.FridaHostInfo>;
+
+export function FridaManagedEnabled():Promise<boolean>;
 
 export function GetNetworkInfo(arg1:string):Promise<adb.NetworkInfo>;
 
@@ -131,6 +139,8 @@ export function ListForwards(arg1:string):Promise<Array<adb.Forward>>;
 
 export function ListFridaReleases(arg1:string,arg2:string):Promise<Array<adb.FridaRelease>>;
 
+export function ListFridaRuntimes():Promise<Array<adb.FridaRuntime>>;
+
 export function ListFridaServers(arg1:string):Promise<Array<adb.FridaServer>>;
 
 export function ListIptables(arg1:string,arg2:string,arg3:string):Promise<adb.IPTSnapshot>;
@@ -161,6 +171,8 @@ export function OpenShell(arg1:string,arg2:boolean):Promise<string>;
 
 export function PickAndInstallAPK(arg1:string):Promise<string>;
 
+export function PickExternalFridaInterpreter():Promise<adb.FridaRuntime>;
+
 export function PlanTcpdumpAutoInstall(arg1:string):Promise<adb.TcpdumpAutoPlan>;
 
 export function PreviewProfile(arg1:string,arg2:string):Promise<Array<adb.StepPreview>>;
@@ -187,7 +199,11 @@ export function RecordingActive(arg1:string):Promise<boolean>;
 
 export function RegisterDevice(arg1:adb.Device):Promise<void>;
 
+export function RegisterExternalFrida(arg1:string):Promise<adb.FridaRuntime>;
+
 export function RemoveForward(arg1:string,arg2:string):Promise<string>;
+
+export function RemoveFridaRuntime(arg1:string):Promise<void>;
 
 export function RemoveReverse(arg1:string,arg2:string):Promise<string>;
 
@@ -214,6 +230,8 @@ export function ScrcpyActive(arg1:string):Promise<boolean>;
 export function ScrcpyAvailable():Promise<boolean>;
 
 export function ScreenRecord(arg1:string,arg2:number):Promise<string>;
+
+export function SetFridaManagedEnabled(arg1:boolean):Promise<void>;
 
 export function SetIptablesPolicy(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
