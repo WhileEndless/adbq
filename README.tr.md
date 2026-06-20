@@ -51,9 +51,15 @@ ikili (binary) olarak çalışır.
   başlatabilir.
 - **Yönlendirmeler** — hem `adb forward` hem `adb reverse` için listeleme,
   ekleme, kaldırma; tek tıkla hazır ayarlar (DevTools, frida, Metro, mitmproxy).
-- **Frida** — `/data/local/tmp/` içinde `frida-server-*` tarar, çalışan PID'i
-  tespit eder, yapılandırılabilir portta (`setsid` + root) başlatır, `pkill` ile
-  durdurur.
+- **Frida** — uçtan uca host + cihaz akışı. Cihaz tarafı: `/data/local/tmp/`
+  içinde `frida-server-*` tarar, çalışan PID'i tespit eder, yapılandırılabilir
+  portta başlatır/durdurur, GitHub'dan doğrulanmış sürümleri tek tıkla kurar.
+  Host tarafı ("Frida Manager"): cihaz sürümüyle eşlenik bir Python `frida`
+  venv'i kurar (tek wheel, SHA256 doğrulamalı, çevrimdışı `pip`) veya kendi
+  yorumlayıcını kullanır; CodeMirror editörlü script kütüphanesi; Frida CodeShare
+  arama/içe aktarma; uygulama başına script bağlama; ve scriptlerinle uygulamayı
+  spawn/attach edip `console.log`/`send()`/hataları canlı konsola akıtan tek tıkla
+  **Start/Attach with Frida**.
 - **Ağ** — arayüzler, IPv4/MAC/ağ geçidi/DNS, Wi-Fi SSID, `settings put global
   http_proxy` ile genel HTTP proxy ayarlama/okuma/temizleme.
 - **Paket yakalama** — uygulama içi canlı yakalama ve analiz (gopacket), cihazda

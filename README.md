@@ -49,8 +49,15 @@ frontend), it ships as a small native binary on macOS, Windows, and Linux.
   the detail pane.
 - **Forwards** — list, add, remove for both `adb forward` and `adb reverse`, with
   one-click presets (DevTools, frida, Metro, mitmproxy).
-- **Frida** — scans `/data/local/tmp/` for `frida-server-*`, detects the running
-  PID, starts (`setsid` + root) on a configurable port, stops via `pkill`.
+- **Frida** — full host + device workflow. Device side: scans `/data/local/tmp/`
+  for `frida-server-*`, detects the running PID, starts on a configurable port,
+  stops, and one-click installs verified builds from GitHub. Host side
+  ("Frida Manager"): provisions a version-matched Python `frida` venv (single
+  wheel, SHA256-verified, offline `pip` install) or uses a bring-your-own
+  interpreter; a script library with a CodeMirror editor; Frida CodeShare search/
+  import; per-app script bindings; and one-click **Start/Attach with Frida** that
+  spawns or attaches an app with your scripts and streams its `console.log`/
+  `send()`/errors into a live console.
 - **Network** — interfaces, IPv4/MAC/gateway/DNS, Wi-Fi SSID, global HTTP proxy
   set/get/clear via `settings put global http_proxy`.
 - **Packet capture** — in-app live capture & analysis (gopacket), on-device

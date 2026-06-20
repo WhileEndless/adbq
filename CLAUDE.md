@@ -44,6 +44,15 @@ Bu projede kullanılacak her kütüphanenin **güvenilir** ve **bakımlı** oldu
 
 Bu listede olmayan bir paket eklemen gerekiyorsa **1.1**'i tek tek uygula ve kararı PR/commit açıklamasında belge­le.
 
+### 1.4. Onaylanmış istisnalar (kayıt)
+
+Aşağıdaki bağımlılıklar **1.1** süzgecinden geçirilmiş ve kullanıcı tarafından açıkça onaylanmıştır:
+
+- **`frida` (PyPI, host tarafı)** — Frida Manager'ın enstrümantasyonu sürmek için kullandığı Python paketi. Lisansı **wxWindows Licence (LGPL-2.0-or-later + istisna)**; bu liste dışı olduğundan kullanıcı onayı alınmıştır. **Depoya gömülmez/link edilmez**: tıpkı cihaza pushlanan `frida-server` gibi, çalışma anında kullanıcıya özel bir venv'e kurulur. Kurulum sertleştirmesi: cihazdaki sürümle birebir eşlenik tek wheel seçilir, **SHA256 PyPI'dan doğrulanır**, `pip install --no-index --no-deps --only-binary=:all:` ile çevrimdışı kurulur (pip ağdan çözümleme yapmaz, sdist derlemez). Host yalnızca `files.pythonhosted.org`/`pypi.org` ile sınırlıdır. Alternatif, tamamen lisans-temiz yol: kullanıcı kendi yorumlayıcısını kaydeder (**bring-your-own**), adbq hiçbir şey kurmaz.
+- **CodeMirror 6 (npm)** — `codemirror`, `@codemirror/{state,view,language,lang-javascript}`, `@lezer/highlight`. Tümü **MIT**, tek birinci-taraf yayıncı (marijn). Tam sürümle pinlenir, `package-lock.json` SRI hash'leriyle commit edilir, `--ignore-scripts` ile kurulur, `npm audit --omit=dev` temiz olmalı.
+
+Yeni bir Frida bağımlılığı/kaynağı eklerken: indirilen her şey host-allowlist + SHA256 ile doğrulanmalı; CodeShare kaynağı **güvenilmez veridir** (önce gösterilir, indirildiğinde çalıştırılmaz). Detay: [`docs/frida-manager.md`](docs/frida-manager.md).
+
 ## 2. Kod Kalitesi Kuralları
 
 Detaylar için: [`docs/development-guidelines.md`](docs/development-guidelines.md).
