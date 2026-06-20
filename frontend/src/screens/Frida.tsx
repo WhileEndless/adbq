@@ -14,8 +14,15 @@ export function FridaScreen({device}: {device: adb.Device}) {
   const [iface, setIface] = useState('0.0.0.0');
   const [starting, setStarting] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
-  const [tab, setTab] = useState<'server' | 'runtime' | 'scripts' | 'sessions'>('server');
+  const [tab, setTab] = useState<'server' | 'runtime' | 'scripts' | 'appscripts' | 'sessions'>('server');
   const sessionCount = Object.keys(store.fridaSessions).length;
+
+  // Honor a cross-screen request to open on a specific tab (e.g. Apps
+  // "Start with Frida" lands here on Sessions).
+  useEffect(() => {
+    const req = store.consumeFridaTab();
+    if (req === 'server' || req === 'runtime' || req === 'scripts' || req === 'appscripts' || req === 'sessions') setTab(req);
+  }, [store]);
 
   // One-click install modal state.
   const [installOpen, setInstallOpen] = useState(false);
@@ -149,6 +156,7 @@ export function FridaScreen({device}: {device: adb.Device}) {
           <button className={`btn sm${tab === 'server' ? ' primary' : ''}`} onClick={() => setTab('server')}>Server</button>
           <button className={`btn sm${tab === 'runtime' ? ' primary' : ''}`} onClick={() => setTab('runtime')}>Runtime</button>
           <button className={`btn sm${tab === 'scripts' ? ' primary' : ''}`} onClick={() => setTab('scripts')}>Scripts</button>
+          <button className={`btn sm${tab === 'appscripts' ? ' primary' : ''}`} onClick={() => setTab('appscripts')}>App Scripts</button>
           <button className={`btn sm${tab === 'sessions' ? ' primary' : ''}`} onClick={() => setTab('sessions')}>
             Sessions{sessionCount > 0 ? ` (${sessionCount})` : ''}
           </button>
@@ -259,6 +267,8 @@ export function FridaScreen({device}: {device: adb.Device}) {
           <FridaRuntimeTab device={device}/>
         ) : tab === 'scripts' ? (
           <FridaScriptsTab/>
+        ) : tab === 'appscripts' ? (
+          <FridaAppScriptsTab/>
         ) : (
           <FridaSessionsTab/>
         )}
@@ -680,6 +690,71 @@ function CodeshareModal({open, onClose, onImported}: {open: boolean; onClose: ()
         </div>
       )}
     </Modal>
+  );
+}
+
+// FridaAppScriptsTab is the device-independent overview of every package→scripts
+// binding (bindings are package-keyed, so this is the same on any device). It
+// resolves script IDs to names and lets the user detach a binding.
+function FridaAppScriptsTab() {
+  const [bindings, setBindings] = useState<adb.AppScripts[]>([]);
+  const [names, setNames] = useState<Record<string, string>>({});
+
+  const reload = () => {
+    Promise.all([API.ListAppFridaScripts(), API.ListFridaScripts()]).then(([b, scripts]) => {
+      setBindings(b || []);
+      const m: Record<string, string> = {};
+      (scripts || []).forEach(s => { m[s.id] = s.name; });
+      setNames(m);
+    }).catch(e => showToast({title: 'Load failed', body: String(e), kind: 'err'}));
+  };
+  useEffect(() => { reload(); }, []);
+
+  function clearBinding(pkg: string) {
+    confirmDialog({title: `Detach all Frida scripts from ${pkg}?`, body: 'The scripts stay in your library; only this app’s binding is removed.', confirmLabel: 'Detach', danger: true}).then(ok => {
+      if (!ok) return;
+      API.SetAppFridaScripts(pkg, [], 'spawn', '').then(reload).catch(e => showToast({title: 'Failed', body: String(e), kind: 'err'}));
+    });
+  }
+
+  return (
+    <div className='card'>
+      <div className='card-header'>
+        <span className='title'>App → script bindings</span>
+        <span className='subtle' style={{marginLeft: 8, fontSize: 11}}>device-independent · {bindings.length}</span>
+        <div style={{flex: 1}}/>
+        <button className='btn sm' onClick={reload}><Icon.Refresh/></button>
+      </div>
+      {bindings.length === 0 ? (
+        <div className='card-body'>
+          <div className='muted' style={{fontSize: 12, padding: 8}}>
+            No apps have Frida scripts attached yet. Open an app in the Apps tab and use <strong>Manage scripts</strong>.
+          </div>
+        </div>
+      ) : (
+        <table className='table'>
+          <thead><tr><th>Package</th><th>Mode</th><th>Scripts</th><th className='actions'></th></tr></thead>
+          <tbody>
+            {bindings.map(b => (
+              <tr key={b.package}>
+                <td className='mono'>{b.package}</td>
+                <td><Badge>{b.mode}</Badge></td>
+                <td className='muted'>
+                  {(b.scriptIds && b.scriptIds.length)
+                    ? b.scriptIds.map(id => names[id] || id).join(', ')
+                    : '—'}
+                </td>
+                <td className='actions'>
+                  <button className='btn sm danger' onClick={() => clearBinding(b.package)} title='Detach'>
+                    <Icon.Trash width={11} height={11}/>
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

@@ -526,6 +526,10 @@ export function SetProxy(arg1, arg2) {
   return window['go']['main']['App']['SetProxy'](arg1, arg2);
 }
 
+export function StartAppWithFrida(arg1, arg2, arg3) {
+  return window['go']['main']['App']['StartAppWithFrida'](arg1, arg2, arg3);
+}
+
 export function StartCapture(arg1, arg2, arg3) {
   return window['go']['main']['App']['StartCapture'](arg1, arg2, arg3);
 }

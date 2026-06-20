@@ -120,6 +120,7 @@ interface Store {
   // frida sessions — keyed by session id
   fridaSessions: Record<string, FridaSessionSlice>;
   startFridaSession: (serial: string, pkg: string, mode: string, runtimeVer: string, scriptIds: string[]) => Promise<adb.FridaSessionInfo>;
+  adoptFridaSession: (info: adb.FridaSessionInfo) => void;
   attachFridaSession: (id: string) => void;
   stopFridaSession: (id: string) => Promise<void>;
   removeFridaSession: (id: string) => void;
@@ -133,6 +134,11 @@ interface Store {
   // newly-opened session (e.g. from Apps "Open shell here").
   queueShellCmd: (req: QueuedShellCmd) => void;
   consumeShellCmd: (serial: string) => QueuedShellCmd | null;
+
+  // cross-screen hand-off: request the Frida screen open on a specific tab
+  // (e.g. Apps "Start with Frida" → land on the Sessions tab).
+  requestFridaTab: (tab: string) => void;
+  consumeFridaTab: () => string | null;
 }
 
 const StoreCtx = createContext<Store | null>(null);
@@ -350,12 +356,18 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
     API.GetFridaSessionLog(id, since).then(msgs => mergeFridaMsgs(id, msgs || [])).catch(() => {});
   }, [mergeFridaMsgs]);
 
+  // adoptFridaSession registers a session the backend already created (e.g. via
+  // StartAppWithFrida's orchestration) so the store subscribes + backfills it.
+  const adoptFridaSession = useCallback((info: adb.FridaSessionInfo) => {
+    setFridaSessions(prev => prev[info.id] ? prev : ({...prev, [info.id]: {info, messages: [], lastSeq: 0, rev: 0, ended: false}}));
+    attachFridaSession(info.id);
+  }, [attachFridaSession]);
+
   const startFridaSession = useCallback(async (serial: string, pkg: string, mode: string, runtimeVer: string, scriptIds: string[]): Promise<adb.FridaSessionInfo> => {
     const info = await API.StartFridaSession(serial, pkg, mode, runtimeVer, scriptIds);
-    setFridaSessions(prev => ({...prev, [info.id]: {info, messages: [], lastSeq: 0, rev: 0, ended: false}}));
-    attachFridaSession(info.id);
+    adoptFridaSession(info);
     return info;
-  }, [attachFridaSession]);
+  }, [adoptFridaSession]);
 
   const stopFridaSession = useCallback(async (id: string) => {
     try { await API.StopFridaSession(id); } catch {}
@@ -410,6 +422,15 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
     return v || null;
   }, []);
 
+  // ── requested Frida tab for cross-screen hand-off ───────────────────────
+  const fridaTabReq = useRef<string | null>(null);
+  const requestFridaTab = useCallback((tab: string) => { fridaTabReq.current = tab; }, []);
+  const consumeFridaTab = useCallback((): string | null => {
+    const v = fridaTabReq.current;
+    fridaTabReq.current = null;
+    return v;
+  }, []);
+
   // ── cleanup on unmount of the entire app ───────────────────────────────
   useEffect(() => {
     return () => {
@@ -425,9 +446,10 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
     shells, openShell, writeShell, closeShell, clearShellBuf,
     getCapture, startCapture, stopCapture, clearCapture,
     setCaptureDisplayFilter, setCaptureMaxPackets, setCaptureState, setCapturePreset, setCaptureIface,
-    fridaSessions, startFridaSession, attachFridaSession, stopFridaSession, removeFridaSession, clearFridaSession,
+    fridaSessions, startFridaSession, adoptFridaSession, attachFridaSession, stopFridaSession, removeFridaSession, clearFridaSession,
     cached, invalidate,
     queueShellCmd, consumeShellCmd,
+    requestFridaTab, consumeFridaTab,
   };
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   void captures;

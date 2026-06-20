@@ -265,6 +265,8 @@ export function SetIptablesPolicy(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function SetProxy(arg1:string,arg2:string):Promise<string>;
 
+export function StartAppWithFrida(arg1:string,arg2:string,arg3:string):Promise<adb.FridaSessionInfo>;
+
 export function StartCapture(arg1:string,arg2:string,arg3:string):Promise<adb.CaptureState>;
 
 export function StartDNSSniffer(arg1:string):Promise<main.DNSSnifferStatus>;

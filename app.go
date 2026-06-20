@@ -1467,6 +1467,84 @@ func (a *App) RemoveFridaSession(id string) {
 	}
 }
 
+// StartAppWithFrida is the one-click orchestration behind "Start/Attach with
+// Frida" in the Apps screen. It uses the package's saved script binding, ensures
+// a frida-server is running on the device (auto-starting an installed binary when
+// there's an unambiguous choice), detects that server's exact version, resolves a
+// matching host runtime (auto-building a managed venv when allowed), and launches
+// the session. Stages are surfaced via the "frida-start:progress" event; failures
+// are actionable (pointing at the Server or Runtime tab) rather than opaque.
+func (a *App) StartAppWithFrida(serial, pkg, mode string) (adb.FridaSessionInfo, error) {
+	if a.frida == nil {
+		return adb.FridaSessionInfo{}, fmt.Errorf("frida store unavailable")
+	}
+	progress := func(stage string) {
+		runtime.EventsEmit(a.ctx, "frida-start:progress", map[string]string{"package": pkg, "stage": stage})
+	}
+	binding := a.frida.GetAppScripts(pkg)
+	if mode == "" {
+		mode = binding.Mode
+	}
+
+	progress("ensuring frida-server")
+	ver, err := a.ensureDeviceFridaServer(serial)
+	if err != nil {
+		return adb.FridaSessionInfo{}, err
+	}
+
+	progress("preparing host runtime frida " + ver)
+	if _, kind := a.frida.ResolveForVersion(ver); kind == "none" {
+		if !a.frida.ManagedEnabled() {
+			return adb.FridaSessionInfo{}, fmt.Errorf("no host runtime for frida %s — add an interpreter in Frida → Runtime, or enable managed installs", ver)
+		}
+		if _, err := a.frida.EnsureVenv(a.ctx, ver, func(stage string) {
+			runtime.EventsEmit(a.ctx, "frida-venv:progress", map[string]string{"version": ver, "stage": stage})
+		}); err != nil {
+			return adb.FridaSessionInfo{}, fmt.Errorf("prepare host frida %s: %w", ver, err)
+		}
+	}
+
+	progress("launching")
+	return a.StartFridaSession(serial, pkg, mode, ver, binding.ScriptIDs)
+}
+
+// ensureDeviceFridaServer returns the running frida-server's version, starting an
+// installed binary first when none is running and the choice is unambiguous.
+func (a *App) ensureDeviceFridaServer(serial string) (string, error) {
+	if ver, err := a.client.DetectRunningFridaVersion(a.ctx, serial); err == nil && ver != "" {
+		return ver, nil
+	}
+	servers, err := a.client.ListFridaServers(a.ctx, serial)
+	if err != nil {
+		return "", fmt.Errorf("check frida-server: %w", err)
+	}
+	for _, s := range servers {
+		if s.Active {
+			if s.Version != "" {
+				return s.Version, nil
+			}
+		}
+	}
+	switch len(servers) {
+	case 0:
+		return "", fmt.Errorf("no frida-server on the device — install one in Frida → Server first")
+	case 1:
+		if _, err := a.client.StartFrida(a.ctx, serial, servers[0].Path, "", 0); err != nil {
+			return "", fmt.Errorf("start frida-server: %w", err)
+		}
+		// Give it a moment, then read the authoritative version.
+		for i := 0; i < 10; i++ {
+			time.Sleep(300 * time.Millisecond)
+			if ver, err := a.client.DetectRunningFridaVersion(a.ctx, serial); err == nil && ver != "" {
+				return ver, nil
+			}
+		}
+		return "", fmt.Errorf("frida-server did not come up — check Frida → Server")
+	default:
+		return "", fmt.Errorf("multiple frida-server binaries and none running — start the one you want in Frida → Server")
+	}
+}
+
 // ─── Network ─────────────────────────────────────────────────────────────
 
 func (a *App) GetNetworkInfo(serial string) (*adb.NetworkInfo, error) {

@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {sdkLabel} from '../lib/android';
 
@@ -235,6 +235,7 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                   <Icon.Download/>Export data{!device.root && ' (root)'}
                 </button>
               </div>
+              <FridaAppSection device={device} pkg={sel.pkg} running={!!running?.running} setScreen={setScreen}/>
               <button className='btn danger' style={{marginTop: 6, width: '100%'}}
                       onClick={async () => {
                         if (!sel) return;
@@ -252,6 +253,137 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
         </div>
       </div>
     </div>
+  );
+}
+
+// FridaAppSection ties an app to its Frida script binding and the one-click
+// "Start/Attach with Frida" orchestration. Bindings are package-keyed
+// (device-independent), so what you attach here shows up on every device and in
+// the Frida → App Scripts tab.
+function FridaAppSection({device, pkg, running, setScreen}: {device: adb.Device; pkg: string; running: boolean; setScreen?: (s: string) => void}) {
+  const store = useStore();
+  const [binding, setBinding] = useState<adb.AppScripts | null>(null);
+  const [manage, setManage] = useState(false);
+  const [busy, setBusy] = useState('');
+
+  const reload = () => { API.GetAppFridaScripts(pkg).then(setBinding).catch(() => setBinding(null)); };
+  useEffect(() => { reload(); }, [pkg]);
+
+  const count = binding?.scriptIds?.length || 0;
+
+  async function launch(mode: 'spawn' | 'attach', restart: boolean) {
+    setBusy(mode + (restart ? '-restart' : ''));
+    try {
+      if (restart && running) {
+        await API.ForceStopApp(device.id, pkg);
+        await new Promise(r => setTimeout(r, 300));
+      }
+      // StartAppWithFrida orchestrates the prerequisites backend-side (ensure a
+      // frida-server is running, detect its exact version, build/resolve a
+      // matching host runtime) and starts the session; we then adopt it into the
+      // store so its log stream is subscribed + backfilled.
+      const info = await API.StartAppWithFrida(device.id, pkg, mode);
+      store.adoptFridaSession(info);
+      showToast({title: 'Frida session started', body: `${mode} · ${pkg}`, kind: 'ok', mono: true});
+      store.requestFridaTab('sessions');
+      setScreen?.('frida');
+    } catch (e) {
+      showToast({title: 'Could not start Frida', body: String(e), kind: 'err'});
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <div className='card' style={{marginTop: 10}}>
+      <div className='card-header'>
+        <span className='title' style={{fontSize: 12, display: 'flex', alignItems: 'center', gap: 6}}><Icon.Zap width={13} height={13}/>Frida</span>
+        {count > 0 && <Badge kind='accent'>{count} script{count === 1 ? '' : 's'}</Badge>}
+        <div style={{flex: 1}}/>
+        <button className='btn sm' onClick={() => setManage(true)}>Manage scripts</button>
+      </div>
+      <div className='card-body'>
+        {!device.root && (
+          <div style={{fontSize: 11, color: 'var(--warn)', marginBottom: 8}}>
+            Frida needs a rooted device running frida-server. On an unrooted device, use frida-gadget instead.
+          </div>
+        )}
+        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6}}>
+          <button className='btn primary' disabled={!device.root || !!busy} onClick={() => launch('spawn', false)}>
+            {busy === 'spawn' ? '…starting' : <><Icon.Play/>Start with Frida</>}
+          </button>
+          <button className='btn' disabled={!device.root || !!busy} onClick={() => launch('spawn', true)} title='Force-stop then spawn under Frida'>
+            {busy === 'spawn-restart' ? '…restarting' : <><Icon.Refresh/>Restart with Frida</>}
+          </button>
+          <button className='btn' disabled={!device.root || !running || !!busy} onClick={() => launch('attach', false)} title={running ? 'Attach to the running process' : 'App is not running'}>
+            {busy === 'attach' ? '…attaching' : <>Attach</>}
+          </button>
+          <div style={{fontSize: 11, color: 'var(--text-subtle)', alignSelf: 'center'}}>
+            {count === 0 ? 'No scripts attached — runs bare.' : `${binding?.mode || 'spawn'} mode`}
+          </div>
+        </div>
+      </div>
+      {manage && <ManageFridaScriptsModal pkg={pkg} onClose={() => { setManage(false); reload(); }}/>}
+    </div>
+  );
+}
+
+// ManageFridaScriptsModal picks which library scripts attach to a package and the
+// default launch mode. Persisted package-keyed (device-independent).
+function ManageFridaScriptsModal({pkg, onClose}: {pkg: string; onClose: () => void}) {
+  const [scripts, setScripts] = useState<adb.FridaScript[]>([]);
+  const [sel, setSel] = useState<Record<string, boolean>>({});
+  const [mode, setMode] = useState<'spawn' | 'attach'>('spawn');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    Promise.all([API.ListFridaScripts(), API.GetAppFridaScripts(pkg)])
+      .then(([list, binding]) => {
+        setScripts(list || []);
+        const chosen: Record<string, boolean> = {};
+        (binding?.scriptIds || []).forEach(id => { chosen[id] = true; });
+        setSel(chosen);
+        setMode((binding?.mode as 'spawn' | 'attach') || 'spawn');
+      })
+      .catch(e => showToast({title: 'Load failed', body: String(e), kind: 'err'}));
+  }, [pkg]);
+
+  function save() {
+    const ids = scripts.filter(s => sel[s.id]).map(s => s.id);
+    setSaving(true);
+    API.SetAppFridaScripts(pkg, ids, mode, '')
+      .then(() => { showToast({title: 'Saved', body: `${ids.length} script(s) for ${pkg}`, kind: 'ok'}); onClose(); })
+      .catch(e => showToast({title: 'Save failed', body: String(e), kind: 'err'}))
+      .finally(() => setSaving(false));
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Frida scripts · ${pkg}`} width={560}
+      footer={<><button className='btn' onClick={onClose}>Cancel</button><button className='btn primary' onClick={save} disabled={saving}>{saving ? '…saving' : 'Save'}</button></>}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10}}>
+        <span className='muted' style={{fontSize: 12}}>Launch mode:</span>
+        <button className={`btn sm${mode === 'spawn' ? ' primary' : ''}`} onClick={() => setMode('spawn')}>spawn (cold start)</button>
+        <button className={`btn sm${mode === 'attach' ? ' primary' : ''}`} onClick={() => setMode('attach')}>attach (running)</button>
+      </div>
+      {scripts.length === 0 ? (
+        <div className='muted' style={{padding: 16, textAlign: 'center', fontSize: 12}}>
+          No scripts in the library yet. Create or import some in Frida → Scripts.
+        </div>
+      ) : (
+        <div style={{display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflow: 'auto'}}>
+          {scripts.map(s => (
+            <label key={s.id} style={{display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 5, background: 'var(--bg-inset)', cursor: 'pointer'}}>
+              <input type='checkbox' checked={!!sel[s.id]} onChange={e => setSel(p => ({...p, [s.id]: e.target.checked}))}/>
+              <div style={{minWidth: 0, flex: 1}}>
+                <div style={{fontSize: 12, fontWeight: 600}}>{s.name}</div>
+                {s.description && <div className='subtle' style={{fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{s.description}</div>}
+              </div>
+              {s.origin === 'codeshare' && !s.trusted && <Badge kind='warn'>untrusted</Badge>}
+            </label>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
 
