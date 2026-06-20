@@ -285,13 +285,30 @@ func fetchFridaReleases(ctx context.Context) ([]ghRelease, error) {
 	return rels, nil
 }
 
-// downloadFridaAsset streams the asset into dst, verifying the SHA256 against
-// the GitHub-published digest when one is available. A verified copy already on
-// disk is reused. URLs are restricted to official GitHub release hosts.
+// downloadFridaAsset streams an official frida-server release asset into dst,
+// verifying its GitHub-published SHA256 digest. URLs are restricted to official
+// GitHub release hosts.
 func downloadFridaAsset(ctx context.Context, url, wantSum, dst string) error {
-	if !(strings.HasPrefix(url, "https://github.com/") ||
-		strings.HasPrefix(url, "https://objects.githubusercontent.com/")) {
-		return fmt.Errorf("refusing to download frida from non-github host: %s", url)
+	return downloadVerifiedAsset(ctx, url, wantSum, dst, []string{
+		"https://github.com/",
+		"https://objects.githubusercontent.com/",
+	})
+}
+
+// downloadVerifiedAsset streams url into dst, verifying the SHA256 against
+// wantSum when one is available, and reusing a verified copy already on disk.
+// The url must begin with one of allowedHosts — per CLAUDE.md §1.2 we never
+// fetch a blob from an unexpected origin. Writes are atomic (temp + rename).
+func downloadVerifiedAsset(ctx context.Context, url, wantSum, dst string, allowedHosts []string) error {
+	allowed := false
+	for _, h := range allowedHosts {
+		if strings.HasPrefix(url, h) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("refusing to download from non-allowlisted host: %s", url)
 	}
 	wantSum = strings.ToLower(strings.TrimSpace(wantSum))
 
@@ -318,7 +335,7 @@ func downloadFridaAsset(ctx context.Context, url, wantSum, dst string) error {
 		return fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(dst), "frida-*.part")
+	tmp, err := os.CreateTemp(filepath.Dir(dst), "adbq-dl-*.part")
 	if err != nil {
 		return err
 	}
@@ -336,7 +353,7 @@ func downloadFridaAsset(ctx context.Context, url, wantSum, dst string) error {
 	if wantSum != "" {
 		if got := hex.EncodeToString(h.Sum(nil)); got != wantSum {
 			_ = os.Remove(tmpPath)
-			return fmt.Errorf("sha256 mismatch: got %s, GitHub published %s", got, wantSum)
+			return fmt.Errorf("sha256 mismatch: got %s, expected %s", got, wantSum)
 		}
 	}
 	if err := os.Rename(tmpPath, dst); err != nil {
