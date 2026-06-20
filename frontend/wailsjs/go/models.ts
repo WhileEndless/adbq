@@ -612,6 +612,32 @@ export namespace adb {
 	        this.error = source["error"];
 	    }
 	}
+	export class FridaMsg {
+	    seq: number;
+	    time: number;
+	    kind: string;
+	    script?: string;
+	    level?: string;
+	    payload?: string;
+	    stack?: string;
+	    detail?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FridaMsg(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.seq = source["seq"];
+	        this.time = source["time"];
+	        this.kind = source["kind"];
+	        this.script = source["script"];
+	        this.level = source["level"];
+	        this.payload = source["payload"];
+	        this.stack = source["stack"];
+	        this.detail = source["detail"];
+	    }
+	}
 	export class FridaRelease {
 	    version: string;
 	    arch: string;
@@ -716,6 +742,32 @@ export namespace adb {
 	        this.active = source["active"];
 	        this.pid = source["pid"];
 	        this.port = source["port"];
+	    }
+	}
+	export class FridaSessionInfo {
+	    id: string;
+	    serial: string;
+	    package: string;
+	    mode: string;
+	    runtime: string;
+	    startedAt: number;
+	    status: string;
+	    statusNote?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FridaSessionInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.serial = source["serial"];
+	        this.package = source["package"];
+	        this.mode = source["mode"];
+	        this.runtime = source["runtime"];
+	        this.startedAt = source["startedAt"];
+	        this.status = source["status"];
+	        this.statusNote = source["statusNote"];
 	    }
 	}
 	export class FridaStep {

@@ -198,6 +198,10 @@ export function GetFridaScript(arg1) {
   return window['go']['main']['App']['GetFridaScript'](arg1);
 }
 
+export function GetFridaSessionLog(arg1, arg2) {
+  return window['go']['main']['App']['GetFridaSessionLog'](arg1, arg2);
+}
+
 export function GetNetworkInfo(arg1) {
   return window['go']['main']['App']['GetNetworkInfo'](arg1);
 }
@@ -312,6 +316,10 @@ export function ListFridaScripts() {
 
 export function ListFridaServers(arg1) {
   return window['go']['main']['App']['ListFridaServers'](arg1);
+}
+
+export function ListFridaSessions() {
+  return window['go']['main']['App']['ListFridaSessions']();
 }
 
 export function ListIptables(arg1, arg2, arg3) {
@@ -438,6 +446,10 @@ export function RemoveFridaRuntime(arg1) {
   return window['go']['main']['App']['RemoveFridaRuntime'](arg1);
 }
 
+export function RemoveFridaSession(arg1) {
+  return window['go']['main']['App']['RemoveFridaSession'](arg1);
+}
+
 export function RemoveReverse(arg1, arg2) {
   return window['go']['main']['App']['RemoveReverse'](arg1, arg2);
 }
@@ -526,6 +538,10 @@ export function StartFrida(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['StartFrida'](arg1, arg2, arg3, arg4);
 }
 
+export function StartFridaSession(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['StartFridaSession'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function StartLiveCapture(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['StartLiveCapture'](arg1, arg2, arg3, arg4);
 }
@@ -556,6 +572,10 @@ export function StopDNSSniffer(arg1) {
 
 export function StopFrida(arg1) {
   return window['go']['main']['App']['StopFrida'](arg1);
+}
+
+export function StopFridaSession(arg1) {
+  return window['go']['main']['App']['StopFridaSession'](arg1);
 }
 
 export function StopLiveCapture(arg1) {

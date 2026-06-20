@@ -615,6 +615,39 @@ input, select, textarea { font: inherit; color: inherit; }
 .logrow.E .lvl, .logrow.E .tag-msg { color: var(--log-e); }
 .logrow.F { border-left-color: rgba(212,114,240,0.6); }
 .logrow.F .lvl, .logrow.F .tag-msg { color: var(--log-f); }
+
+/* Frida live session console — reuses the log color tokens for consistency. */
+.frida-console {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: var(--terminal-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+}
+.frida-line {
+  display: grid;
+  grid-template-columns: 76px 52px 1fr;
+  gap: 10px;
+  padding: 1px 14px;
+  border-left: 2px solid transparent;
+}
+.frida-line:hover { background: var(--hover); }
+.frida-line .t { color: var(--text-subtle); }
+.frida-line .k { color: var(--text-muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; padding-top: 1px; }
+.frida-line .msg { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.frida-line.log .msg { color: var(--log-i); }
+.frida-line.send .k { color: var(--log-d); }
+.frida-line.send .msg { color: var(--log-d); }
+.frida-line.warn { border-left-color: rgba(233,180,84,0.5); }
+.frida-line.warn .msg, .frida-line.warn .k { color: var(--log-w); }
+.frida-line.err { border-left-color: rgba(236,106,115,0.6); }
+.frida-line.err .msg, .frida-line.err .k { color: var(--log-e); }
+.frida-line.meta .msg { color: var(--text-subtle); font-style: italic; }
 .logrow .tag-msg .msg mark {
   background: var(--accent-soft-strong);
   color: var(--accent-strong);

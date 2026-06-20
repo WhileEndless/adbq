@@ -51,3 +51,49 @@ func TestEnsureVenvSmoke(t *testing.T) {
 		t.Fatal("managed venv not found in ListRuntimes")
 	}
 }
+
+// TestFridaSessionDriverSmoke exercises the real driver subprocess (JSON
+// streaming, ring buffer, structured error, clean teardown) without a device:
+// a bogus serial must yield a "ready" handshake then a structured "fatal".
+func TestFridaSessionDriverSmoke(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	const ver = "17.15.0"
+	s, err := NewFridaStore()
+	if err != nil {
+		t.Fatalf("NewFridaStore: %v", err)
+	}
+	rt, err := s.EnsureVenv(context.Background(), ver, func(string) {})
+	if err != nil {
+		t.Fatalf("EnsureVenv: %v", err)
+	}
+
+	sess, err := StartFridaSession(context.Background(), rt, "f-smoke",
+		"bogus-serial-no-such-device", "com.example.app", "spawn",
+		[]FridaScriptArg{{Name: "noop", Source: "console.log('loaded');"}})
+	if err != nil {
+		t.Fatalf("StartFridaSession: %v", err)
+	}
+
+	sawReady, sawFatal := false, false
+	for m := range sess.Messages() {
+		t.Logf("msg kind=%s payload=%q detail=%q", m.Kind, m.Payload, m.Detail)
+		if m.Kind == "ready" {
+			sawReady = true
+		}
+		if m.Kind == "fatal" {
+			sawFatal = true
+		}
+	}
+	if !sawReady {
+		t.Error("expected a ready handshake from the driver")
+	}
+	if !sawFatal {
+		t.Error("expected a fatal (no-device) message for a bogus serial")
+	}
+	if len(sess.LogSince(0)) == 0 {
+		t.Error("ring buffer should retain messages")
+	}
+	sess.Stop() // idempotent + temp-dir cleanup
+}

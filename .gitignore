@@ -40,3 +40,7 @@ adbq-*.pcap
 adbq-*.apk
 adbq-*.png
 *.keystore
+
+# Python bytecode (from driver syntax checks)
+__pycache__/
+*.pyc

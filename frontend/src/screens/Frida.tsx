@@ -14,7 +14,8 @@ export function FridaScreen({device}: {device: adb.Device}) {
   const [iface, setIface] = useState('0.0.0.0');
   const [starting, setStarting] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
-  const [tab, setTab] = useState<'server' | 'runtime' | 'scripts'>('server');
+  const [tab, setTab] = useState<'server' | 'runtime' | 'scripts' | 'sessions'>('server');
+  const sessionCount = Object.keys(store.fridaSessions).length;
 
   // One-click install modal state.
   const [installOpen, setInstallOpen] = useState(false);
@@ -148,6 +149,9 @@ export function FridaScreen({device}: {device: adb.Device}) {
           <button className={`btn sm${tab === 'server' ? ' primary' : ''}`} onClick={() => setTab('server')}>Server</button>
           <button className={`btn sm${tab === 'runtime' ? ' primary' : ''}`} onClick={() => setTab('runtime')}>Runtime</button>
           <button className={`btn sm${tab === 'scripts' ? ' primary' : ''}`} onClick={() => setTab('scripts')}>Scripts</button>
+          <button className={`btn sm${tab === 'sessions' ? ' primary' : ''}`} onClick={() => setTab('sessions')}>
+            Sessions{sessionCount > 0 ? ` (${sessionCount})` : ''}
+          </button>
         </div>
         <div className='spacer' style={{flex: 1}}/>
         {tab === 'server' && <>
@@ -253,8 +257,10 @@ export function FridaScreen({device}: {device: adb.Device}) {
         </div>
         </>) : tab === 'runtime' ? (
           <FridaRuntimeTab device={device}/>
-        ) : (
+        ) : tab === 'scripts' ? (
           <FridaScriptsTab/>
+        ) : (
+          <FridaSessionsTab/>
         )}
       </div>
 
@@ -674,6 +680,116 @@ function CodeshareModal({open, onClose, onImported}: {open: boolean; onClose: ()
         </div>
       )}
     </Modal>
+  );
+}
+
+// FridaSessionsTab lists live/finished sessions and renders a colored console
+// for the selected one. Messages keep arriving into the store while this tab is
+// closed; on mount we re-attach (idempotent) so nothing is missed.
+function FridaSessionsTab() {
+  const store = useStore();
+  const sessions = Object.values(store.fridaSessions).sort((a, b) => b.info.startedAt - a.info.startedAt);
+  const [selId, setSelId] = useState('');
+  const sel = store.fridaSessions[selId] || sessions[0];
+
+  // Re-attach every known session so a remount/HMR re-subscribes + backfills.
+  useEffect(() => {
+    Object.keys(store.fridaSessions).forEach(id => store.attachFridaSession(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (sessions.length === 0) {
+    return (
+      <div className='muted' style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, textAlign: 'center', padding: 24}}>
+        No Frida sessions yet.<br/>Start one from an app’s <strong>&nbsp;Start with Frida&nbsp;</strong> action in the Apps tab.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{height: '100%', display: 'grid', gridTemplateColumns: 'minmax(200px, 260px) minmax(0, 1fr)', gap: 12, minHeight: 0}}>
+      <div style={{display: 'flex', flexDirection: 'column', minHeight: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'auto'}}>
+        {sessions.map(s => (
+          <div key={s.info.id} onClick={() => setSelId(s.info.id)}
+               style={{padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', background: sel?.info.id === s.info.id ? 'var(--accent-soft)' : undefined}}>
+            <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+              <span style={{fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{s.info.package}</span>
+              <div style={{flex: 1}}/>
+              <SessionStatusBadge slice={s}/>
+            </div>
+            <div className='subtle' style={{fontSize: 11}}>{s.info.mode} · frida {s.info.runtime}</div>
+          </div>
+        ))}
+      </div>
+      {sel ? <FridaConsole key={sel.info.id} slice={sel}/> : <div className='muted' style={{padding: 20}}>Select a session</div>}
+    </div>
+  );
+}
+
+function SessionStatusBadge({slice}: {slice: import('../store').FridaSessionSlice}) {
+  const st = slice.info.status;
+  if (st === 'error') return <Badge kind='err'>error</Badge>;
+  if (slice.ended || st === 'ended') return <Badge>ended</Badge>;
+  return <Badge kind='ok'>live</Badge>;
+}
+
+function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
+  const store = useStore();
+  const wrap = React.useRef<HTMLDivElement>(null);
+  const [autoscroll, setAutoscroll] = useState(true);
+  const id = slice.info.id;
+
+  // Keep the latest line in view unless the user scrolled up.
+  useEffect(() => {
+    if (autoscroll && wrap.current) wrap.current.scrollTop = wrap.current.scrollHeight;
+  }, [slice.rev, autoscroll]);
+
+  return (
+    <div style={{display: 'flex', flexDirection: 'column', minHeight: 0, gap: 8}}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+        <span className='mono' style={{fontSize: 12}}>{slice.info.package}</span>
+        <SessionStatusBadge slice={slice}/>
+        {slice.info.statusNote && <span className='subtle' style={{fontSize: 11, color: 'var(--err)'}}>{slice.info.statusNote}</span>}
+        <div style={{flex: 1}}/>
+        <label className='muted' style={{display: 'flex', alignItems: 'center', gap: 4, fontSize: 11}}>
+          <input type='checkbox' checked={autoscroll} onChange={e => setAutoscroll(e.target.checked)}/> follow
+        </label>
+        <button className='btn sm' onClick={() => store.clearFridaSession(id)}>Clear</button>
+        {!slice.ended && slice.info.status === 'running'
+          ? <button className='btn sm danger' onClick={() => store.stopFridaSession(id)}><Icon.Stop/>Stop</button>
+          : <button className='btn sm' onClick={() => store.removeFridaSession(id)}><Icon.Trash width={11} height={11}/>Remove</button>}
+      </div>
+      <div ref={wrap} className='frida-console'>
+        {slice.messages.length === 0 && <div className='muted' style={{padding: 12, fontSize: 12}}>Waiting for output…</div>}
+        {slice.messages.map((m, i) => <FridaLogLine key={m.seq || i} m={m}/>)}
+      </div>
+    </div>
+  );
+}
+
+function FridaLogLine({m}: {m: adb.FridaMsg}) {
+  const t = new Date(m.time).toLocaleTimeString(undefined, {hour12: false});
+  // Map a message to a console row class for coloring.
+  const kindClass =
+    m.kind === 'error' || m.kind === 'fatal' ? 'err'
+    : m.kind === 'send' ? 'send'
+    : m.kind === 'log' ? (m.level === 'error' ? 'err' : m.level === 'warning' ? 'warn' : 'log')
+    : 'meta';
+  let text = m.payload || '';
+  if (m.kind === 'detached') text = `— detached (${m.detail || 'session ended'}) —`;
+  else if (m.kind === 'resumed') text = '— process resumed —';
+  else if (m.kind === 'loaded') text = `— loaded ${m.script || 'script'} —`;
+  else if (m.kind === 'ready') text = '— driver ready —';
+  else if (m.kind === 'status') text = m.detail ? `— ${m.detail} —` : '';
+  else if (m.kind === 'fatal') text = `✕ ${m.payload || ''}${m.detail ? ': ' + m.detail : ''}`;
+  if (m.kind === 'status' && !text) return null;
+  const tag = m.kind === 'send' ? 'send' : m.kind === 'log' ? (m.level || 'log') : m.kind;
+  return (
+    <div className={`frida-line ${kindClass}`}>
+      <span className='t'>{t}</span>
+      <span className='k'>{tag}</span>
+      <span className='msg'>{text}{m.stack ? `\n${m.stack}` : ''}</span>
+    </div>
   );
 }
 

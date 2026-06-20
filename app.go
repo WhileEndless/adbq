@@ -48,6 +48,10 @@ type App struct {
 	profiles *adb.ProfileStore
 	frida    *adb.FridaStore
 
+	fridaMu   sync.Mutex
+	fridaSess map[string]*adb.FridaSession
+	fridaSeq  int
+
 	dnsMu   sync.Mutex
 	dnsSnif map[string]*adb.DNSSnifferStream
 
@@ -71,6 +75,7 @@ func NewApp() *App {
 		icons:       adb.NewIconCache(),
 		profiles:    profiles,
 		frida:       frida,
+		fridaSess:   map[string]*adb.FridaSession{},
 		dnsSnif:     map[string]*adb.DNSSnifferStream{},
 		procStreams: map[string]*adb.TopStream{},
 	}
@@ -551,6 +556,13 @@ func (a *App) shutdown(ctx context.Context) {
 		sh.Stop()
 	}
 	a.shellMu.Unlock()
+	// Stop frida driver processes so we don't orphan a python child (and leave a
+	// gum agent resident in the target) when adbq closes.
+	a.fridaMu.Lock()
+	for _, fs := range a.fridaSess {
+		fs.Stop()
+	}
+	a.fridaMu.Unlock()
 }
 
 // ─── Devices ─────────────────────────────────────────────────────────────
@@ -1352,6 +1364,107 @@ func (a *App) ImportCodeshareScript(owner, slug string) (adb.FridaScript, error)
 		return adb.FridaScript{}, err
 	}
 	return a.frida.ImportCodeshare(cs)
+}
+
+// ─── Frida live sessions ───────────────────────────────────────────────────
+
+// StartFridaSession launches a host-side frida driver under the runtime matching
+// runtimeVer, instrumenting pkg with the given library scripts. mode is "spawn"
+// (cold-start) or "attach". Messages stream via the "frida-session:<id>" event;
+// call GetFridaSessionLog right after subscribing to backfill the start race.
+func (a *App) StartFridaSession(serial, pkg, mode, runtimeVer string, scriptIDs []string) (adb.FridaSessionInfo, error) {
+	if a.frida == nil {
+		return adb.FridaSessionInfo{}, fmt.Errorf("frida store unavailable")
+	}
+	rt, kind := a.frida.ResolveForVersion(runtimeVer)
+	if kind == "none" {
+		return adb.FridaSessionInfo{}, fmt.Errorf("no host runtime for frida %s — create a venv or register an interpreter in the Runtime tab", runtimeVer)
+	}
+	scripts, err := a.collectScripts(scriptIDs)
+	if err != nil {
+		return adb.FridaSessionInfo{}, err
+	}
+
+	a.fridaMu.Lock()
+	a.fridaSeq++
+	id := fmt.Sprintf("f-%d", a.fridaSeq)
+	a.fridaMu.Unlock()
+
+	sess, err := adb.StartFridaSession(a.ctx, rt, id, serial, pkg, mode, scripts)
+	if err != nil {
+		return adb.FridaSessionInfo{}, err
+	}
+	a.fridaMu.Lock()
+	a.fridaSess[id] = sess
+	a.fridaMu.Unlock()
+
+	eventName := "frida-session:" + id
+	go func() {
+		for m := range sess.Messages() {
+			runtime.EventsEmit(a.ctx, eventName, m)
+		}
+		// Final state (ended/error) is reflected via the info snapshot the UI
+		// re-reads; signal completion so it can stop showing "running".
+		runtime.EventsEmit(a.ctx, eventName+":done", sess.Info())
+	}()
+	return sess.Info(), nil
+}
+
+// collectScripts resolves library script IDs to name+source pairs for the driver.
+func (a *App) collectScripts(ids []string) ([]adb.FridaScriptArg, error) {
+	var out []adb.FridaScriptArg
+	for _, id := range ids {
+		sc, err := a.frida.GetScript(id)
+		if err != nil {
+			return nil, fmt.Errorf("script %s: %w", id, err)
+		}
+		out = append(out, adb.FridaScriptArg{Name: sc.Name, Source: sc.Source})
+	}
+	return out, nil
+}
+
+// ListFridaSessions returns metadata for all live/finished sessions this run.
+func (a *App) ListFridaSessions() []adb.FridaSessionInfo {
+	a.fridaMu.Lock()
+	defer a.fridaMu.Unlock()
+	out := make([]adb.FridaSessionInfo, 0, len(a.fridaSess))
+	for _, s := range a.fridaSess {
+		out = append(out, s.Info())
+	}
+	return out
+}
+
+// GetFridaSessionLog returns buffered messages with seq > sinceSeq, so the UI can
+// backfill what it missed before (or between) subscriptions and de-dupe by seq.
+func (a *App) GetFridaSessionLog(id string, sinceSeq int) []adb.FridaMsg {
+	a.fridaMu.Lock()
+	s := a.fridaSess[id]
+	a.fridaMu.Unlock()
+	if s == nil {
+		return nil
+	}
+	return s.LogSince(sinceSeq)
+}
+
+// StopFridaSession detaches and terminates a session's driver.
+func (a *App) StopFridaSession(id string) {
+	a.fridaMu.Lock()
+	s := a.fridaSess[id]
+	a.fridaMu.Unlock()
+	if s != nil {
+		s.Stop()
+	}
+}
+
+// RemoveFridaSession stops a session and drops it from the list.
+func (a *App) RemoveFridaSession(id string) {
+	a.fridaMu.Lock()
+	s := a.fridaSess[id]
+	delete(a.fridaSess, id)
+	a.fridaMu.Unlock()
+	if s != nil {
+		s.Stop()
+	}
 }
 
 // ─── Network ─────────────────────────────────────────────────────────────

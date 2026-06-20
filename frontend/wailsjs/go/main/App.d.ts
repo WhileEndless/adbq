@@ -101,6 +101,8 @@ export function GetCodeshareScript(arg1:string,arg2:string):Promise<adb.Codeshar
 
 export function GetFridaScript(arg1:string):Promise<adb.FridaScript>;
 
+export function GetFridaSessionLog(arg1:string,arg2:number):Promise<Array<adb.FridaMsg>>;
+
 export function GetNetworkInfo(arg1:string):Promise<adb.NetworkInfo>;
 
 export function GetProfile(arg1:string):Promise<adb.Profile>;
@@ -158,6 +160,8 @@ export function ListFridaRuntimes():Promise<Array<adb.FridaRuntime>>;
 export function ListFridaScripts():Promise<Array<adb.FridaScript>>;
 
 export function ListFridaServers(arg1:string):Promise<Array<adb.FridaServer>>;
+
+export function ListFridaSessions():Promise<Array<adb.FridaSessionInfo>>;
 
 export function ListIptables(arg1:string,arg2:string,arg3:string):Promise<adb.IPTSnapshot>;
 
@@ -221,6 +225,8 @@ export function RemoveForward(arg1:string,arg2:string):Promise<string>;
 
 export function RemoveFridaRuntime(arg1:string):Promise<void>;
 
+export function RemoveFridaSession(arg1:string):Promise<void>;
+
 export function RemoveReverse(arg1:string,arg2:string):Promise<string>;
 
 export function RemoveTask(arg1:string):Promise<void>;
@@ -265,6 +271,8 @@ export function StartDNSSniffer(arg1:string):Promise<main.DNSSnifferStatus>;
 
 export function StartFrida(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
 
+export function StartFridaSession(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<adb.FridaSessionInfo>;
+
 export function StartLiveCapture(arg1:string,arg2:string,arg3:string,arg4:adb.LiveCaptureOptions):Promise<adb.LiveCaptureState>;
 
 export function StartLogcat(arg1:string,arg2:string):Promise<void>;
@@ -280,6 +288,8 @@ export function StopCapture(arg1:string):Promise<adb.CaptureState>;
 export function StopDNSSniffer(arg1:string):Promise<void>;
 
 export function StopFrida(arg1:string):Promise<string>;
+
+export function StopFridaSession(arg1:string):Promise<void>;
 
 export function StopLiveCapture(arg1:string):Promise<void>;
 
