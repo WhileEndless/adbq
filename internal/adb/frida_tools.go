@@ -1,6 +1,8 @@
 package adb
 
 import (
+	"archive/zip"
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -34,7 +37,7 @@ import (
 // frida ships abi3 (cp37) wheels — one per platform, valid on any CPython ≥3.7 —
 // so wheel selection is purely OS+arch; the Python minor version is irrelevant.
 
-const pypiFridaBase = "https://pypi.org/pypi/frida"
+const pypiBase = "https://pypi.org/pypi"
 const pythonHostedHost = "https://files.pythonhosted.org/"
 
 // FridaRuntime is a host interpreter able to drive Frida.
@@ -62,11 +65,23 @@ type FridaHostInfo struct {
 // DetectHostPython finds a Python 3.7+ on the host (PATH plus the common
 // install dirs lookTool covers, since a Finder-launched app has a minimal PATH).
 func DetectHostPython() (path, version string, err error) {
+	// An explicit override wins, so a user with several Pythons can pin the one
+	// adbq builds venvs with (e.g. a 3.11+ interpreter).
+	var candidates []string
+	if env := strings.TrimSpace(os.Getenv("ADBQ_FRIDA_PYTHON")); env != "" {
+		candidates = append(candidates, env)
+	}
+	candidates = append(candidates, "python3", "python")
+
 	var sawOld string
-	for _, name := range []string{"python3", "python"} {
+	for _, name := range candidates {
 		p, ok := lookTool(name)
 		if !ok {
-			continue
+			if fileExists(name) { // an absolute override path lookTool didn't resolve
+				p, ok = name, true
+			} else {
+				continue
+			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		out, _, e := runHostStdout(ctx, p, "-c", "import sys;print('%d.%d.%d'%sys.version_info[:3])")
@@ -134,16 +149,59 @@ func detectFridaInfo(pythonPath string) (fridaVer, pyVer string, err error) {
 // venvFridaVersion returns the frida version importable from a venv's
 // interpreter, or "" if the venv is absent/broken/missing frida.
 func venvFridaVersion(venvPy string) string {
+	v, _ := venvFridaProbe(venvPy)
+	return v
+}
+
+// venvFridaProbe imports frida in the interpreter and returns its version. On
+// failure it returns the interpreter's stderr (e.g. a ModuleNotFoundError for a
+// missing dependency) so callers can surface an actionable message instead of an
+// empty string. A version token in stdout wins even if the process exits non-zero
+// (some frida builds print the version then crash in native cleanup at exit).
+func venvFridaProbe(venvPy string) (string, error) {
 	if !fileExists(venvPy) {
-		return ""
+		return "", fmt.Errorf("interpreter not found: %s", venvPy)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	out, _, err := runHostStdout(ctx, venvPy, "-c", "import frida;print(frida.__version__)")
-	if err != nil {
-		return ""
+	out, errOut, err := runHostStdout(ctx, venvPy, "-c", "import frida;print(frida.__version__)")
+	if v := parseVersionToken(out); v != "" {
+		return v, nil
 	}
-	return strings.TrimSpace(firstLine(out))
+	if detail := strings.TrimSpace(firstLine(errOut)); detail != "" {
+		return "", fmt.Errorf("%s", detail)
+	}
+	if err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("no version reported")
+}
+
+// hostPythonTarget reports the (GOOS, GOARCH) of a Python interpreter so wheel
+// selection matches the interpreter that will import the wheel, not adbq's own
+// process. Falls back to the build's GOOS/GOARCH if the probe fails.
+func hostPythonTarget(py string) (string, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, _, err := runHostStdout(ctx, py, "-c", "import sys,platform;print(sys.platform);print(platform.machine())")
+	if err != nil {
+		return runtime.GOOS, runtime.GOARCH
+	}
+	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(out, "\r\n", "\n")), "\n")
+	if len(lines) < 2 {
+		return runtime.GOOS, runtime.GOARCH
+	}
+	goos := map[string]string{"darwin": "darwin", "linux": "linux", "win32": "windows", "cygwin": "windows"}[strings.TrimSpace(lines[0])]
+	goarch := map[string]string{
+		"arm64": "arm64", "aarch64": "arm64",
+		"x86_64": "amd64", "amd64": "amd64", "AMD64": "amd64",
+		"armv7l": "arm", "armv8l": "arm",
+		"i686": "386", "i386": "386", "x86": "386",
+	}[strings.TrimSpace(lines[1])]
+	if goos == "" || goarch == "" {
+		return runtime.GOOS, runtime.GOARCH
+	}
+	return goos, goarch
 }
 
 // ─── PyPI wheel resolution ─────────────────────────────────────────────────
@@ -173,12 +231,17 @@ type pypiResponse struct {
 	} `json:"urls"`
 }
 
-// pypiFridaFiles fetches the file list for a frida version from PyPI's JSON API
-// (empty ver = latest). Returns the resolved version and the (non-yanked) files.
+// pypiFridaFiles fetches the file list for a frida version (empty = latest).
 func pypiFridaFiles(ctx context.Context, ver string) (string, []pypiFile, error) {
-	url := pypiFridaBase + "/json"
+	return pypiFiles(ctx, "frida", ver)
+}
+
+// pypiFiles fetches the file list for a package version from PyPI's JSON API
+// (empty ver = latest). Returns the resolved version and the (non-yanked) files.
+func pypiFiles(ctx context.Context, pkg, ver string) (string, []pypiFile, error) {
+	url := pypiBase + "/" + pkg + "/json"
 	if v := strings.TrimPrefix(strings.TrimSpace(ver), "v"); v != "" {
-		url = pypiFridaBase + "/" + v + "/json"
+		url = pypiBase + "/" + pkg + "/" + v + "/json"
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -190,14 +253,14 @@ func pypiFridaFiles(ctx context.Context, ver string) (string, []pypiFile, error)
 	req.Header.Set("Accept", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", nil, fmt.Errorf("query PyPI for frida: %w", err)
+		return "", nil, fmt.Errorf("query PyPI for %s: %w", pkg, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return "", nil, fmt.Errorf("frida %s not found on PyPI", strings.TrimSpace(ver))
+		return "", nil, fmt.Errorf("%s %s not found on PyPI", pkg, strings.TrimSpace(ver))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("PyPI returned HTTP %d for frida %s", resp.StatusCode, strings.TrimSpace(ver))
+		return "", nil, fmt.Errorf("PyPI returned HTTP %d for %s %s", resp.StatusCode, pkg, strings.TrimSpace(ver))
 	}
 	var pr pypiResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&pr); err != nil {
@@ -263,6 +326,126 @@ func selectHostWheel(files []pypiFile, goos, goarch string) (pypiFile, error) {
 		}
 	}
 	return pypiFile{}, fmt.Errorf("no matching Frida wheel for %s/%s among %d files", goos, goarch, len(files))
+}
+
+// selectUniversalWheel picks a pure-Python (py3-none-any) wheel — used for
+// frida's declared dependencies (e.g. typing_extensions), which are platform-
+// independent.
+func selectUniversalWheel(files []pypiFile) (pypiFile, error) {
+	for _, f := range files {
+		if f.PackageType == "bdist_wheel" && strings.HasSuffix(f.Filename, "-none-any.whl") {
+			return f, nil
+		}
+	}
+	return pypiFile{}, fmt.Errorf("no pure-python wheel available")
+}
+
+// wheelRequires reads the Requires-Dist lines from a wheel's METADATA. A wheel is
+// a zip; reading METADATA executes no code (unlike an sdist's setup.py).
+func wheelRequires(wheelPath string) ([]string, error) {
+	zr, err := zip.OpenReader(wheelPath)
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if !strings.HasSuffix(f.Name, ".dist-info/METADATA") {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		var reqs []string
+		sc := bufio.NewScanner(rc)
+		for sc.Scan() {
+			line := sc.Text()
+			if line == "" {
+				break // headers end at the first blank line
+			}
+			if r, ok := strings.CutPrefix(line, "Requires-Dist:"); ok {
+				reqs = append(reqs, strings.TrimSpace(r))
+			}
+		}
+		return reqs, sc.Err()
+	}
+	return nil, nil
+}
+
+// neededDeps returns the bare package names from a wheel's Requires-Dist that
+// apply to the target Python version (markers evaluated). Extra-gated deps are
+// skipped since we never request extras.
+func neededDeps(requires []string, pyVer string) []string {
+	var out []string
+	for _, req := range requires {
+		name, marker := splitRequirement(req)
+		if name == "" {
+			continue
+		}
+		if marker != "" && !markerApplies(marker, pyVer) {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// splitRequirement parses "name[extras] (spec) ; marker" into the package name
+// and the marker expression.
+func splitRequirement(req string) (name, marker string) {
+	parts := strings.SplitN(req, ";", 2)
+	spec := strings.TrimSpace(parts[0])
+	if len(parts) == 2 {
+		marker = strings.TrimSpace(parts[1])
+	}
+	name = spec
+	if i := strings.IndexAny(spec, " [(<>=!~"); i >= 0 {
+		name = spec[:i]
+	}
+	return strings.TrimSpace(name), marker
+}
+
+var rePyVerMarker = regexp.MustCompile(`python_version\s*(<=|>=|==|!=|<|>)\s*["']([0-9.]+)["']`)
+
+// markerApplies evaluates a PEP 508 environment marker for our install context.
+// We don't request extras, so extra-gated deps never apply. python_version
+// comparisons are evaluated against pyVer; unknown markers default to applying
+// (better to install a maybe-needed pure-python dep than to miss a required one).
+func markerApplies(marker, pyVer string) bool {
+	if strings.Contains(marker, "extra") {
+		return false
+	}
+	if strings.Contains(marker, "python_version") {
+		m := rePyVerMarker.FindStringSubmatch(marker)
+		if m == nil {
+			return true
+		}
+		cmp := compareVersions(majorMinor(pyVer), m[2])
+		switch m[1] {
+		case "<":
+			return cmp < 0
+		case "<=":
+			return cmp <= 0
+		case ">":
+			return cmp > 0
+		case ">=":
+			return cmp >= 0
+		case "==":
+			return cmp == 0
+		case "!=":
+			return cmp != 0
+		}
+	}
+	return true
+}
+
+func majorMinor(v string) string {
+	p := strings.Split(strings.TrimSpace(v), ".")
+	if len(p) >= 2 {
+		return p[0] + "." + p[1]
+	}
+	return v
 }
 
 // ─── Runtime store (runtime.json) ──────────────────────────────────────────
@@ -336,13 +519,72 @@ func (s *FridaStore) SetManagedEnabled(v bool) error {
 	return s.save()
 }
 
-// ListRuntimes returns managed venvs plus registered external interpreters.
+// ListRuntimes returns every host runtime able to drive Frida: managed venvs,
+// registered external interpreters, and any frida already importable from a host
+// Python (auto-discovered, so an existing install needs no manual registration).
 func (s *FridaStore) ListRuntimes() []FridaRuntime {
 	s.mu.Lock()
 	exts := append([]FridaRuntime(nil), s.external...)
 	s.mu.Unlock()
+
 	out := listVenvs()
-	return append(out, exts...)
+	seen := map[string]bool{}
+	for _, r := range out {
+		seen[r.PythonPath] = true
+	}
+	for _, e := range exts {
+		if !seen[e.PythonPath] {
+			seen[e.PythonPath] = true
+			out = append(out, e)
+		}
+	}
+	for _, d := range discoverSystemRuntimes() {
+		if !seen[d.PythonPath] {
+			seen[d.PythonPath] = true
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// discoverSystemRuntimes probes the host Python interpreters (the ADBQ_FRIDA_PYTHON
+// override, then python3/python) and reports any that can already import frida.
+// Most system Pythons lack frida and fail fast; one that has it becomes a usable
+// runtime with no registration step.
+func discoverSystemRuntimes() []FridaRuntime {
+	var cands []string
+	if env := strings.TrimSpace(os.Getenv("ADBQ_FRIDA_PYTHON")); env != "" {
+		cands = append(cands, env)
+	}
+	cands = append(cands, "python3", "python")
+
+	var out []FridaRuntime
+	seen := map[string]bool{}
+	for _, name := range cands {
+		p, ok := lookTool(name)
+		if !ok {
+			if fileExists(name) {
+				p = name
+			} else {
+				continue
+			}
+		}
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		if fv, pv, err := detectFridaInfo(p); err == nil && fv != "" {
+			out = append(out, FridaRuntime{
+				ID:            "system:" + p,
+				Kind:          "system",
+				Label:         "System " + filepath.Base(p) + " (frida " + fv + ")",
+				PythonPath:    p,
+				FridaVersion:  fv,
+				PythonVersion: pv,
+			})
+		}
+	}
+	return out
 }
 
 // EnsureVenv provisions (or reuses) a managed venv with frida pinned to ver.
@@ -354,7 +596,7 @@ func (s *FridaStore) EnsureVenv(ctx context.Context, ver string, progress func(s
 	if ver == "" {
 		return FridaRuntime{}, fmt.Errorf("no Frida version specified")
 	}
-	py, _, err := DetectHostPython()
+	py, pyVer, err := DetectHostPython()
 	if err != nil {
 		return FridaRuntime{}, err
 	}
@@ -389,7 +631,10 @@ func (s *FridaStore) EnsureVenv(ctx context.Context, ver string, progress func(s
 		_ = os.RemoveAll(venvDir)
 		return FridaRuntime{}, err
 	}
-	wheel, err := selectHostWheel(files, runtime.GOOS, runtime.GOARCH)
+	// Match the wheel to the venv's own interpreter arch, not adbq's process arch
+	// — a user may run an x86_64 Python under Rosetta on an arm64 mac, etc.
+	goos, goarch := hostPythonTarget(venvPy)
+	wheel, err := selectHostWheel(files, goos, goarch)
 	if err != nil {
 		_ = os.RemoveAll(venvDir)
 		return FridaRuntime{}, err
@@ -399,28 +644,54 @@ func (s *FridaStore) EnsureVenv(ctx context.Context, ver string, progress func(s
 		_ = os.RemoveAll(venvDir)
 		return FridaRuntime{}, err
 	}
-	wheelPath := filepath.Join(wheelsDir, wheel.Filename)
 
 	progress("downloading wheel")
+	wheelPath := filepath.Join(wheelsDir, wheel.Filename)
 	if err := downloadVerifiedAsset(ctx, wheel.URL, wheel.SHA256, wheelPath, []string{pythonHostedHost}); err != nil {
 		_ = os.RemoveAll(venvDir)
 		return FridaRuntime{}, err
 	}
 
-	// Offline install of the one verified wheel: no index, no deps, no sdist
-	// build — pip executes no network resolution and no arbitrary setup.py.
+	// frida declares deps (e.g. typing_extensions on Python < 3.11). Resolve the
+	// ones that apply to this interpreter and fetch each as a SHA256-verified
+	// wheel too, so the offline install below stays self-contained yet correct.
+	installFiles := []string{wheelPath}
+	reqs, _ := wheelRequires(wheelPath)
+	for _, dep := range neededDeps(reqs, pyVer) {
+		_, dfiles, derr := pypiFiles(ctx, dep, "")
+		if derr != nil {
+			continue // best-effort; the post-install import check catches a real miss
+		}
+		dw, werr := selectUniversalWheel(dfiles)
+		if werr != nil {
+			continue
+		}
+		dwPath := filepath.Join(wheelsDir, dw.Filename)
+		if err := downloadVerifiedAsset(ctx, dw.URL, dw.SHA256, dwPath, []string{pythonHostedHost}); err != nil {
+			_ = os.RemoveAll(venvDir)
+			return FridaRuntime{}, fmt.Errorf("download dependency %s: %w", dep, err)
+		}
+		installFiles = append(installFiles, dwPath)
+	}
+
+	// Offline install of the verified wheels: no index, no transitive deps, no
+	// sdist build — pip executes no network resolution and no arbitrary setup.py.
 	progress("installing")
+	args := append([]string{"-m", "pip", "install", "--no-index", "--no-deps", "--only-binary=:all:"}, installFiles...)
 	ictx, icancel := context.WithTimeout(ctx, 3*time.Minute)
-	out, err = runHost(ictx, venvPy, "-m", "pip", "install", "--no-index", "--no-deps", "--only-binary=:all:", wheelPath)
+	out, err = runHost(ictx, venvPy, args...)
 	icancel()
 	if err != nil {
 		_ = os.RemoveAll(venvDir)
 		return FridaRuntime{}, fmt.Errorf("pip install: %s", firstLineOr(out, err))
 	}
 
-	got := venvFridaVersion(venvPy)
+	got, perr := venvFridaProbe(venvPy)
 	if got != ver {
 		_ = os.RemoveAll(venvDir)
+		if perr != nil {
+			return FridaRuntime{}, fmt.Errorf("post-install check failed: %v", perr)
+		}
 		return FridaRuntime{}, fmt.Errorf("post-install check failed: venv reports frida %q, expected %q", got, ver)
 	}
 	progress("ready")
@@ -464,6 +735,9 @@ func (s *FridaStore) RegisterExternal(path string) (FridaRuntime, error) {
 
 // RemoveRuntime deletes a managed venv (by version) or forgets an external entry.
 func (s *FridaStore) RemoveRuntime(id string) error {
+	if strings.HasPrefix(id, "system:") {
+		return fmt.Errorf("auto-discovered system runtime — uninstall frida from that Python to remove it")
+	}
 	if ver, ok := strings.CutPrefix(id, "managed:"); ok {
 		if ver == "" || strings.ContainsAny(ver, "/\\") {
 			return fmt.Errorf("invalid runtime id")

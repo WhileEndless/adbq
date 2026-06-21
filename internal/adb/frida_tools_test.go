@@ -132,6 +132,76 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
+func TestNeededDeps(t *testing.T) {
+	// frida's real metadata: typing_extensions only on Python < 3.11.
+	reqs := []string{`typing_extensions; python_version < "3.11"`}
+	if got := neededDeps(reqs, "3.9.6"); len(got) != 1 || got[0] != "typing_extensions" {
+		t.Fatalf("py3.9 should need typing_extensions, got %v", got)
+	}
+	if got := neededDeps(reqs, "3.11.2"); len(got) != 0 {
+		t.Fatalf("py3.11 should need nothing, got %v", got)
+	}
+	if got := neededDeps(reqs, "3.13.0"); len(got) != 0 {
+		t.Fatalf("py3.13 should need nothing, got %v", got)
+	}
+	// Extras are never requested → never needed.
+	if got := neededDeps([]string{`colorama; extra == "cli"`}, "3.9.0"); len(got) != 0 {
+		t.Fatalf("extra-gated dep should be skipped, got %v", got)
+	}
+	// Unmarked dep is always needed; version spec stripped from the name.
+	if got := neededDeps([]string{"requests>=2.0"}, "3.12.0"); len(got) != 1 || got[0] != "requests" {
+		t.Fatalf("unmarked dep: got %v", got)
+	}
+}
+
+func TestSplitRequirement(t *testing.T) {
+	cases := []struct{ in, name, marker string }{
+		{`typing_extensions; python_version < "3.11"`, "typing_extensions", `python_version < "3.11"`},
+		{"requests>=2.0", "requests", ""},
+		{"colorama; extra == 'cli'", "colorama", "extra == 'cli'"},
+		{"frida[tools] (>=1.0)", "frida", ""},
+	}
+	for _, c := range cases {
+		n, m := splitRequirement(c.in)
+		if n != c.name || m != c.marker {
+			t.Errorf("splitRequirement(%q) = (%q,%q), want (%q,%q)", c.in, n, m, c.name, c.marker)
+		}
+	}
+}
+
+func TestMarkerApplies(t *testing.T) {
+	cases := []struct {
+		marker, pyVer string
+		want          bool
+	}{
+		{`python_version < "3.11"`, "3.9.6", true},
+		{`python_version < "3.11"`, "3.11.0", false},
+		{`python_version >= "3.8"`, "3.9.0", true},
+		{`python_version >= "3.8"`, "3.7.5", false},
+		{`extra == "cli"`, "3.9.0", false},
+		{`sys_platform == "linux"`, "3.9.0", true}, // unknown → default apply
+	}
+	for _, c := range cases {
+		if got := markerApplies(c.marker, c.pyVer); got != c.want {
+			t.Errorf("markerApplies(%q, %q) = %v, want %v", c.marker, c.pyVer, got, c.want)
+		}
+	}
+}
+
+func TestSelectUniversalWheel(t *testing.T) {
+	files := []pypiFile{
+		{Filename: "typing_extensions-4.12.2.tar.gz", PackageType: "sdist"},
+		{Filename: "typing_extensions-4.12.2-py3-none-any.whl", PackageType: "bdist_wheel"},
+	}
+	w, err := selectUniversalWheel(files)
+	if err != nil || w.Filename != "typing_extensions-4.12.2-py3-none-any.whl" {
+		t.Fatalf("selectUniversalWheel: %q err=%v", w.Filename, err)
+	}
+	if _, err := selectUniversalWheel(files[:1]); err == nil {
+		t.Fatal("expected error when only an sdist is available")
+	}
+}
+
 func TestResolveForVersion(t *testing.T) {
 	// Isolate the cache dir so listVenvs() finds no real managed venvs.
 	t.Setenv("HOME", t.TempDir())
