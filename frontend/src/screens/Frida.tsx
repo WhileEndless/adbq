@@ -152,12 +152,12 @@ export function FridaScreen({device}: {device: adb.Device}) {
     <div className='screen'>
       <div className='screen-header'>
         <h1>Frida {active && tab === 'server' && <Badge kind='accent'>active</Badge>}</h1>
-        <div style={{display: 'flex', gap: 4, marginLeft: 8}}>
-          <button className={`btn sm${tab === 'server' ? ' primary' : ''}`} onClick={() => setTab('server')}>Server</button>
-          <button className={`btn sm${tab === 'runtime' ? ' primary' : ''}`} onClick={() => setTab('runtime')}>Runtime</button>
-          <button className={`btn sm${tab === 'scripts' ? ' primary' : ''}`} onClick={() => setTab('scripts')}>Scripts</button>
-          <button className={`btn sm${tab === 'appscripts' ? ' primary' : ''}`} onClick={() => setTab('appscripts')}>App Scripts</button>
-          <button className={`btn sm${tab === 'sessions' ? ' primary' : ''}`} onClick={() => setTab('sessions')}>
+        <div className='subtabs' style={{marginLeft: 10}}>
+          <button className={`subtab${tab === 'server' ? ' active' : ''}`} onClick={() => setTab('server')}>Server</button>
+          <button className={`subtab${tab === 'runtime' ? ' active' : ''}`} onClick={() => setTab('runtime')}>Runtime</button>
+          <button className={`subtab${tab === 'scripts' ? ' active' : ''}`} onClick={() => setTab('scripts')}>Scripts</button>
+          <button className={`subtab${tab === 'appscripts' ? ' active' : ''}`} onClick={() => setTab('appscripts')}>App Scripts</button>
+          <button className={`subtab${tab === 'sessions' ? ' active' : ''}`} onClick={() => setTab('sessions')}>
             Sessions{sessionCount > 0 ? ` (${sessionCount})` : ''}
           </button>
         </div>
@@ -465,15 +465,17 @@ function FridaRuntimeTab({device}: {device: adb.Device}) {
               <div>
                 <div className='meta-row'>
                   <strong>frida {rt.fridaVersion || '?'}</strong>
-                  <Badge kind={rt.kind === 'managed' ? 'accent' : undefined}>{rt.kind}</Badge>
+                  <Badge kind={rt.kind === 'managed' ? 'accent' : rt.kind === 'system' ? 'ok' : undefined}>{rt.kind === 'system' ? 'discovered' : rt.kind}</Badge>
                   {rt.pythonVersion && <Badge>py {rt.pythonVersion}</Badge>}
                 </div>
                 <div className='filename'>{rt.pythonPath}</div>
               </div>
               <div style={{flex: 1}}/>
-              <button className='btn sm danger' onClick={() => remove(rt)} title={rt.kind === 'managed' ? 'Delete venv' : 'Forget'}>
-                <Icon.Trash width={11} height={11}/>
-              </button>
+              {rt.kind === 'system'
+                ? <span className='subtle' style={{fontSize: 11}} title='Already installed on this machine — used automatically'>auto</span>
+                : <button className='btn sm danger' onClick={() => remove(rt)} title={rt.kind === 'managed' ? 'Delete venv' : 'Forget'}>
+                    <Icon.Trash width={11} height={11}/>
+                  </button>}
             </div>
           ))}
           <div style={{display: 'flex', gap: 6, marginTop: 6, alignItems: 'center'}}>
@@ -604,20 +606,54 @@ function CodeshareModal({open, onClose, onImported}: {open: boolean; onClose: ()
   const [err, setErr] = useState('');
   const [preview, setPreview] = useState<adb.CodeshareScript | null>(null);
   const [importing, setImporting] = useState(false);
+  const [mode, setMode] = useState<'browse' | 'search'>('browse');
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
 
   // Load the popular listing when the modal first opens.
   useEffect(() => {
-    if (open && results.length === 0 && !q) search('');
+    if (open && results.length === 0 && !q) run('');
     if (!open) { setPreview(null); setErr(''); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  function search(query: string) {
+  // run searches CodeShare (full results) or, for an empty query, browses the
+  // popular listing page 1. Browse is paginated (16/page) → "Load more"; search
+  // returns everything matching in one response.
+  function run(query: string) {
+    const term = query.trim();
     setLoading(true);
     setErr('');
-    API.SearchCodeshare(query)
-      .then(r => setResults(r || []))
-      .catch(e => { setErr(String(e)); setResults([]); })
+    if (!term) {
+      setMode('browse');
+      setPage(1);
+      API.BrowseCodeshare(1)
+        .then(r => { setResults(r || []); setHasMore((r || []).length >= 12); })
+        .catch(e => { setErr(String(e)); setResults([]); setHasMore(false); })
+        .finally(() => setLoading(false));
+    } else {
+      setMode('search');
+      API.SearchCodeshare(term)
+        .then(r => { setResults(r || []); setHasMore(false); })
+        .catch(e => { setErr(String(e)); setResults([]); })
+        .finally(() => setLoading(false));
+    }
+  }
+
+  function loadMore() {
+    const next = page + 1;
+    setLoading(true);
+    API.BrowseCodeshare(next)
+      .then(r => {
+        const add = r || [];
+        setResults(prev => {
+          const seen = new Set(prev.map(p => `${p.owner}/${p.slug}`));
+          return prev.concat(add.filter(p => !seen.has(`${p.owner}/${p.slug}`)));
+        });
+        setPage(next);
+        setHasMore(add.length >= 12);
+      })
+      .catch(() => setHasMore(false))
       .finally(() => setLoading(false));
   }
 
@@ -641,12 +677,17 @@ function CodeshareModal({open, onClose, onImported}: {open: boolean; onClose: ()
     <Modal open={open} onClose={onClose} title='Frida CodeShare' width={760}
       footer={<button className='btn' onClick={onClose}>Close</button>}>
       {!preview ? (
-        <div style={{display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 480}}>
-          <form style={{display: 'flex', gap: 6}} onSubmit={e => { e.preventDefault(); search(q); }}>
+        <div style={{display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 520}}>
+          <form style={{display: 'flex', gap: 6}} onSubmit={e => { e.preventDefault(); run(q); }}>
             <SearchInput value={q} onChange={setQ} placeholder='Search CodeShare (e.g. ssl pinning)…'/>
             <button className='btn primary' type='submit'><Icon.Search/>Search</button>
+            {q && <button className='btn' type='button' onClick={() => { setQ(''); run(''); }}>Clear</button>}
           </form>
-          {loading && <div className='muted' style={{padding: 16, textAlign: 'center'}}>Loading…</div>}
+          <div className='muted' style={{fontSize: 11, display: 'flex', alignItems: 'center', gap: 6}}>
+            {mode === 'search'
+              ? <span>{results.length} result{results.length === 1 ? '' : 's'} for “{q.trim()}”</span>
+              : <span>Popular on CodeShare{results.length ? ` · ${results.length} loaded` : ''}</span>}
+          </div>
           {err && <div className='card' style={{padding: 10, borderColor: 'var(--err)', fontSize: 12, color: 'var(--err)'}}>{err}</div>}
           <div style={{display: 'flex', flexDirection: 'column', gap: 4, overflow: 'auto'}}>
             {!loading && results.length === 0 && !err && (
@@ -665,6 +706,10 @@ function CodeshareModal({open, onClose, onImported}: {open: boolean; onClose: ()
                 <button className='btn sm' onClick={e => { e.stopPropagation(); openPreview(r); }}>View</button>
               </div>
             ))}
+            {loading && <div className='muted' style={{padding: 12, textAlign: 'center'}}>Loading…</div>}
+            {!loading && mode === 'browse' && hasMore && (
+              <button className='btn' style={{margin: '6px auto'}} onClick={loadMore}>Load more</button>
+            )}
           </div>
         </div>
       ) : (

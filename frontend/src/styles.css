@@ -616,6 +616,34 @@ input, select, textarea { font: inherit; color: inherit; }
 .logrow.F { border-left-color: rgba(212,114,240,0.6); }
 .logrow.F .lvl, .logrow.F .tag-msg { color: var(--log-f); }
 
+/* Segmented sub-tabs (e.g. the Frida screen's Server|Runtime|… switcher). */
+.subtabs {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 3px;
+}
+.subtab {
+  padding: 5px 13px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.subtab:hover { color: var(--text); background: var(--hover); }
+.subtab.active {
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 1px 3px var(--accent-soft-strong);
+}
+
 /* Frida live session console — reuses the log color tokens for consistency. */
 .frida-console {
   flex: 1;
