@@ -1,8 +1,10 @@
 package adb
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -446,6 +448,172 @@ func majorMinor(v string) string {
 		return p[0] + "." + p[1]
 	}
 	return v
+}
+
+// ─── Runtime bridges (Java/ObjC/Swift) ─────────────────────────────────────
+//
+// Frida 17 removed the legacy `Java`/`ObjC`/`Swift` globals from the agent
+// runtime; scripts now obtain them on demand. The `frida` CLI works because
+// frida-tools ships the bridge implementations (frida_tools/bridges/*.js) and
+// injects them. The bare `frida` package we install does NOT include them, so a
+// pinning-bypass script that references `Java` fails with "Java is not defined".
+//
+// We mirror what frida-tools does: download the matching frida-tools wheel
+// (verified by SHA256, no install, no deps — we only read the data files out of
+// the zip) and cache the three bridge .js files. The driver then prepends the
+// needed bridge(s), wrapped exactly like frida-tools' repl agent does
+// (run the bridge source, then `globalThis.<Name> = bridge`).
+
+// fridaBridgesDir is where extracted bridge .js files are cached, per version.
+func fridaBridgesDir(ver string) (string, error) {
+	base, err := fridaCacheSub("bridges")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, ver), nil
+}
+
+// ensureFridaBridges makes sure java.js/objc.js/swift.js for the given frida
+// version are cached on disk, downloading the frida-tools wheel once if needed.
+// Returns the directory holding them. Best-effort: callers proceed without
+// bridges if this fails (only scripts using Java/ObjC/Swift are affected).
+func ensureFridaBridges(ctx context.Context, ver string) (string, error) {
+	ver = strings.TrimPrefix(strings.TrimSpace(ver), "v")
+	if ver == "" {
+		return "", fmt.Errorf("no frida version for bridges")
+	}
+	dir, err := fridaBridgesDir(ver)
+	if err != nil {
+		return "", err
+	}
+	if fileExists(filepath.Join(dir, "java.js")) {
+		return dir, nil // already extracted
+	}
+
+	// frida-tools has its OWN version scheme (independent of frida core — e.g.
+	// frida-tools 14.x ships bridges for frida 17). Use the latest; its bridges
+	// target the current frida major.
+	_, files, err := pypiFiles(ctx, "frida-tools", "")
+	if err != nil {
+		return "", fmt.Errorf("resolve frida-tools: %w", err)
+	}
+	art, isSdist, err := selectFridaToolsArtifact(files)
+	if err != nil {
+		return "", err
+	}
+	wheelsDir, err := fridaWheelsDir()
+	if err != nil {
+		return "", err
+	}
+	artPath := filepath.Join(wheelsDir, art.Filename)
+	if err := downloadVerifiedAsset(ctx, art.URL, art.SHA256, artPath, []string{pythonHostedHost}); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	extract := extractFridaBridgesZip
+	if isSdist {
+		extract = extractFridaBridgesTar
+	}
+	if err := extract(artPath, dir); err != nil {
+		return "", err
+	}
+	if !fileExists(filepath.Join(dir, "java.js")) {
+		return "", fmt.Errorf("frida-tools artifact %s contained no bridges", art.Filename)
+	}
+	return dir, nil
+}
+
+// selectFridaToolsArtifact prefers a pure-python wheel, falling back to the
+// source tarball (recent frida-tools releases publish only an sdist, which still
+// bundles the prebuilt bridge .js files).
+func selectFridaToolsArtifact(files []pypiFile) (pypiFile, bool, error) {
+	for _, f := range files {
+		if f.PackageType == "bdist_wheel" && strings.HasSuffix(f.Filename, "-none-any.whl") {
+			return f, false, nil
+		}
+	}
+	for _, f := range files {
+		if f.PackageType == "sdist" && strings.HasSuffix(f.Filename, ".tar.gz") {
+			return f, true, nil
+		}
+	}
+	return pypiFile{}, false, fmt.Errorf("no usable frida-tools artifact (wheel or sdist)")
+}
+
+var fridaBridgeFiles = map[string]bool{"java.js": true, "objc.js": true, "swift.js": true}
+
+func baseName(p string) string {
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+// extractFridaBridgesZip copies frida_tools/bridges/{java,objc,swift}.js out of
+// a frida-tools wheel (a zip) without installing the package or its deps.
+func extractFridaBridgesZip(wheelPath, destDir string) error {
+	zr, err := zip.OpenReader(wheelPath)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if !strings.Contains(f.Name, "frida_tools/bridges/") || !fridaBridgeFiles[baseName(f.Name)] {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, 16<<20))
+		rc.Close()
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(destDir, baseName(f.Name)), data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// extractFridaBridgesTar does the same from a frida-tools source tarball
+// (.tar.gz). Recent frida-tools releases ship only an sdist, but it still
+// bundles the prebuilt bridge .js files as package data.
+func extractFridaBridgesTar(tgzPath, destDir string) error {
+	f, err := os.Open(tgzPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(h.Name, "frida_tools/bridges/") || !fridaBridgeFiles[baseName(h.Name)] {
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(tr, 16<<20))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(destDir, baseName(h.Name)), data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ─── Runtime store (runtime.json) ──────────────────────────────────────────

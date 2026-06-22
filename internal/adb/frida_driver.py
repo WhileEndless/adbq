@@ -14,11 +14,45 @@
 #                "scripts": [{"name": str, "source": str}, ...]}
 
 import sys
+import os
+import re
 import json
 import threading
 import signal
 
 DRIVER_PROTO = 1
+
+# Frida 17 dropped the legacy Java/ObjC/Swift globals from the agent runtime.
+# When a script references one, we prepend the matching bridge implementation
+# (shipped by frida-tools, extracted by the Go side into bridgesDir) wrapped the
+# same way frida-tools' repl agent does: run the bridge source, which defines a
+# local `bridge`, then publish it as the global. Without this, pinning-bypass
+# scripts fail with "ReferenceError: 'Java' is not defined".
+_BRIDGES = [("Java", "java.js"), ("ObjC", "objc.js"), ("Swift", "swift.js")]
+
+
+def bridge_prologue(source, bridges_dir):
+    if not bridges_dir or not os.path.isdir(bridges_dir):
+        return ""
+    parts = []
+    for name, fname in _BRIDGES:
+        if re.search(r"\b" + name + r"\b", source) is None:
+            continue
+        path = os.path.join(bridges_dir, fname)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                src = fh.read().strip()
+        except Exception:
+            continue
+        if not src:
+            continue
+        # Keep it on one line so user-script line numbers barely shift (the
+        # bridge sources are minified single-line bundles).
+        parts.append(
+            "(function(){ %s\n;Object.defineProperty(globalThis,'%s',{value:bridge,configurable:true}); })();"
+            % (src, name)
+        )
+    return "".join(parts)
 
 
 def emit(obj):
@@ -50,6 +84,7 @@ def main():
     package = job.get("package")
     mode = job.get("mode", "spawn")
     scripts = job.get("scripts", [])
+    bridges_dir = job.get("bridgesDir") or ""
 
     try:
         import frida
@@ -138,8 +173,10 @@ def main():
     for i, sc in enumerate(scripts):
         name = sc.get("name") or ("script-%d" % i)
         source = sc.get("source", "")
+        prologue = bridge_prologue(source, bridges_dir)
+        full_source = (prologue + "\n" + source) if prologue else source
         try:
-            script = session.create_script(source)
+            script = session.create_script(full_source)
             script.on("message", make_handler(name))
             script.load()
             loaded += 1

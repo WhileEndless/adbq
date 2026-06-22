@@ -73,10 +73,11 @@ type FridaSession struct {
 }
 
 type fridaJob struct {
-	Serial  string           `json:"serial"`
-	Package string           `json:"package"`
-	Mode    string           `json:"mode"`
-	Scripts []FridaScriptArg `json:"scripts"`
+	Serial     string           `json:"serial"`
+	Package    string           `json:"package"`
+	Mode       string           `json:"mode"`
+	Scripts    []FridaScriptArg `json:"scripts"`
+	BridgesDir string           `json:"bridgesDir,omitempty"` // dir with java.js/objc.js/swift.js (Frida 17 needs these)
 }
 
 // StartFridaSession launches the embedded driver under the given host runtime,
@@ -104,8 +105,21 @@ func StartFridaSession(ctx context.Context, rt FridaRuntime, id, serial, pkg, mo
 		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
+	// Provision the Frida 17 runtime bridges (Java/ObjC/Swift) so scripts that
+	// reference them work like they do under the `frida` CLI. Best-effort and
+	// cached: a failure just means a Java-using script will report the same
+	// "Java is not defined" as before, but non-bridge scripts still run.
+	bridgesDir := ""
+	if rt.FridaVersion != "" {
+		bctx, bcancel := context.WithTimeout(ctx, 60*time.Second)
+		if d, err := ensureFridaBridges(bctx, rt.FridaVersion); err == nil {
+			bridgesDir = d
+		}
+		bcancel()
+	}
+
 	jobPath := filepath.Join(tmp, "job.json")
-	jobBytes, _ := json.Marshal(fridaJob{Serial: serial, Package: pkg, Mode: mode, Scripts: scripts})
+	jobBytes, _ := json.Marshal(fridaJob{Serial: serial, Package: pkg, Mode: mode, Scripts: scripts, BridgesDir: bridgesDir})
 	if err := os.WriteFile(jobPath, jobBytes, 0o600); err != nil {
 		_ = os.RemoveAll(tmp)
 		return nil, err
