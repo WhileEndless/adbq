@@ -270,7 +270,7 @@ export function FridaScreen({device}: {device: adb.Device}) {
         ) : tab === 'appscripts' ? (
           <FridaAppScriptsTab/>
         ) : (
-          <FridaSessionsTab/>
+          <FridaSessionsTab device={device}/>
         )}
       </div>
 
@@ -806,44 +806,109 @@ function FridaAppScriptsTab() {
 // FridaSessionsTab lists live/finished sessions and renders a colored console
 // for the selected one. Messages keep arriving into the store while this tab is
 // closed; on mount we re-attach (idempotent) so nothing is missed.
-function FridaSessionsTab() {
+function FridaSessionsTab({device}: {device: adb.Device}) {
   const store = useStore();
   const sessions = Object.values(store.fridaSessions).sort((a, b) => b.info.startedAt - a.info.startedAt);
   const [selId, setSelId] = useState('');
   const sel = store.fridaSessions[selId] || sessions[0];
+  const [history, setHistory] = useState<adb.FridaHistoryEntry[]>([]);
+  const [repeating, setRepeating] = useState('');
+
+  const loadHistory = () => { API.ListFridaHistory().then(h => setHistory(h || [])).catch(() => {}); };
 
   // Re-attach every known session so a remount/HMR re-subscribes + backfills.
   useEffect(() => {
     Object.keys(store.fridaSessions).forEach(id => store.attachFridaSession(id));
+    loadHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (sessions.length === 0) {
-    return (
-      <div className='muted' style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, textAlign: 'center', padding: 24}}>
-        No Frida sessions yet.<br/>Start one from an app’s <strong>&nbsp;Start with Frida&nbsp;</strong> action in the Apps tab.
-      </div>
-    );
+  async function repeat(h: adb.FridaHistoryEntry) {
+    if (!device?.id) { showToast({title: 'No device', body: 'Connect a device first', kind: 'err'}); return; }
+    setRepeating(h.package);
+    try {
+      const info = await store.startFridaSession(device.id, h.package, h.mode, h.runtimeVer, h.scriptIds || []);
+      setSelId(info.id);
+      loadHistory();
+    } catch (e) {
+      showToast({title: 'Repeat failed', body: String(e), kind: 'err'});
+    } finally {
+      setRepeating('');
+    }
   }
+  function forget(pkg: string) { API.RemoveFridaHistory(pkg).then(loadHistory).catch(() => {}); }
 
-  return (
-    <div style={{height: '100%', display: 'grid', gridTemplateColumns: 'minmax(200px, 260px) minmax(0, 1fr)', gap: 12, minHeight: 0}}>
-      <div style={{display: 'flex', flexDirection: 'column', minHeight: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'auto'}}>
-        {sessions.map(s => (
-          <div key={s.info.id} onClick={() => setSelId(s.info.id)}
-               style={{padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', background: sel?.info.id === s.info.id ? 'var(--accent-soft)' : undefined}}>
-            <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-              <span style={{fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{s.info.package}</span>
-              <div style={{flex: 1}}/>
-              <SessionStatusBadge slice={s}/>
+  const recents = (
+    <div className='card' style={{display: 'flex', flexDirection: 'column', minHeight: 0}}>
+      <div className='card-header'>
+        <span className='title'>Recents</span>
+        {history.length > 0 && <Badge>{history.length}</Badge>}
+        <div style={{flex: 1}}/>
+        {history.length > 0 && (
+          <button className='btn sm' title='Clear history' onClick={() => confirmDialog({title: 'Clear Frida recents?', body: 'Forget all previously instrumented apps.', confirmLabel: 'Clear', danger: true}).then(ok => { if (ok) API.ClearFridaHistory().then(loadHistory); })}>Clear</button>
+        )}
+      </div>
+      <div style={{overflow: 'auto', minHeight: 0}}>
+        {history.length === 0 && (
+          <div className='muted' style={{padding: 14, fontSize: 12}}>
+            No history yet. Launch an app from <strong>Start with Frida</strong> in Apps; it’ll appear here for one-click repeat.
+          </div>
+        )}
+        {history.map(h => (
+          <div key={h.package} className='frida-recent-row' style={{display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderBottom: '1px solid var(--border)'}}>
+            <div style={{minWidth: 0, flex: 1}}>
+              <div className='mono' style={{fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{h.package}</div>
+              <div className='subtle' style={{fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                {h.mode}{h.scriptNames && h.scriptNames.length ? ' · ' + h.scriptNames.join(', ') : ' · no scripts'} · {fmtAgo(h.lastRun)}{h.count > 1 ? ` · ×${h.count}` : ''}
+              </div>
             </div>
-            <div className='subtle' style={{fontSize: 11}}>{s.info.mode} · frida {s.info.runtime}</div>
+            <button className='btn sm primary' disabled={!!repeating} onClick={() => repeat(h)} title='Run again with the same scripts'>
+              {repeating === h.package ? '…' : <><Icon.Play/>Repeat</>}
+            </button>
+            <button className='btn sm' title='Forget' onClick={() => forget(h.package)}><Icon.Trash width={11} height={11}/></button>
           </div>
         ))}
       </div>
-      {sel ? <FridaConsole key={sel.info.id} slice={sel}/> : <div className='muted' style={{padding: 20}}>Select a session</div>}
     </div>
   );
+
+  return (
+    <div style={{height: '100%', display: 'grid', gridTemplateColumns: 'minmax(220px, 300px) minmax(0, 1fr)', gap: 12, minHeight: 0}}>
+      <div style={{display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0}}>
+        <div style={{flex: '0 0 auto', maxHeight: '45%', display: 'flex', flexDirection: 'column', minHeight: 0}}>{recents}</div>
+        <div style={{flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden'}}>
+          <div className='card-header' style={{borderBottom: '1px solid var(--border)'}}><span className='title'>Sessions</span>{sessions.length > 0 && <Badge>{sessions.length}</Badge>}</div>
+          <div style={{overflow: 'auto', minHeight: 0}}>
+            {sessions.length === 0 && <div className='muted' style={{padding: 14, fontSize: 12}}>No live sessions. Use Repeat above, or Start with Frida in Apps.</div>}
+            {sessions.map(s => (
+              <div key={s.info.id} onClick={() => setSelId(s.info.id)}
+                   style={{padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', background: sel?.info.id === s.info.id ? 'var(--accent-soft)' : undefined}}>
+                <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+                  <span style={{fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{s.info.package}</span>
+                  <div style={{flex: 1}}/>
+                  <SessionStatusBadge slice={s}/>
+                </div>
+                <div className='subtle' style={{fontSize: 11}}>{s.info.mode} · frida {s.info.runtime}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      {sel ? <FridaConsole key={sel.info.id} slice={sel}/> : <div className='muted' style={{padding: 20, fontSize: 13}}>Select a session, or Repeat a recent app to start one.</div>}
+    </div>
+  );
+}
+
+// fmtAgo renders a compact "time ago" from a unix-seconds timestamp.
+function fmtAgo(unixSec: number): string {
+  if (!unixSec) return '';
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - unixSec));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 function SessionStatusBadge({slice}: {slice: import('../store').FridaSessionSlice}) {

@@ -592,6 +592,30 @@ export namespace adb {
 	        this.supported = source["supported"];
 	    }
 	}
+	export class FridaHistoryEntry {
+	    package: string;
+	    mode: string;
+	    runtimeVer: string;
+	    scriptIds: string[];
+	    scriptNames: string[];
+	    lastRun: number;
+	    count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FridaHistoryEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.package = source["package"];
+	        this.mode = source["mode"];
+	        this.runtimeVer = source["runtimeVer"];
+	        this.scriptIds = source["scriptIds"];
+	        this.scriptNames = source["scriptNames"];
+	        this.lastRun = source["lastRun"];
+	        this.count = source["count"];
+	    }
+	}
 	export class FridaHostInfo {
 	    available: boolean;
 	    pythonPath: string;

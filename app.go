@@ -1398,6 +1398,17 @@ func (a *App) StartFridaSession(serial, pkg, mode, runtimeVer string, scriptIDs 
 	a.fridaSess[id] = sess
 	a.fridaMu.Unlock()
 
+	// Record this launch in the recents list so it can be repeated from the
+	// Frida → Sessions tab without going back to Apps.
+	names := make([]string, 0, len(scripts))
+	for _, sc := range scripts {
+		names = append(names, sc.Name)
+	}
+	a.frida.RecordHistory(adb.FridaHistoryEntry{
+		Package: pkg, Mode: mode, RuntimeVer: runtimeVer,
+		ScriptIDs: scriptIDs, ScriptNames: names,
+	})
+
 	eventName := "frida-session:" + id
 	go func() {
 		for m := range sess.Messages() {
@@ -1421,6 +1432,31 @@ func (a *App) collectScripts(ids []string) ([]adb.FridaScriptArg, error) {
 		out = append(out, adb.FridaScriptArg{Name: sc.Name, Source: sc.Source})
 	}
 	return out, nil
+}
+
+// ListFridaHistory returns the recents list (previously instrumented apps,
+// newest first) for the Frida → Sessions tab's one-click repeat.
+func (a *App) ListFridaHistory() []adb.FridaHistoryEntry {
+	if a.frida == nil {
+		return nil
+	}
+	return a.frida.ListHistory()
+}
+
+// RemoveFridaHistory drops one app from the recents list.
+func (a *App) RemoveFridaHistory(pkg string) error {
+	if a.frida == nil {
+		return nil
+	}
+	return a.frida.RemoveHistory(pkg)
+}
+
+// ClearFridaHistory empties the recents list.
+func (a *App) ClearFridaHistory() error {
+	if a.frida == nil {
+		return nil
+	}
+	return a.frida.ClearHistory()
 }
 
 // ListFridaSessions returns metadata for all live/finished sessions this run.

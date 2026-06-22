@@ -39,6 +39,8 @@ export function ChownFile(arg1:string,arg2:string,arg3:string,arg4:boolean):Prom
 
 export function ClearApp(arg1:string,arg2:string):Promise<string>;
 
+export function ClearFridaHistory():Promise<void>;
+
 export function ClearLogcat(arg1:string):Promise<string>;
 
 export function ClearShellHistory(arg1:string,arg2:string):Promise<void>;
@@ -153,6 +155,8 @@ export function ListDir(arg1:string,arg2:string,arg3:boolean):Promise<Array<adb.
 
 export function ListForwards(arg1:string):Promise<Array<adb.Forward>>;
 
+export function ListFridaHistory():Promise<Array<adb.FridaHistoryEntry>>;
+
 export function ListFridaReleases(arg1:string,arg2:string):Promise<Array<adb.FridaRelease>>;
 
 export function ListFridaRuntimes():Promise<Array<adb.FridaRuntime>>;
@@ -222,6 +226,8 @@ export function RegisterDevice(arg1:adb.Device):Promise<void>;
 export function RegisterExternalFrida(arg1:string):Promise<adb.FridaRuntime>;
 
 export function RemoveForward(arg1:string,arg2:string):Promise<string>;
+
+export function RemoveFridaHistory(arg1:string):Promise<void>;
 
 export function RemoveFridaRuntime(arg1:string):Promise<void>;
 

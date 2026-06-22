@@ -74,6 +74,10 @@ export function ClearApp(arg1, arg2) {
   return window['go']['main']['App']['ClearApp'](arg1, arg2);
 }
 
+export function ClearFridaHistory() {
+  return window['go']['main']['App']['ClearFridaHistory']();
+}
+
 export function ClearLogcat(arg1) {
   return window['go']['main']['App']['ClearLogcat'](arg1);
 }
@@ -302,6 +306,10 @@ export function ListForwards(arg1) {
   return window['go']['main']['App']['ListForwards'](arg1);
 }
 
+export function ListFridaHistory() {
+  return window['go']['main']['App']['ListFridaHistory']();
+}
+
 export function ListFridaReleases(arg1, arg2) {
   return window['go']['main']['App']['ListFridaReleases'](arg1, arg2);
 }
@@ -440,6 +448,10 @@ export function RegisterExternalFrida(arg1) {
 
 export function RemoveForward(arg1, arg2) {
   return window['go']['main']['App']['RemoveForward'](arg1, arg2);
+}
+
+export function RemoveFridaHistory(arg1) {
+  return window['go']['main']['App']['RemoveFridaHistory'](arg1);
 }
 
 export function RemoveFridaRuntime(arg1) {

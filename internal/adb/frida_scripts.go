@@ -78,6 +78,7 @@ func (s *FridaStore) initScripts() {
 			s.appScripts = m
 		}
 	}
+	s.initHistory()
 }
 
 func (s *FridaStore) saveScriptsIndex() error {

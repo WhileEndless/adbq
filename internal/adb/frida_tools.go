@@ -639,6 +639,10 @@ type FridaStore struct {
 	scripts        map[string]FridaScript // id → metadata (source lives in sidecars)
 	appScripts     map[string]AppScripts  // package → binding
 	scriptSeq      int
+
+	// instrumentation history (frida_history.go) — recents for one-click repeat.
+	historyPath string
+	history     []FridaHistoryEntry
 }
 
 // NewFridaStore loads runtime.json and the script library, degrading to an
