@@ -168,7 +168,12 @@ func (c *Client) InstallSystemCert(ctx context.Context, serial, localCertPath st
 	_, _ = c.Shell(ctx, serial, "chmod 644 "+stage)
 
 	style, _ := c.suStyleFor(ctx, serial)
-	res.Rooted = style == suSimple || style == suShWrap
+	// Every concrete root style is usable here — ShellSU/rootWrap already
+	// handle suBareRoot (adb-rooted emulators/userdebug, no `su` binary) and the
+	// suZero* forms the same as suSimple/suShWrap. Only suUnknown means "no
+	// root at all". Excluding suBareRoot here made adb-rooted emulators wrongly
+	// fall back to the user-store path despite being rooted.
+	res.Rooted = styleGrantsRoot(style)
 	if !res.Rooted {
 		return c.installUserCertFallback(ctx, serial, stage, hash, res)
 	}
@@ -224,6 +229,16 @@ func (c *Client) InstallSystemCert(ctx context.Context, serial, localCertPath st
 		res.Note = "Installed via tmpfs overlay — active now but reset on reboot. Re-run after rebooting. Force-stop and reopen the target app to pick it up."
 	}
 	return res, nil
+}
+
+// styleGrantsRoot reports whether a probed suStyle is a real root grant, i.e.
+// anything but suUnknown. All concrete styles — including suBareRoot (adb-rooted
+// emulators/userdebug, no `su` binary) and the suZero* positional forms — are
+// usable for system-store cert writes because ShellSU/rootWrap already adapt the
+// command to each style. suUnknown means no root at all → user-store fallback.
+func styleGrantsRoot(style suStyle) bool {
+	return style == suBareRoot || style == suSimple || style == suShWrap ||
+		style == suZeroSimple || style == suZeroShWrap
 }
 
 // installUserCertFallback stages the cert where the user can import it via

@@ -71,7 +71,10 @@ func (c *Client) ListApps(ctx context.Context, serial string, onlyUser bool) ([]
 	if err != nil {
 		return nil, err
 	}
-	var apps []App
+	// Pre-allocate as a non-nil slice so an app-less device serializes to
+	// JSON `[]` rather than `null` — the frontend maps over the result and a
+	// null crashes the Logcat/Apps combobox render.
+	apps := make([]App, 0)
 	for _, ln := range strings.Split(out, "\n") {
 		ln = strings.TrimSpace(ln)
 		if !strings.HasPrefix(ln, "package:") {

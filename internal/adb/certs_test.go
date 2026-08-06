@@ -51,3 +51,19 @@ func TestAndroidSubjectHash(t *testing.T) {
 		t.Errorf("androidSubjectHash = %s, want eb1bf87a (openssl subject_hash_old)", got)
 	}
 }
+
+// TestStyleGrantsRoot locks in that adb-rooted emulators (suBareRoot) and the
+// uid-positional su forms are treated as rooted for system-store cert install.
+// Regression: suBareRoot was excluded from the gate, so a rooted emulator fell
+// back to the user-store path with a misleading "Device is not rooted" note.
+func TestStyleGrantsRoot(t *testing.T) {
+	rooted := []suStyle{suBareRoot, suSimple, suShWrap, suZeroSimple, suZeroShWrap}
+	for _, st := range rooted {
+		if !styleGrantsRoot(st) {
+			t.Errorf("styleGrantsRoot(%d) = false, want true (rooted style must not fall back to user-store)", st)
+		}
+	}
+	if styleGrantsRoot(suUnknown) {
+		t.Error("styleGrantsRoot(suUnknown) = true, want false (non-rooted must fall back)")
+	}
+}
