@@ -42,7 +42,10 @@ ikili (binary) olarak çalışır.
   (100+ paket için aranabilir seçici), seviye filtresi, vurgulamalı metin arama,
   `.txt` dışa aktarma. İşletim sistemine ait satırlar varsayılan olarak gizlidir
   (tek düğmeyle geri gelir) ve liste pencerelenmiş çizilir; böylece konuşkan bir
-  cihaz ekranı çekirdek audit gürültüsüne boğmaz.
+  cihaz ekranı çekirdek audit gürültüsüne boğmaz. Bir uygulama seçiliyken, o
+  uygulamanın 10 saniye içinde yinelediği satırlar ilkine daraltılır — açılıp
+  kapatılabilir, dışa aktarma da buna uyar. Yukarı kaydırınca otomatik takip
+  devreden çıkar; en yeni satıra dönmek için altta bir düğme belirir.
 - **Shell** — cihaz başına birden çok eşzamanlı etkileşimli oturum; root
   oturumları otomatik `su`.
 - **Uygulamalar** — yükleme (dosya seçici), kaldırma, zorla durdurma, veri

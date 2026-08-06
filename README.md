@@ -40,7 +40,10 @@ frontend), it ships as a small native binary on macOS, Windows, and Linux.
   a searchable picker for 100+ packages), level filter, text search with
   highlighting, export to `.txt`. OS-owned lines are hidden by default (one
   toggle brings them back) and the view is windowed, so a chatty device stays
-  readable instead of drowning the screen in kernel audit spam.
+  readable instead of drowning the screen in kernel audit spam. With an app
+  selected, lines it repeats within 10 seconds collapse to the first one —
+  toggleable, and honoured by Export. Scrolling up stops the auto-scroll from
+  dragging you back; a pill offers the way to the newest line.
 - **Shell** — multiple concurrent interactive sessions per device, including root
   sessions that auto-`su`.
 - **Apps** — install (file picker), uninstall, force-stop, clear data, launch,
