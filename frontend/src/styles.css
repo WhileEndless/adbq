@@ -574,6 +574,35 @@ input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+/* Holds the scrolling rows plus the floating "jump to latest" affordance.
+   It is the flex child that absorbs all leftover height, which is what keeps
+   the status bar pinned to the bottom no matter how much log there is. */
+.logcat-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.logcat-jump {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 14px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  z-index: 5;
+}
+.logcat-jump:hover { background: var(--hover); border-color: var(--accent); color: var(--accent); }
+
 .logcat-rows {
   flex: 1;
   min-height: 0;
@@ -699,7 +728,19 @@ input, select, textarea { font: inherit; color: inherit; }
   font-size: 11px;
   color: var(--text-muted);
   background: var(--bg);
+  /* Pinned: never shrink and never wrap onto a second line, however long the
+     package name or the adb command line gets. */
   flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.logcat-status > span { flex-shrink: 0; }
+/* The echoed adb command is the one part allowed to lose its tail. */
+.logcat-status > span.subtle {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ─── Shell / terminal ────────────────────────────────────────────────────── */

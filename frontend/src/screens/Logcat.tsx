@@ -47,6 +47,9 @@ export function LogcatScreen({device}: {device: adb.Device}) {
   // Whether the list is parked at its newest line. Starts true: a fresh mount
   // renders the tail.
   const atBottom = useRef(true);
+  // Line count at the moment auto-scroll was switched off, so the jump button
+  // can report how much has arrived since.
+  const missedFrom = useRef(0);
 
   // Make sure a feed exists for this device and filter. The backend is the one
   // that decides whether anything needs (re)starting, so this is safe to call
@@ -156,6 +159,16 @@ export function LogcatScreen({device}: {device: adb.Device}) {
     setExpanded(null);
   }
 
+  // How much arrived while the reader was scrolled away, so the jump button can
+  // say whether it is worth pressing.
+  const missed = tail ? 0 : Math.max(0, filtered.length - missedFrom.current);
+
+  const resumeTail = useCallback(() => {
+    atBottom.current = true;
+    setTail(true);
+    if (wrap.current) wrap.current.scrollTop = wrap.current.scrollHeight;
+  }, []);
+
   const visible = filtered.slice(first, last);
 
   return (
@@ -176,7 +189,8 @@ export function LogcatScreen({device}: {device: adb.Device}) {
         <IconBtn title={state.paused ? 'Resume' : 'Pause'} active={state.paused} onClick={() => logcatStore.setPaused(device.id, !state.paused)}>
           {state.paused ? <Icon.Play width={14} height={14}/> : <Icon.Pause width={14} height={14}/>}
         </IconBtn>
-        <IconBtn title={tail ? 'Auto-scroll on' : 'Auto-scroll off'} active={tail} onClick={() => setTail(!tail)}>
+        <IconBtn title={tail ? 'Auto-scroll on' : 'Auto-scroll off'} active={tail}
+                 onClick={() => { if (tail) { setTail(false); missedFrom.current = filtered.length; } else resumeTail(); }}>
           <Icon.Activity width={14} height={14}/>
         </IconBtn>
         <IconBtn title='Clear' onClick={() => { logcatStore.clear(device.id); setExpanded(null); }}>
@@ -196,9 +210,19 @@ export function LogcatScreen({device}: {device: adb.Device}) {
         <LevelMenu value={levelMin} onChange={setLevelMin}/>
       </div>
 
+      <div className='logcat-viewport'>
       <div className='logcat-rows' ref={wrap} onScroll={e => {
         const el = e.currentTarget;
-        atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < ROW_H * 2;
+        const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < ROW_H * 2;
+        // Scrolling up is an explicit "let me read this", so it takes over from
+        // auto-scroll instead of fighting it — otherwise the next batch yanks
+        // the reader straight back to the newest line. Our own scroll-to-bottom
+        // lands at the bottom, so it never trips this.
+        if (!bottom && atBottom.current && tail) {
+          setTail(false);
+          missedFrom.current = filtered.length;
+        }
+        atBottom.current = bottom;
         setScrollTop(el.scrollTop);
       }}>
         {filtered.length > 0 && (
@@ -228,6 +252,13 @@ export function LogcatScreen({device}: {device: adb.Device}) {
         {filtered.length === 0 && lines.length > 0 && (
           <div className='muted' style={{padding: 30, textAlign: 'center'}}>No matching lines. Try lowering the level threshold or clearing the search.</div>
         )}
+      </div>
+      {!tail && (
+        <button className='logcat-jump' onClick={resumeTail}>
+          <Icon.ChevronDown width={13} height={13}/>
+          {missed > 0 ? `${missed} new line${missed === 1 ? '' : 's'}` : 'Jump to latest'}
+        </button>
+      )}
       </div>
 
       <div className='logcat-status'>
