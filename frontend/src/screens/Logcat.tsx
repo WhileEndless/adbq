@@ -33,6 +33,10 @@ export function LogcatScreen({device}: {device: adb.Device}) {
   const [search, setSearch] = useState('');
   const [levelMin, setLevelMin] = useState<string>('V');
   const [tail, setTail] = useState(true);
+  // Hide lines an app repeats within seconds of each other. On by default; the
+  // repeats are kept in the buffer either way, so switching it off brings them
+  // straight back.
+  const [collapse, setCollapse] = useState(true);
   const [apps, setApps] = useState<adb.App[]>([]);
   // At most one row is expanded at a time. It is tracked by object identity,
   // not by a content key: chatty apps repeat the same line verbatim, and any
@@ -81,11 +85,17 @@ export function LogcatScreen({device}: {device: adb.Device}) {
     return () => ro.disconnect();
   }, []);
 
-  const filtered = useMemo(() => {
+  // Repeat collapsing only applies to a single app's log — see the store.
+  const collapsible = !!state.pkgFilter;
+  const collapsing = collapsible && collapse;
+
+  const {filtered, collapsed} = useMemo(() => {
     const q = search.toLowerCase();
     const min = LEVEL_ORDER[levelMin];
     const out: LogEntry[] = [];
+    let hidden = 0;
     for (const l of lines) {
+      if (collapsing && l.dup) { hidden++; continue; }
       // An unrecognised priority letter is shown at every threshold rather
       // than silently dropped: the level filter exists to hide noise the user
       // understands, not lines we failed to classify.
@@ -94,11 +104,11 @@ export function LogcatScreen({device}: {device: adb.Device}) {
       if (q && !l.tag.toLowerCase().includes(q) && !l.msg.toLowerCase().includes(q)) continue;
       out.push(l);
     }
-    return out;
+    return {filtered: out, collapsed: hidden};
     // `lines` is a ring buffer mutated in place — `state.version` is what
     // actually signals a change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, state.version, levelMin, search]);
+  }, [lines, state.version, levelMin, search, collapsing]);
 
   const expandedIdx = useMemo(
     () => (expanded ? filtered.indexOf(expanded) : -1),
@@ -176,7 +186,7 @@ export function LogcatScreen({device}: {device: adb.Device}) {
       <div className='screen-header'>
         <h1>Logcat <span className='subtitle mono'>{filtered.length} / {lines.length} lines</span></h1>
         <div className='spacer' style={{flex: 1}}/>
-        <Combobox value={state.pkgFilter} onChange={setPkgFilter} width={240}
+        <Combobox value={state.pkgFilter} onChange={setPkgFilter} width={240} clearable
                   items={[{value: '', label: 'All processes', sub: 'no PID filter'},
                           {value: 'system_server', label: 'system_server', sub: 'core OS pid'},
                           ...(apps || []).map(a => ({
@@ -207,6 +217,13 @@ export function LogcatScreen({device}: {device: adb.Device}) {
                 onClick={() => logcatStore.setShowSystem(device.id, !state.showSystem)}>
           <Icon.Cpu width={12} height={12}/>System logs
         </button>
+        <button className={`btn sm${collapsing ? ' primary' : ''}`} disabled={!collapsible}
+                title={collapsible
+                  ? 'Hide lines this app repeats within 10 seconds. The first one is always shown; hidden lines are left out of Export too.'
+                  : 'Pick an app above to collapse its repeated lines'}
+                onClick={() => setCollapse(c => !c)}>
+          <Icon.Layers width={12} height={12}/>Collapse repeats
+        </button>
         <LevelMenu value={levelMin} onChange={setLevelMin}/>
       </div>
 
@@ -222,6 +239,9 @@ export function LogcatScreen({device}: {device: adb.Device}) {
           setTail(false);
           missedFrom.current = filtered.length;
         }
+        // Scrolling the whole way back down means "I'm caught up" — same
+        // intent as pressing the jump pill, so it resumes following.
+        if (bottom && !tail) setTail(true);
         atBottom.current = bottom;
         setScrollTop(el.scrollTop);
       }}>
@@ -264,6 +284,7 @@ export function LogcatScreen({device}: {device: adb.Device}) {
       <div className='logcat-status'>
         <span>{filtered.length} visible</span>
         <span>{state.paused ? 'Paused' : 'Live'} · ≥{levelMin} · {state.pkgFilter ? `pkg=${state.pkgFilter}` : 'all processes'} · {state.showSystem ? 'apps + system' : 'apps only'}</span>
+        {collapsed > 0 && <span title='Identical lines repeated within 10 seconds'>{collapsed} repeats hidden</span>}
         <div style={{flex: 1}}/>
         <span className='subtle'>adb -s {device.id} logcat -v threadtime{state.pkgFilter ? ` --pid=$(pidof ${state.pkgFilter})` : ''}</span>
       </div>

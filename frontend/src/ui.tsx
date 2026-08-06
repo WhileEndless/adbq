@@ -241,34 +241,86 @@ export interface ComboItem {
   icon?: React.ReactNode;
   badge?: React.ReactNode;
 }
-export function Combobox({value, onChange, items, placeholder, width, footer}:{
+export function Combobox({value, onChange, items, placeholder, width, footer, clearable}:{
   value: string;
   onChange: (v: string) => void;
   items: ComboItem[];
   placeholder?: string;
   width?: number;
   footer?: React.ReactNode;
+  /**
+   * Show an × on the trigger that resets the selection to "". Worth setting
+   * whenever the empty value means "no filter": the option for it can be typed
+   * out of the list by the search box, leaving no obvious way back.
+   */
+  clearable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  // Index of the keyboard-highlighted option within the filtered list.
+  const [active, setActive] = useState(0);
   const ref = useClickOutside<HTMLDivElement>(open, () => setOpen(false));
+  const listRef = useRef<HTMLDivElement>(null);
   const sel = items.find(i => i.value === value);
   const filt = !q ? items : items.filter(i => i.label.toLowerCase().includes(q.toLowerCase()) || i.value.toLowerCase().includes(q.toLowerCase()));
+  const at = Math.min(active, Math.max(0, filt.length - 1));
+
+  function openAtSelection() {
+    const i = filt.findIndex(x => x.value === value);
+    setActive(i >= 0 ? i : 0);
+    setOpen(true);
+  }
+
+  // Follow the highlight with the scroll position, otherwise arrowing past the
+  // bottom of the list walks an option the user cannot see.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector('.combo-opt.active')?.scrollIntoView({block: 'nearest'});
+  }, [at, open]);
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!filt.length) return;
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      setActive((at + step + filt.length) % filt.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const pick = filt[at];
+      if (pick) { onChange(pick.value); setOpen(false); setQ(''); }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      setQ('');
+    }
+  }
+
   return (
     <div className='combo' ref={ref}>
-      <button className='combo-trigger' style={width ? {minWidth: width} : undefined} onClick={() => setOpen(o => !o)}>
+      <button className='combo-trigger' style={width ? {minWidth: width} : undefined}
+              onClick={() => (open ? setOpen(false) : openAtSelection())}>
         <span className='val'>{sel?.label || placeholder || 'Select…'}</span>
-        <Icon.Search width={12} height={12}/>
+        {clearable && value
+          // A <button> cannot nest inside the trigger button, so this is a
+          // span carrying the same affordances.
+          ? <span className='combo-clear' role='button' tabIndex={0} title='Clear filter'
+                  onClick={e => { e.stopPropagation(); onChange(''); setQ(''); setOpen(false); }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); onChange(''); setQ(''); setOpen(false); } }}>
+              <Icon.X width={12} height={12}/>
+            </span>
+          : <Icon.Search width={12} height={12}/>}
       </button>
       {open && (
         <div className='combo-pop' style={width ? {minWidth: width + 40} : undefined}>
           <div className='combo-search'>
             <Icon.Search width={13} height={13}/>
-            <input autoFocus value={q} placeholder='Search…' onChange={e => setQ(e.target.value)}/>
+            <input autoFocus value={q} placeholder='Search…' onKeyDown={onKeyDown}
+                   onChange={e => { setQ(e.target.value); setActive(0); }}/>
           </div>
-          <div className='combo-list'>
-            {filt.map(i => (
-              <div key={i.value} className={`combo-opt${i.value === value ? ' selected' : ''}`}
+          <div className='combo-list' ref={listRef}>
+            {filt.map((i, idx) => (
+              <div key={i.value} className={`combo-opt${i.value === value ? ' selected' : ''}${idx === at ? ' active' : ''}`}
+                   onMouseEnter={() => setActive(idx)}
                    onClick={() => { onChange(i.value); setOpen(false); setQ(''); }}>
                 {i.icon}
                 <div className='text'>

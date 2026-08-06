@@ -648,6 +648,11 @@ input, select, textarea { font: inherit; color: inherit; }
 /* Logcat's minimum-level picker: a hover/click panel anchored to its trigger.
    Positioned relative so the shared .dropdown (which is absolute) lands under
    the button instead of the toolbar's far edge. */
+/* A control that only applies in some mode reads as broken unless it looks
+   inert; the title attribute explains what would enable it. */
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:disabled:hover { background: var(--panel); border-color: var(--border); color: var(--text); }
+
 .level-menu { position: relative; display: inline-flex; }
 .level-menu .dropdown { min-width: 190px; }
 .level-menu .dropdown .lvl { font-weight: 700; text-align: center; font-family: var(--font-mono); }
@@ -1156,6 +1161,15 @@ input, select, textarea { font: inherit; color: inherit; }
   font-size: 12px;
 }
 .combo-opt:hover { background: var(--hover); }
+/* Keyboard highlight. Kept visually distinct from .selected (the current
+   value) so arrowing through the list never looks like the value changed. */
+.combo-opt.active { background: var(--hover); box-shadow: inset 2px 0 0 var(--accent); }
+.combo-clear {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 4px;
+  color: var(--text-subtle); flex-shrink: 0;
+}
+.combo-clear:hover { background: var(--hover); color: var(--err); }
 .combo-opt.selected { background: var(--accent-soft); color: var(--accent-strong); }
 :root[data-theme="dark"] .combo-opt.selected { color: #c5a3ff; }
 .combo-opt .icon { width: 18px; height: 18px; border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 10px; font-weight: 700; color: white; }

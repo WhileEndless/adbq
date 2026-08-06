@@ -25,6 +25,12 @@ export interface LogEntry {
   proc?: string;
   /** True when the owning process is an installed app rather than the OS. */
   app?: boolean;
+
+  // ── Filled in by the frontend, never sent by the backend ──────────────
+  /** Milliseconds used for repeat detection: device clock when parseable. */
+  t?: number;
+  /** True when an identical line was already shown moments earlier. */
+  dup?: boolean;
 }
 
 export interface ToastAction {
