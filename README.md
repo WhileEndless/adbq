@@ -38,7 +38,9 @@ frontend), it ships as a small native binary on macOS, Windows, and Linux.
   IP, MAC, Wi-Fi SSID, root method (Magisk / userdebug / su), live battery/RAM/CPU.
 - **Logcat** — `adb logcat -v threadtime` streamed live, per-app PID filter (with
   a searchable picker for 100+ packages), level filter, text search with
-  highlighting, export to `.txt`.
+  highlighting, export to `.txt`. OS-owned lines are hidden by default (one
+  toggle brings them back) and the view is windowed, so a chatty device stays
+  readable instead of drowning the screen in kernel audit spam.
 - **Shell** — multiple concurrent interactive sessions per device, including root
   sessions that auto-`su`.
 - **Apps** — install (file picker), uninstall, force-stop, clear data, launch,

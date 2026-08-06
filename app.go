@@ -32,9 +32,16 @@ type App struct {
 	client *adb.Client
 	tasks  *adb.TaskManager
 
-	mu          sync.Mutex
-	logcats     map[string]*adb.LogcatStream
-	logcatWatch map[string]context.CancelFunc
+	mu sync.Mutex
+	// lcMu serializes whole start/stop sequences for logcat feeds. Wails runs
+	// every binding call on its own goroutine, so two concurrent StartLogcat
+	// calls (React StrictMode does exactly that on mount) could both clear the
+	// old feed before either registered its own, leaving an orphaned adb stream
+	// emitting into the same event — every line delivered twice. `mu` cannot do
+	// this job: starting a feed talks to the device, and holding the general
+	// lock across that would stall every other binding.
+	lcMu        sync.Mutex
+	logcats     map[string]*logcatFeed
 	shellMu     sync.Mutex
 	shells      map[string]*adb.ShellSession
 	shellSerial int
@@ -66,8 +73,7 @@ func NewApp() *App {
 	return &App{
 		client:      adb.NewClient(),
 		tasks:       adb.NewTaskManager(),
-		logcats:     map[string]*adb.LogcatStream{},
-		logcatWatch: map[string]context.CancelFunc{},
+		logcats:     map[string]*logcatFeed{},
 		shells:      map[string]*adb.ShellSession{},
 		srSess:      map[string]*srEntry{},
 		scrcpy:      adb.NewScrcpyManager(),
@@ -546,11 +552,22 @@ func (a *App) PullCapture(serial string) (string, error) {
 
 func (a *App) shutdown(ctx context.Context) {
 	a.scrcpy.StopAll()
+	// lcMu keeps a StartLogcat that is mid-flight (blocked on a slow device)
+	// from re-registering its feed into the map we are about to clear, which
+	// would leave an adb child running past exit.
+	a.lcMu.Lock()
+	defer a.lcMu.Unlock()
 	a.mu.Lock()
-	for _, s := range a.logcats {
-		s.Stop()
+	feeds := make([]*logcatFeed, 0, len(a.logcats))
+	for _, f := range a.logcats {
+		feeds = append(feeds, f)
 	}
+	a.logcats = map[string]*logcatFeed{}
 	a.mu.Unlock()
+	// Stop outside the lock: each Stop waits for its batcher goroutine.
+	for _, f := range feeds {
+		f.Stop()
+	}
 	a.shellMu.Lock()
 	for _, sh := range a.shells {
 		sh.Stop()
@@ -603,108 +620,104 @@ func (a *App) ADBVersion() (string, error)                  { return a.client.Se
 
 // ─── Logcat streaming via events ────────────────────────────────────────
 
-func (a *App) StartLogcat(serial, pkgFilter string) error {
-	return a.startLogcatInternal(serial, pkgFilter, 100)
-}
-
-func (a *App) startLogcatInternal(serial, pkgFilter string, tailLines int) error {
-	a.mu.Lock()
-	// Stop any existing stream + supervisor for this serial.
-	if cancel, ok := a.logcatWatch[serial]; ok {
-		cancel()
-		delete(a.logcatWatch, serial)
-	}
-	if s, ok := a.logcats[serial]; ok {
-		s.Stop()
-		delete(a.logcats, serial)
-	}
-	var pid int
-	if pkgFilter != "" {
-		if p, err := a.client.PidOf(a.ctx, serial, pkgFilter); err == nil {
-			pid = p
-		}
-	}
-	s, err := a.client.StartLogcat(a.ctx, serial, pid, 2048, tailLines)
+// restartLogcatLocked replaces whatever feed a device has with a fresh one.
+// Callers must hold lcMu.
+func (a *App) restartLogcatLocked(serial, pkgFilter string, showSystem bool) error {
+	a.stopLogcatFeed(serial)
+	// A short tail gives the screen something to show immediately instead of an
+	// empty pane while waiting for the device to say something.
+	f, err := a.startLogcatFeed(serial, pkgFilter, showSystem, 100)
 	if err != nil {
-		a.mu.Unlock()
 		return err
 	}
-	a.logcats[serial] = s
+	a.mu.Lock()
+	a.logcats[serial] = f
 	a.mu.Unlock()
-	eventName := "logcat:" + serial
-	go func() {
-		for entry := range s.Lines() {
-			runtime.EventsEmit(a.ctx, eventName, entry)
-		}
-		runtime.EventsEmit(a.ctx, eventName+":done", nil)
-	}()
-	// When filtering by package, supervise: if the PID changes (app restarts)
-	// we transparently relaunch the underlying adb logcat with the new --pid.
-	if pkgFilter != "" {
-		ctx, cancel := context.WithCancel(a.ctx)
-		a.mu.Lock()
-		a.logcatWatch[serial] = cancel
-		a.mu.Unlock()
-		go a.superviseLogcat(ctx, serial, pkgFilter, pid)
-	}
 	return nil
 }
 
-func (a *App) superviseLogcat(ctx context.Context, serial, pkg string, lastPID int) {
-	ticker := time.NewTicker(2500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			newPID, err := a.client.PidOf(a.ctx, serial, pkg)
-			if err != nil || newPID == lastPID {
-				continue
-			}
-			if newPID == 0 {
-				// app died — keep streaming under last PID until it returns
-				continue
-			}
-			// PID changed: restart the underlying logcat process under the same UI subscription.
-			a.mu.Lock()
-			if s, ok := a.logcats[serial]; ok {
-				s.Stop()
-				delete(a.logcats, serial)
-			}
-			ns, err := a.client.StartLogcat(a.ctx, serial, newPID, 2048, 0)
-			if err != nil {
-				a.mu.Unlock()
-				continue
-			}
-			a.logcats[serial] = ns
-			a.mu.Unlock()
-			lastPID = newPID
-			eventName := "logcat:" + serial
-			runtime.EventsEmit(a.ctx, eventName+":pid", newPID)
-			go func(s *adb.LogcatStream) {
-				for entry := range s.Lines() {
-					runtime.EventsEmit(a.ctx, eventName, entry)
-				}
-			}(ns)
-		}
+// EnsureLogcat guarantees a live feed for this device and filter. It is the
+// UI's only entry point for starting logs — on mount, on a filter change, on
+// anything — and it is deliberately idempotent, because the alternative (a
+// separate stop call followed by a start call) is two independent binding
+// invocations that Wails dispatches on separate goroutines with no ordering
+// guarantee: the stop can land after the start and silently kill the feed the
+// UI just asked for.
+//
+// Re-subscribing on the JS side alone is not enough to trust either: the event
+// listener can be perfectly valid while the feed behind it is gone (backend
+// restarted during development, adb server bounced, device replugged), leaving
+// the screen empty forever. Only the backend knows whether a feed is really
+// alive, so it decides here. A healthy feed with the same filter is left
+// running untouched — no restart, no re-delivered tail, no duplicates.
+//
+// showSystem controls whether OS-owned lines are delivered at all: with it off
+// the feed drops them host-side, which is what keeps a chatty device (kernel
+// audit spam and friends) from drowning the UI. Lines arrive batched as
+// `logcat:<serial>` events carrying an array of entries.
+// It reports whether it had to (re)start the feed, which is the frontend's cue
+// to drop its buffer — a restarted feed re-delivers a tail, and keeping the old
+// lines around would show them twice.
+func (a *App) EnsureLogcat(serial, pkgFilter string, showSystem bool) (bool, error) {
+	a.lcMu.Lock()
+	defer a.lcMu.Unlock()
+	a.mu.Lock()
+	f := a.logcats[serial]
+	a.mu.Unlock()
+	if f != nil && f.pkg == pkgFilter && f.Alive() {
+		f.SetShowSystem(showSystem)
+		return false, nil
+	}
+	return true, a.restartLogcatLocked(serial, pkgFilter, showSystem)
+}
+
+// SetLogcatSystem toggles OS-line visibility on the running feed without
+// restarting adb, so flipping the switch is instant and loses nothing that is
+// already on screen.
+func (a *App) SetLogcatSystem(serial string, showSystem bool) {
+	// lcMu, not just mu: between a StartLogcat's teardown and its
+	// re-registration the map is empty for as long as the device takes to
+	// answer, and a toggle landing in that window would be silently dropped
+	// while the UI happily showed the new state.
+	a.lcMu.Lock()
+	defer a.lcMu.Unlock()
+	a.mu.Lock()
+	f := a.logcats[serial]
+	a.mu.Unlock()
+	if f != nil {
+		f.SetShowSystem(showSystem)
 	}
 }
 
 func (a *App) StopLogcat(serial string) {
+	a.lcMu.Lock()
+	defer a.lcMu.Unlock()
+	a.stopLogcatFeed(serial)
+}
+
+// stopLogcatFeed tears down the feed. Callers must hold lcMu; it drops a.mu
+// before Stop() because Stop waits for the batcher goroutine and holding the
+// general lock across that would block every other binding that touches it.
+func (a *App) stopLogcatFeed(serial string) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if cancel, ok := a.logcatWatch[serial]; ok {
-		cancel()
-		delete(a.logcatWatch, serial)
-	}
-	if s, ok := a.logcats[serial]; ok {
-		s.Stop()
-		delete(a.logcats, serial)
+	f := a.logcats[serial]
+	delete(a.logcats, serial)
+	a.mu.Unlock()
+	if f != nil {
+		f.Stop()
 	}
 }
 
 func (a *App) ClearLogcat(serial string) (string, error) {
+	// Drop what is already in flight as well as what is on the device.
+	// Otherwise the lines buffered between logd and the UI arrive a moment
+	// later and the "cleared" pane refills with history.
+	a.mu.Lock()
+	f := a.logcats[serial]
+	a.mu.Unlock()
+	if f != nil {
+		f.Clear()
+	}
 	return a.client.Shell(a.ctx, serial, "logcat -c")
 }
 

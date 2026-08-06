@@ -44,3 +44,6 @@ adbq-*.png
 # Python bytecode (from driver syntax checks)
 __pycache__/
 *.pyc
+
+# Wails dev writes this alongside the tracked Info.plist on every `wails dev`.
+build/darwin/Info.dev.plist

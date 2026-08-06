@@ -64,6 +64,11 @@ func TestParseThreadtimeRejectsNonLog(t *testing.T) {
 		"java.lang.NullPointerException",
 		"    at com.foo.Bar.baz(Bar.java:42)",
 		"short line",
+		// A wrapped stack-trace line whose words happen to land in the
+		// digit/digit/level shape. Without a timestamp anchor this parses as a
+		// brand-new entry, splitting the trace and inventing pid 100.
+		"    at Native 100 200 D method",
+		"Caused by 42 7 E something",
 	} {
 		if e, ok := parseThreadtime(line); ok {
 			t.Errorf("parseThreadtime(%q) unexpectedly parsed as %+v", line, e)

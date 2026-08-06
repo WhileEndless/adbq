@@ -79,6 +79,8 @@ export function DisconnectDevice(arg1:string):Promise<string>;
 
 export function EnsureFridaVenv(arg1:string):Promise<adb.FridaRuntime>;
 
+export function EnsureLogcat(arg1:string,arg2:string,arg3:boolean):Promise<boolean>;
+
 export function ExportAPK(arg1:string,arg2:string):Promise<string>;
 
 export function ExportAppDataWithPicker(arg1:string,arg2:string):Promise<string>;
@@ -269,6 +271,8 @@ export function SetFridaManagedEnabled(arg1:boolean):Promise<void>;
 
 export function SetIptablesPolicy(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function SetLogcatSystem(arg1:string,arg2:boolean):Promise<void>;
+
 export function SetProxy(arg1:string,arg2:string):Promise<string>;
 
 export function StartAppWithFrida(arg1:string,arg2:string,arg3:string):Promise<adb.FridaSessionInfo>;
@@ -282,8 +286,6 @@ export function StartFrida(arg1:string,arg2:string,arg3:string,arg4:number):Prom
 export function StartFridaSession(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<adb.FridaSessionInfo>;
 
 export function StartLiveCapture(arg1:string,arg2:string,arg3:string,arg4:adb.LiveCaptureOptions):Promise<adb.LiveCaptureState>;
-
-export function StartLogcat(arg1:string,arg2:string):Promise<void>;
 
 export function StartProcStream(arg1:string,arg2:number):Promise<main.ProcStreamStatus>;
 

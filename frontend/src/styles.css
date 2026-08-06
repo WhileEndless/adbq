@@ -616,6 +616,13 @@ input, select, textarea { font: inherit; color: inherit; }
 .logrow.F { border-left-color: rgba(212,114,240,0.6); }
 .logrow.F .lvl, .logrow.F .tag-msg { color: var(--log-f); }
 
+/* Logcat's minimum-level picker: a hover/click panel anchored to its trigger.
+   Positioned relative so the shared .dropdown (which is absolute) lands under
+   the button instead of the toolbar's far edge. */
+.level-menu { position: relative; display: inline-flex; }
+.level-menu .dropdown { min-width: 190px; }
+.level-menu .dropdown .lvl { font-weight: 700; text-align: center; font-family: var(--font-mono); }
+
 /* Segmented sub-tabs (e.g. the Frida screen's Server|Runtime|… switcher). */
 .subtabs {
   display: inline-flex;

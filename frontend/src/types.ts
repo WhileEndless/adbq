@@ -21,6 +21,10 @@ export interface LogEntry {
   lvl: string;
   tag: string;
   msg: string;
+  /** Owning process name, resolved host-side from the device's pid table. */
+  proc?: string;
+  /** True when the owning process is an installed app rather than the OS. */
+  app?: boolean;
 }
 
 export interface ToastAction {

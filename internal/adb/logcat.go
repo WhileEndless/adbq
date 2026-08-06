@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 )
 
 // LogEntry is a parsed `logcat -v threadtime` row.
@@ -19,7 +20,16 @@ type LogEntry struct {
 	Level string `json:"lvl"` // V D I W E F
 	Tag   string `json:"tag"`
 	Msg   string `json:"msg"`
+	// Proc and App are filled in by the caller from a ProcTable snapshot;
+	// the parser itself only sees the pid. App is false for OS-owned lines.
+	Proc string `json:"proc,omitempty"`
+	App  bool   `json:"app,omitempty"`
 }
+
+// maxMsgLen caps a single log message. A runaway line (a base64 blob, a dumped
+// heap) would otherwise be held in the UI's ring buffer for its whole lifetime
+// and re-rendered on every frame; 8 KB is far beyond any readable line.
+const maxMsgLen = 8 << 10
 
 // LogcatStream is a running logcat subscription. Lines() emits parsed entries
 // until the stream is stopped or the process exits.
@@ -104,7 +114,7 @@ func (s *LogcatStream) pump() {
 			TID:   last.TID,
 			Level: last.Level,
 			Tag:   last.Tag,
-			Msg:   "    " + strings.TrimLeft(t, " "),
+			Msg:   truncMsg("    " + strings.TrimLeft(t, " ")),
 		}
 	}
 	_ = s.cmd.Wait()
@@ -150,6 +160,13 @@ func parseThreadtime(line string) (LogEntry, bool) {
 	}
 	// i starts at 1 so at least one timestamp token precedes the PID column.
 	for i := 1; i+2 < len(fields); i++ {
+		// The token before the PID column has to look like the tail of a
+		// timestamp. Without that anchor a wrapped stack-trace line such as
+		// "at 100 200 D foo" matches the digit/digit/level shape and is parsed
+		// as a brand-new entry, tearing the trace apart and inventing a pid.
+		if !looksLikeStampTail(fields[i-1]) {
+			continue
+		}
 		if !isAllDigits(fields[i]) || !isAllDigits(fields[i+1]) {
 			continue
 		}
@@ -174,10 +191,39 @@ func parseThreadtime(line string) (LogEntry, bool) {
 			TID:   tid,
 			Level: lvl,
 			Tag:   tag,
-			Msg:   msg,
+			Msg:   truncMsg(msg),
 		}, true
 	}
 	return LogEntry{}, false
+}
+
+// truncMsg clamps an over-long message, marking it so the reader knows the
+// tail was dropped here rather than by the device.
+func truncMsg(s string) string {
+	if len(s) <= maxMsgLen {
+		return s
+	}
+	// Back off to a rune boundary so the cut does not leave half a UTF-8
+	// sequence, which JSON marshalling would turn into a replacement char.
+	cut := maxMsgLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + " …[truncated]"
+}
+
+// looksLikeStampTail reports whether tok can be the last token of a threadtime
+// timestamp, i.e. the thing that immediately precedes the PID column. That is
+// either a clock time ("12:18:04.123"), a monotonic stamp ("1234.567"), or the
+// optional UTC offset some ROMs append ("+0000").
+func looksLikeStampTail(tok string) bool {
+	if strings.ContainsAny(tok, ":.") {
+		return true
+	}
+	if len(tok) == 5 && (tok[0] == '+' || tok[0] == '-') && isAllDigits(tok[1:]) {
+		return true
+	}
+	return false
 }
 
 // isLogLevel reports whether b is an Android log priority letter.

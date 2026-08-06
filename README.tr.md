@@ -40,7 +40,9 @@ ikili (binary) olarak çalışır.
   IP, MAC, Wi-Fi SSID, root yöntemi (Magisk / userdebug / su), canlı batarya/RAM/CPU.
 - **Logcat** — `adb logcat -v threadtime` canlı akış, uygulama bazlı PID filtresi
   (100+ paket için aranabilir seçici), seviye filtresi, vurgulamalı metin arama,
-  `.txt` dışa aktarma.
+  `.txt` dışa aktarma. İşletim sistemine ait satırlar varsayılan olarak gizlidir
+  (tek düğmeyle geri gelir) ve liste pencerelenmiş çizilir; böylece konuşkan bir
+  cihaz ekranı çekirdek audit gürültüsüne boğmaz.
 - **Shell** — cihaz başına birden çok eşzamanlı etkileşimli oturum; root
   oturumları otomatik `su`.
 - **Uygulamalar** — yükleme (dosya seçici), kaldırma, zorla durdurma, veri

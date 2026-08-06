@@ -1,21 +1,10 @@
-// Cross-screen state store. Lives at App level so logcat lines, shell
-// sessions, and per-device caches survive navigation between screens.
+// Cross-screen state store. Lives at App level so shell sessions, captures,
+// Frida sessions and per-device caches survive navigation between screens.
+// Logcat deliberately does NOT live here — see logcatStore.ts for why.
 import React, {createContext, useCallback, useContext, useEffect, useRef, useState} from 'react';
 import {adb} from '../wailsjs/go/models';
 import * as API from '../wailsjs/go/main/App';
 import {EventsOn, EventsOff} from '../wailsjs/runtime/runtime';
-import {LogEntry} from './types';
-
-// ─── Per-device logcat ───────────────────────────────────────────────────
-
-interface LogcatSlice {
-  lines: LogEntry[];
-  paused: boolean;
-  pkgFilter: string;
-  running: boolean;
-}
-
-const LOGCAT_MAX = 5000;
 
 // ─── Per-device shell sessions (persistent across navigation) ────────────
 
@@ -92,13 +81,6 @@ export interface FridaSessionSlice {
 const FRIDA_MSG_MAX = 5000;
 
 interface Store {
-  // logcat per device
-  getLogcat: (serial: string) => LogcatSlice;
-  startLogcat: (serial: string, pkgFilter: string) => void;
-  stopLogcat: (serial: string) => void;
-  setPaused: (serial: string, paused: boolean) => void;
-  clearLogcat: (serial: string) => void;
-
   // shells per device — keyed by sessionId
   shells: Record<string, ShellSession>;
   openShell: (serial: string, root: boolean) => Promise<string>;
@@ -150,69 +132,6 @@ export function useStore(): Store {
 }
 
 export function StoreProvider({children}: {children: React.ReactNode}) {
-  // ── logcat slices ──────────────────────────────────────────────────────
-  const [logcats, setLogcats] = useState<Record<string, LogcatSlice>>({});
-  const logcatsRef = useRef(logcats);
-  logcatsRef.current = logcats;
-  const lcSubs = useRef<Record<string, () => void>>({});
-
-  const getLogcat = useCallback((serial: string): LogcatSlice => {
-    return logcatsRef.current[serial] || {lines: [], paused: false, pkgFilter: '', running: false};
-  }, []);
-
-  const startLogcat = useCallback((serial: string, pkgFilter: string) => {
-    const cur = logcatsRef.current[serial];
-    const sameFilter = cur?.running && cur.pkgFilter === pkgFilter;
-    // Already running with same filter AND we still hold the subscription
-    // handle — true no-op. The handle check matters across Vite hot-reloads
-    // and dev-server restarts: state may say "running" while the live
-    // EventsOn was torn down by the module replacement.
-    if (sameFilter && lcSubs.current[serial]) return;
-    // Tear down stale sub (if any) and start fresh.
-    if (lcSubs.current[serial]) {
-      lcSubs.current[serial]();
-      delete lcSubs.current[serial];
-    }
-    const ev = `logcat:${serial}`;
-    EventsOn(ev, (entry: LogEntry) => {
-      const slice = logcatsRef.current[serial];
-      if (!slice || slice.paused) return;
-      setLogcats(prev => {
-        const s = prev[serial];
-        if (!s) return prev;
-        const next = s.lines.length >= LOGCAT_MAX ? s.lines.slice(s.lines.length - LOGCAT_MAX + 1) : s.lines.slice();
-        next.push(entry);
-        return {...prev, [serial]: {...s, lines: next}};
-      });
-    });
-    lcSubs.current[serial] = () => EventsOff(ev);
-    // Only re-spawn the backend stream when the filter actually changed.
-    // Otherwise the existing tcpdump-style adb process keeps emitting into
-    // the freshly-subscribed channel.
-    if (!sameFilter) {
-      API.StopLogcat(serial).catch(() => {});
-      setLogcats(prev => ({...prev, [serial]: {lines: [], paused: false, pkgFilter, running: true}}));
-      API.StartLogcat(serial, pkgFilter).catch(() => {
-        setLogcats(prev => ({...prev, [serial]: {...prev[serial], running: false}}));
-      });
-    }
-  }, []);
-
-  const stopLogcat = useCallback((serial: string) => {
-    if (lcSubs.current[serial]) { lcSubs.current[serial](); delete lcSubs.current[serial]; }
-    API.StopLogcat(serial).catch(() => {});
-    setLogcats(prev => ({...prev, [serial]: {...(prev[serial] || {lines: [], paused: false, pkgFilter: '', running: false}), running: false}}));
-  }, []);
-
-  const setPaused = useCallback((serial: string, paused: boolean) => {
-    setLogcats(prev => ({...prev, [serial]: {...(prev[serial] || {lines: [], paused: false, pkgFilter: '', running: false}), paused}}));
-  }, []);
-
-  const clearLogcat = useCallback((serial: string) => {
-    setLogcats(prev => ({...prev, [serial]: {...(prev[serial] || {lines: [], paused: false, pkgFilter: '', running: false}), lines: []}}));
-    API.ClearLogcat(serial).catch(() => {});
-  }, []);
-
   // ── shells ────────────────────────────────────────────────────────────
   const [shells, setShells] = useState<Record<string, ShellSession>>({});
   const shellSubs = useRef<Record<string, () => void>>({});
@@ -434,7 +353,6 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   // ── cleanup on unmount of the entire app ───────────────────────────────
   useEffect(() => {
     return () => {
-      Object.values(lcSubs.current).forEach(off => off());
       Object.values(shellSubs.current).forEach(off => off());
       Object.values(capSubs.current).forEach(off => off());
       Object.values(fridaSubs.current).forEach(off => off());
@@ -442,7 +360,6 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   }, []);
 
   const value: Store = {
-    getLogcat, startLogcat, stopLogcat, setPaused, clearLogcat,
     shells, openShell, writeShell, closeShell, clearShellBuf,
     getCapture, startCapture, stopCapture, clearCapture,
     setCaptureDisplayFilter, setCaptureMaxPackets, setCaptureState, setCapturePreset, setCaptureIface,
@@ -454,22 +371,4 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   void captures;
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;
-}
-
-// Convenience hooks ──────────────────────────────────────────────────────
-
-export function useLogcat(serial: string): LogcatSlice {
-  const s = useStore();
-  // Subscribe via re-read; the underlying state lives in StoreProvider.
-  const slice = s.getLogcat(serial);
-  return slice;
-}
-
-// Force re-render when logcat lines update — accessed via a state subscription.
-// Provider already triggers setLogcats which propagates via getLogcat closure
-// returning fresh state on every render. To make components re-render, we
-// expose a tick state derived from the store's logcat slice.
-export function useLogcatLines(serial: string): LogEntry[] {
-  const s = useStore();
-  return s.getLogcat(serial).lines;
 }

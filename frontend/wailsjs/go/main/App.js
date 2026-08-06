@@ -154,6 +154,10 @@ export function EnsureFridaVenv(arg1) {
   return window['go']['main']['App']['EnsureFridaVenv'](arg1);
 }
 
+export function EnsureLogcat(arg1, arg2, arg3) {
+  return window['go']['main']['App']['EnsureLogcat'](arg1, arg2, arg3);
+}
+
 export function ExportAPK(arg1, arg2) {
   return window['go']['main']['App']['ExportAPK'](arg1, arg2);
 }
@@ -534,6 +538,10 @@ export function SetIptablesPolicy(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SetIptablesPolicy'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function SetLogcatSystem(arg1, arg2) {
+  return window['go']['main']['App']['SetLogcatSystem'](arg1, arg2);
+}
+
 export function SetProxy(arg1, arg2) {
   return window['go']['main']['App']['SetProxy'](arg1, arg2);
 }
@@ -560,10 +568,6 @@ export function StartFridaSession(arg1, arg2, arg3, arg4, arg5) {
 
 export function StartLiveCapture(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['StartLiveCapture'](arg1, arg2, arg3, arg4);
-}
-
-export function StartLogcat(arg1, arg2) {
-  return window['go']['main']['App']['StartLogcat'](arg1, arg2);
 }
 
 export function StartProcStream(arg1, arg2) {

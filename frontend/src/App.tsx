@@ -4,6 +4,7 @@ import * as API from '../wailsjs/go/main/App';
 import {Icon} from './icons';
 import {Badge, ConfirmHost, IconBtn, Modal, PromptHost, ToastHost, showToast, promptDialog, useTheme, ThemeMode} from './ui';
 import {StoreProvider} from './store';
+import {logcatStore} from './logcatStore';
 import {TasksTray} from './tasks';
 import {Screen} from './types';
 import {OverviewScreen} from './screens/Overview';
@@ -97,6 +98,7 @@ function AppInner() {
   const [applyQueue, setApplyQueue] = useState<{serial: string; profileId: string; key: string}[]>([]);
   const apply = applyQueue[0] || null;
   const prevOnline = useRef<Record<string, boolean>>({});
+  const knownIds = useRef<string[]>([]);
   const pendingApply = useRef<Set<string>>(new Set());
 
   const bump = () => setProfilesVersion(v => v + 1);
@@ -129,6 +131,15 @@ function AppInner() {
     API.ListDevices()
       .then(devs => {
         const list = devs || [];
+        // Free the logcat buffer and the backend feed of any device that has
+        // gone away. Otherwise an unplugged phone keeps an adb process and a
+        // periodic on-device poll alive, plus its ring buffer, for the rest of
+        // the session. Tracked in a ref rather than inside the state updater,
+        // which React may run more than once.
+        for (const id of knownIds.current) {
+          if (!list.some(d => d.id === id)) logcatStore.release(id);
+        }
+        knownIds.current = list.map(d => d.id);
         setDevices(list);
         setActiveId(prev => prev && list.some(d => d.id === prev) ? prev : (list[0]?.id || ''));
       })
