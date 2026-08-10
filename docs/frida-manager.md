@@ -47,6 +47,12 @@ Apps ekranında **Start / Restart / Attach with Frida**:
 
 İlgili: `internal/adb/frida_session.go`, `frontend/src/store.tsx` (frida slice), `frontend/src/screens/Frida.tsx`.
 
+## Java/ObjC/Swift bridge sürümü
+
+Frida 17 bridge'leri agent'ın (cihazdaki `frida-server`) çekirdek sürümüne bağlıdır ve **uyumsuzluk sessizdir**: `Java.use` sınıfı bulur, `.implementation = fn` atanır, ama metot hiç yakalanmaz — script tek satır log basmaz. Bu yüzden bridge'i "PyPI'daki en yeni frida-tools"tan almak yanlıştır.
+
+Kural (`resolveFridaToolsVersion`): çalışma zamanının frida sürümünün karşıladığı **en yüksek `frida>=` tabanına sahip sürüm satırının ilk sürümü** seçilir. frida-tools yama sürümleri tabanı yükseltmeden daha yeni bir `frida-java-bridge` yayımlayabiliyor — 14.5.0 ve 14.5.2 ikisi de `frida>=17.5.0` der, ama 17.5.1 agent altında yalnız 14.5.0'ın bridge'i hook atar. Önbellek `frida-tools-version.txt` ile damgalanır; damgadaki politika satırı değişirse önbellek kendini yeniler.
+
 ## Güvenlik notları
 
 - İndirilen her şey **host-allowlist + SHA256** ile doğrulanır (wheel'ler `files.pythonhosted.org`, frida-server GitHub, CodeShare yalnızca kendi host'u).

@@ -222,3 +222,56 @@ func TestResolveForVersion(t *testing.T) {
 		t.Fatalf("no match: got %s", kind)
 	}
 }
+
+func TestRequirementAllows(t *testing.T) {
+	const spec = "<18.0.0,>=17.5.0"
+	cases := []struct {
+		spec, ver string
+		want      bool
+	}{
+		{spec, "17.5.0", true},
+		{spec, "17.5.1", true},
+		{spec, "17.10.0", true},
+		{spec, "17.4.9", false},
+		{spec, "18.0.0", false},
+		{spec, "16.7.19", false},
+		{"(>=17.8.0)", "17.8.0", true},
+		{">=17.10.0; python_version >= '3.9'", "17.9.0", false},
+		{"", "17.5.1", true},
+		{spec, "", false},
+	}
+	for _, c := range cases {
+		if got := requirementAllows(c.spec, c.ver); got != c.want {
+			t.Errorf("requirementAllows(%q, %q) = %v", c.spec, c.ver, got)
+		}
+	}
+}
+
+func TestRequirementFloor(t *testing.T) {
+	cases := map[string]string{
+		"<18.0.0,>=17.5.0": "17.5.0",
+		">17.0.0":          "17.0.0",
+		"(>=17.8.0,<18)":   "17.8.0",
+		">=17.10.0; extra": "17.10.0",
+		"<18.0.0":          "",
+		"":                 "",
+	}
+	for spec, want := range cases {
+		if got := requirementFloor(spec); got != want {
+			t.Errorf("requirementFloor(%q) = %q want %q", spec, got, want)
+		}
+	}
+}
+
+func TestIsPlainVersion(t *testing.T) {
+	for _, v := range []string{"14.5.0", "1", "17.10.2"} {
+		if !isPlainVersion(v) {
+			t.Errorf("isPlainVersion(%q) = false", v)
+		}
+	}
+	for _, v := range []string{"", "14.0.0a1", "1.0.0-rc1", "v1.2.3"} {
+		if isPlainVersion(v) {
+			t.Errorf("isPlainVersion(%q) = true", v)
+		}
+	}
+}

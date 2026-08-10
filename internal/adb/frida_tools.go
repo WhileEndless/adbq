@@ -219,9 +219,11 @@ type pypiFile struct {
 
 type pypiResponse struct {
 	Info struct {
-		Version string `json:"version"`
+		Version      string   `json:"version"`
+		RequiresDist []string `json:"requires_dist"`
 	} `json:"info"`
-	URLs []struct {
+	Releases map[string]json.RawMessage `json:"releases"`
+	URLs     []struct {
 		Filename    string `json:"filename"`
 		URL         string `json:"url"`
 		PackageType string `json:"packagetype"`
@@ -241,6 +243,53 @@ func pypiFridaFiles(ctx context.Context, ver string) (string, []pypiFile, error)
 // pypiFiles fetches the file list for a package version from PyPI's JSON API
 // (empty ver = latest). Returns the resolved version and the (non-yanked) files.
 func pypiFiles(ctx context.Context, pkg, ver string) (string, []pypiFile, error) {
+	pr, err := pypiFetch(ctx, pkg, ver)
+	if err != nil {
+		return "", nil, err
+	}
+	return pr.Info.Version, parsePypiFiles(pr), nil
+}
+
+// pypiVersions lists every release of a package (unordered).
+func pypiVersions(ctx context.Context, pkg string) ([]string, error) {
+	pr, err := pypiFetch(ctx, pkg, "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(pr.Releases))
+	for v := range pr.Releases {
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("PyPI listed no releases for %s", pkg)
+	}
+	return out, nil
+}
+
+// pypiRequirement returns the version specifier a release declares for one of
+// its dependencies (e.g. frida-tools 14.5.0 → frida "<18.0.0,>=17.5.0"), or an
+// error when it declares none.
+func pypiRequirement(ctx context.Context, pkg, ver, dep string) (string, error) {
+	pr, err := pypiFetch(ctx, pkg, ver)
+	if err != nil {
+		return "", err
+	}
+	for _, r := range pr.Info.RequiresDist {
+		r = strings.TrimSpace(r)
+		rest, ok := strings.CutPrefix(r, dep)
+		if !ok {
+			continue
+		}
+		// Guard against a prefix match on a longer name ("frida-tools" for "frida").
+		if rest != "" && (rest[0] == '-' || rest[0] == '_' || rest[0] == '.') {
+			continue
+		}
+		return strings.TrimSpace(rest), nil
+	}
+	return "", fmt.Errorf("%s %s declares no %s requirement", pkg, ver, dep)
+}
+
+func pypiFetch(ctx context.Context, pkg, ver string) (*pypiResponse, error) {
 	url := pypiBase + "/" + pkg + "/json"
 	if v := strings.TrimPrefix(strings.TrimSpace(ver), "v"); v != "" {
 		url = pypiBase + "/" + pkg + "/" + v + "/json"
@@ -249,26 +298,26 @@ func pypiFiles(ctx context.Context, pkg, ver string) (string, []pypiFile, error)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, "GET", url, nil)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", "adbq/frida-tools")
 	req.Header.Set("Accept", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", nil, fmt.Errorf("query PyPI for %s: %w", pkg, err)
+		return nil, fmt.Errorf("query PyPI for %s: %w", pkg, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return "", nil, fmt.Errorf("%s %s not found on PyPI", pkg, strings.TrimSpace(ver))
+		return nil, fmt.Errorf("%s %s not found on PyPI", pkg, strings.TrimSpace(ver))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("PyPI returned HTTP %d for %s %s", resp.StatusCode, pkg, strings.TrimSpace(ver))
+		return nil, fmt.Errorf("PyPI returned HTTP %d for %s %s", resp.StatusCode, pkg, strings.TrimSpace(ver))
 	}
 	var pr pypiResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&pr); err != nil {
-		return "", nil, fmt.Errorf("parse PyPI response: %w", err)
+		return nil, fmt.Errorf("parse PyPI response: %w", err)
 	}
-	return pr.Info.Version, parsePypiFiles(&pr), nil
+	return &pr, nil
 }
 
 func parsePypiFiles(pr *pypiResponse) []pypiFile {
@@ -486,16 +535,28 @@ func ensureFridaBridges(ctx context.Context, ver string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if fileExists(filepath.Join(dir, "java.js")) {
-		return dir, nil // already extracted
+	// The stamp records how the cached bridges were chosen. Anything picked by an
+	// older policy — including the "just take the newest frida-tools" one that
+	// shipped a bridge unable to hook — is stale, so a poisoned cache heals
+	// itself instead of silently breaking every session that reuses it.
+	stamp := filepath.Join(dir, "frida-tools-version.txt")
+	if fileExists(filepath.Join(dir, "java.js")) && stampPolicy(stamp) == fridaBridgePolicy {
+		return dir, nil
 	}
 
-	// frida-tools has its OWN version scheme (independent of frida core — e.g.
-	// frida-tools 14.x ships bridges for frida 17). Use the latest; its bridges
-	// target the current frida major.
-	_, files, err := pypiFiles(ctx, "frida-tools", "")
+	// frida-tools has its own version scheme, but each release pins the frida
+	// core it targets (`frida>=17.10.0,<18.0.0`). Its Java bridge talks to ART
+	// through that core's agent, and against an older one it fails *silently*:
+	// Java.use resolves and `.implementation = fn` assigns, but the method is
+	// never intercepted. So resolve the newest release this runtime satisfies
+	// rather than whatever is newest on PyPI.
+	tv, err := resolveFridaToolsVersion(ctx, ver)
 	if err != nil {
-		return "", fmt.Errorf("resolve frida-tools: %w", err)
+		return "", err
+	}
+	_, files, err := pypiFiles(ctx, "frida-tools", tv)
+	if err != nil {
+		return "", fmt.Errorf("resolve frida-tools %s: %w", tv, err)
 	}
 	art, isSdist, err := selectFridaToolsArtifact(files)
 	if err != nil {
@@ -522,7 +583,165 @@ func ensureFridaBridges(ctx context.Context, ver string) (string, error) {
 	if !fileExists(filepath.Join(dir, "java.js")) {
 		return "", fmt.Errorf("frida-tools artifact %s contained no bridges", art.Filename)
 	}
+	if err := os.WriteFile(stamp, []byte(fridaBridgePolicy+"\n"+tv+"\n"), 0o644); err != nil {
+		return "", err
+	}
 	return dir, nil
+}
+
+// fridaBridgePolicy identifies the rule used to pick a frida-tools release.
+// Bump it whenever that rule changes so existing caches are re-provisioned.
+const fridaBridgePolicy = "policy=2 first-release-of-matching-floor"
+
+// stampPolicy reads the policy line from a bridge cache stamp ("" when absent).
+func stampPolicy(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	line, _, _ := strings.Cut(string(b), "\n")
+	return strings.TrimSpace(line)
+}
+
+// fridaToolsProbeLimit bounds how many frida-tools releases we ask PyPI about
+// while walking back from the newest. Releases track frida core closely, so a
+// runtime more than this many releases behind is old enough that failing loudly
+// beats guessing.
+const fridaToolsProbeLimit = 24
+
+// resolveFridaToolsVersion picks the frida-tools release whose bridges target
+// the given frida core version: the *first* release that raised its floor to the
+// highest floor this version still satisfies.
+//
+// Walking down to the first release of that line matters. frida-tools patch
+// releases keep shipping newer frida-java-bridge builds without raising the
+// declared floor — 14.5.0 and 14.5.2 both claim `frida>=17.5.0`, yet only
+// 14.5.0's bridge actually hooks under a 17.5.1 agent. The floor tells us which
+// line was cut for our core; the first release on it is the one built against it.
+func resolveFridaToolsVersion(ctx context.Context, fridaVer string) (string, error) {
+	all, err := pypiVersions(ctx, "frida-tools")
+	if err != nil {
+		return "", fmt.Errorf("list frida-tools releases: %w", err)
+	}
+	vers := make([]string, 0, len(all))
+	for _, v := range all {
+		if isPlainVersion(v) { // skip pre-releases; they don't sort numerically
+			vers = append(vers, v)
+		}
+	}
+	sort.Slice(vers, func(i, j int) bool { return compareVersions(vers[i], vers[j]) > 0 })
+	if len(vers) > fridaToolsProbeLimit {
+		vers = vers[:fridaToolsProbeLimit]
+	}
+
+	best, floor := "", ""
+	for _, v := range vers {
+		req, err := pypiRequirement(ctx, "frida-tools", v, "frida")
+		if err != nil {
+			continue // a release we can't read metadata for is one we can't vouch for
+		}
+		if !requirementAllows(req, fridaVer) {
+			if best != "" {
+				break // below our line already; older releases only get further away
+			}
+			continue
+		}
+		f := requirementFloor(req)
+		if best == "" {
+			best, floor = v, f
+			continue
+		}
+		if f != floor {
+			break // start of an older line
+		}
+		best = v // same line, older release — prefer it
+	}
+	if best == "" {
+		return "", fmt.Errorf("no frida-tools release targets frida %s", fridaVer)
+	}
+	return best, nil
+}
+
+// isPlainVersion reports whether v is purely dotted digits (1.2.3), i.e. not a
+// pre-release like 14.0.0a1 that compareVersions would mis-order.
+func isPlainVersion(v string) bool {
+	if v == "" {
+		return false
+	}
+	for _, r := range v {
+		if (r < '0' || r > '9') && r != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+// requirementFloor returns the version from a specifier's lower bound (the
+// ">=" / ">" clause), or "" when it declares none.
+func requirementFloor(spec string) string {
+	if i := strings.IndexByte(spec, ';'); i >= 0 {
+		spec = spec[:i]
+	}
+	for _, clause := range strings.Split(spec, ",") {
+		clause = strings.TrimSpace(strings.Trim(strings.TrimSpace(clause), "()"))
+		for _, op := range []string{">=", ">"} {
+			if strings.HasPrefix(clause, op) {
+				return strings.TrimSpace(clause[len(op):])
+			}
+		}
+	}
+	return ""
+}
+
+// requirementAllows reports whether ver satisfies a PEP 508 version specifier
+// list such as "<18.0.0,>=17.5.0". An empty specifier allows anything.
+func requirementAllows(spec, ver string) bool {
+	if ver == "" {
+		return false
+	}
+	if i := strings.IndexByte(spec, ';'); i >= 0 { // drop environment markers
+		spec = spec[:i]
+	}
+	for _, clause := range strings.Split(spec, ",") {
+		clause = strings.TrimSpace(strings.Trim(strings.TrimSpace(clause), "()"))
+		if clause == "" {
+			continue
+		}
+		op := ""
+		for _, cand := range []string{">=", "<=", "==", "!=", ">", "<", "~="} {
+			if strings.HasPrefix(clause, cand) {
+				op = cand
+				break
+			}
+		}
+		if op == "" {
+			continue
+		}
+		want := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(clause[len(op):], " "), ".*"))
+		if want == "" {
+			continue
+		}
+		c := compareVersions(ver, want)
+		ok := false
+		switch op {
+		case ">=", "~=":
+			ok = c >= 0
+		case ">":
+			ok = c > 0
+		case "<=":
+			ok = c <= 0
+		case "<":
+			ok = c < 0
+		case "==":
+			ok = c == 0
+		case "!=":
+			ok = c != 0
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // selectFridaToolsArtifact prefers a pure-python wheel, falling back to the
