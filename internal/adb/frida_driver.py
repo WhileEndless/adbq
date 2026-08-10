@@ -169,6 +169,17 @@ def main():
                       "payload": json.dumps(message)})
         return on_message
 
+    def make_log_handler(name):
+        # frida-python never routes console.* through the "message" callback: it
+        # intercepts type=="log" in Script._on_message and calls the script's log
+        # handler, whose default prints info to stdout and everything else to
+        # stderr. That bypassed our JSON protocol entirely — warn/error output
+        # vanished into stderr, and info lines raced the JSON writes on stdout.
+        def on_log(level, text):
+            emit({"type": "log", "script": name, "level": level or "info",
+                  "payload": text if isinstance(text, str) else str(text)})
+        return on_log
+
     loaded = 0
     for i, sc in enumerate(scripts):
         name = sc.get("name") or ("script-%d" % i)
@@ -178,6 +189,12 @@ def main():
         try:
             script = session.create_script(full_source)
             script.on("message", make_handler(name))
+            # Older bindings may lack set_log_handler; there console.log still
+            # reaches us as a raw stdout line the Go side wraps as a log entry.
+            try:
+                script.set_log_handler(make_log_handler(name))
+            except Exception:
+                pass
             script.load()
             loaded += 1
             emit({"type": "loaded", "script": name})

@@ -1,6 +1,9 @@
 package adb
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 func TestParseFridaMsg(t *testing.T) {
 	cases := []struct {
@@ -45,8 +48,51 @@ func TestParseFridaMsg(t *testing.T) {
 	}
 }
 
+// A chatty script used to outrun the delivery channel and have its lines
+// dropped on the floor. Draining the ring by seq must hand every message to a
+// slow consumer exactly once instead.
+func TestFridaLogSinceLosesNothingUnderLoad(t *testing.T) {
+	s := &FridaSession{done: make(chan struct{})}
+	const total = fridaSessionRing / 2
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < total; i++ {
+			s.ingest(FridaMsg{Kind: "log", Payload: "x"})
+		}
+		close(s.done)
+	}()
+
+	seen, last := 0, 0
+	drain := func() {
+		for _, m := range s.LogSince(last) {
+			if m.Seq != last+1 {
+				t.Errorf("seq gap: got %d after %d", m.Seq, last)
+			}
+			last = m.Seq
+			seen++
+		}
+	}
+	for done := false; !done; {
+		select {
+		case <-s.done:
+			done = true
+		default:
+		}
+		drain()
+	}
+	wg.Wait()
+	drain()
+
+	if seen != total {
+		t.Fatalf("delivered %d of %d messages", seen, total)
+	}
+}
+
 func TestFridaMsgRingAndSeq(t *testing.T) {
-	s := &FridaSession{ch: make(chan FridaMsg, 1024), done: make(chan struct{})}
+	s := &FridaSession{done: make(chan struct{})}
 	for i := 0; i < fridaSessionRing+50; i++ {
 		s.ingest(FridaMsg{Kind: "log", Payload: "x"})
 	}

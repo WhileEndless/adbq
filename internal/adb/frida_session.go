@@ -67,7 +67,6 @@ type FridaSession struct {
 	status string
 	note   string
 
-	ch       chan FridaMsg
 	done     chan struct{}
 	stopOnce sync.Once
 }
@@ -157,7 +156,6 @@ func StartFridaSession(ctx context.Context, rt FridaRuntime, id, serial, pkg, mo
 		stdin:  stdin,
 		tmp:    tmp,
 		status: "running",
-		ch:     make(chan FridaMsg, 256),
 		done:   make(chan struct{}),
 	}
 	go s.pump(stdout, stderr)
@@ -165,10 +163,10 @@ func StartFridaSession(ctx context.Context, rt FridaRuntime, id, serial, pkg, mo
 }
 
 // pump reads the driver's stdout line-by-line, normalizes each JSON object into
-// a sequenced FridaMsg, and fans it out to the ring buffer and the live channel.
-// stderr is drained so a chatty interpreter can't block the child on a full pipe.
+// a sequenced FridaMsg, and appends it to the ring buffer. stderr is drained so
+// a chatty interpreter can't block the child on a full pipe; its lines are also
+// surfaced as log entries so a Python traceback isn't invisible.
 func (s *FridaSession) pump(stdout, stderr io.Reader) {
-	defer close(s.ch)
 	defer close(s.done)
 
 	var stderrBuf strings.Builder
@@ -179,8 +177,12 @@ func (s *FridaSession) pump(stdout, stderr io.Reader) {
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 		for sc.Scan() {
+			line := sc.Text()
 			if stderrBuf.Len() < 8192 {
-				stderrBuf.WriteString(sc.Text() + "\n")
+				stderrBuf.WriteString(line + "\n")
+			}
+			if strings.TrimSpace(line) != "" {
+				s.ingest(FridaMsg{Kind: "log", Level: "warning", Script: "driver", Payload: line})
 			}
 		}
 	}()
@@ -241,15 +243,13 @@ func (s *FridaSession) ingest(m FridaMsg) {
 		s.ring = append(s.ring, m)
 	}
 	s.mu.Unlock()
-
-	select {
-	case s.ch <- m:
-	default: // never block the reader if the consumer is slow
-	}
 }
 
-// Messages is the live channel of session messages (closed when the driver exits).
-func (s *FridaSession) Messages() <-chan FridaMsg { return s.ch }
+// Done is closed once the driver has exited and the final status is settled.
+// Consumers drain with LogSince on a timer and once more after Done fires; the
+// ring is the single source of truth, so a slow consumer coalesces rather than
+// losing lines — which is what a chatty script needs.
+func (s *FridaSession) Done() <-chan struct{} { return s.done }
 
 // Info returns the current session metadata snapshot.
 func (s *FridaSession) Info() FridaSessionInfo {
