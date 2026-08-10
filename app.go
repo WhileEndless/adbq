@@ -1381,6 +1381,11 @@ func (a *App) ImportCodeshareScript(owner, slug string) (adb.FridaScript, error)
 
 // ─── Frida live sessions ───────────────────────────────────────────────────
 
+// fridaFlushInterval is how often a live session's new messages are batched out
+// to the UI. Fast enough to feel live, slow enough that a noisy script can't
+// turn every log line into its own event + React render.
+const fridaFlushInterval = 100 * time.Millisecond
+
 // StartFridaSession launches a host-side frida driver under the runtime matching
 // runtimeVer, instrumenting pkg with the given library scripts. mode is "spawn"
 // (cold-start) or "attach". Messages stream via the "frida-session:<id>" event;
@@ -1424,12 +1429,32 @@ func (a *App) StartFridaSession(serial, pkg, mode, runtimeVer string, scriptIDs 
 
 	eventName := "frida-session:" + id
 	go func() {
-		for m := range sess.Messages() {
-			runtime.EventsEmit(a.ctx, eventName, m)
+		// Drain the session ring on a timer rather than emitting one event per
+		// message: a hook that logs on every call outruns the event bridge, and
+		// batching keeps the UI at one state update per tick instead of thousands.
+		last := 0
+		flush := func() {
+			msgs := sess.LogSince(last)
+			if len(msgs) == 0 {
+				return
+			}
+			last = msgs[len(msgs)-1].Seq
+			runtime.EventsEmit(a.ctx, eventName, msgs)
 		}
-		// Final state (ended/error) is reflected via the info snapshot the UI
-		// re-reads; signal completion so it can stop showing "running".
-		runtime.EventsEmit(a.ctx, eventName+":done", sess.Info())
+		tick := time.NewTicker(fridaFlushInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-tick.C:
+				flush()
+			case <-sess.Done():
+				flush()
+				// Final state (ended/error) is reflected via the info snapshot the
+				// UI re-reads; signal completion so it can stop showing "running".
+				runtime.EventsEmit(a.ctx, eventName+":done", sess.Info())
+				return
+			}
+		}
 	}()
 	return sess.Info(), nil
 }

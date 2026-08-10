@@ -266,7 +266,9 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   const attachFridaSession = useCallback((id: string) => {
     if (fridaSubs.current[id]) return;
     const ev = `frida-session:${id}`;
-    EventsOn(ev, (m: adb.FridaMsg) => mergeFridaMsgs(id, [m]));
+    // The backend batches a tick's worth of messages into one event; tolerate a
+    // single object too so an older backend build still streams.
+    EventsOn(ev, (m: adb.FridaMsg | adb.FridaMsg[]) => mergeFridaMsgs(id, Array.isArray(m) ? m : [m]));
     EventsOn(`${ev}:done`, (info: adb.FridaSessionInfo) => {
       setFridaSessions(prev => prev[id] ? {...prev, [id]: {...prev[id], info, ended: true, rev: prev[id].rev + 1}} : prev);
     });

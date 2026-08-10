@@ -76,8 +76,9 @@ func TestFridaSessionDriverSmoke(t *testing.T) {
 		t.Fatalf("StartFridaSession: %v", err)
 	}
 
+	<-sess.Done()
 	sawReady, sawFatal := false, false
-	for m := range sess.Messages() {
+	for _, m := range sess.LogSince(0) {
 		t.Logf("msg kind=%s payload=%q detail=%q", m.Kind, m.Payload, m.Detail)
 		if m.Kind == "ready" {
 			sawReady = true

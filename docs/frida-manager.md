@@ -40,9 +40,10 @@ Bağlamalar **paket-anahtarlı** (cihazdan bağımsız): bir paketin script seti
 
 Apps ekranında **Start / Restart / Attach with Frida**:
 - `StartAppWithFrida` (app.go) orkestrasyonu: bağlı scriptleri al → cihazda frida-server'ın çalıştığından emin ol (tek aday varsa otomatik başlat) → sürümü otoriter algıla → eşleşen host runtime'ı çöz (izin varsa yönetilen venv'i otomatik kur) → oturumu başlat.
-- Driver (`internal/adb/frida_driver.py`, `go:embed`): job dosyasını okur, `get_device(serial)` ile bağlanır, spawn-suspended + attach (veya çalışan sürece attach), scriptleri yükler, resume eder. Satır başına bir compact JSON mesajı yayar (`console.log` → `log`, `send()` → `send`, hatalar → `error`).
+- Driver (`internal/adb/frida_driver.py`, `go:embed`): job dosyasını okur, `get_device(serial)` ile bağlanır, spawn-suspended + attach (veya çalışan sürece attach), scriptleri yükler, resume eder. Satır başına bir compact JSON mesajı yayar (`console.*` → `log`, `send()` → `send`, hatalar → `error`). `console.*` çıktısı frida-python'ın `message` geri çağrısına **hiç uğramaz** — `Script._on_message` `type=="log"` mesajlarını script'in log handler'ına yönlendirir ve varsayılan handler bunu doğrudan stdout/stderr'e basar. Bu yüzden her script için `set_log_handler` kurulur; aksi hâlde `console.warn`/`console.error` stderr'de kaybolur, `console.log` ise JSON protokolünü atlayarak ham satır olarak akar.
 - Durdurma: stdin kapatma (taşınabilir; Windows'ta SIGTERM yok) + süreç kill yedeği; driver çıkmadan önce detach eder (cihazda gum agent bırakmaz).
 - Loglar **sekme kapalıyken de toplanır**: backend halka tamponu (5000) + monoton `seq`; frontend abone olunca `GetFridaSessionLog(sinceSeq)` ile backfill yapar ve `seq` ile tekilleştirir. Wails olayları fire-and-forget olduğundan, `resume`'dan ~50 ms sonra gelen ilk `console.log`'lar bu sayede kaçmaz.
+- Teslimat **kayıpsız ve toplu**: halka tamponu tek doğruluk kaynağıdır, `app.go` 100 ms'de bir `LogSince(last)` ile boşaltıp tek olayda dizi gönderir. Her mesaj için ayrı olay yayan eski yol, her çağrıda log basan bir hook'un altında olay köprüsünün gerisinde kalıp satırları sessizce düşürüyordu.
 
 İlgili: `internal/adb/frida_session.go`, `frontend/src/store.tsx` (frida slice), `frontend/src/screens/Frida.tsx`.
 
