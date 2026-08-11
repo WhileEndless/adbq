@@ -5,6 +5,7 @@ import {Icon} from '../icons';
 import {Combobox, IconBtn, SearchInput, showToast} from '../ui';
 import {useStore} from '../store';
 import {logcatStore, useLogcat} from '../logcatStore';
+import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
 import {LogEntry} from '../types';
 
 const LEVELS = ['V', 'D', 'I', 'W', 'E', 'F'] as const;
@@ -19,11 +20,6 @@ const LEVEL_NAMES: Record<string, string> = {
 // render as a screenful.
 const ROW_H = 22;
 const OVERSCAN = 12;
-
-// Typing must stay responsive while lines stream in, so the search box owns its
-// own immediate state and only hands the term to the (expensive) filter pass
-// after a short idle.
-const SEARCH_DEBOUNCE_MS = 120;
 
 export function LogcatScreen({device}: {device: adb.Device}) {
   const store = useStore();
@@ -333,25 +329,6 @@ function LevelMenu({value, onChange}: {value: string; onChange: (v: string) => v
       )}
     </div>
   );
-}
-
-function highlight(msg: string, q: string) {
-  if (!q) return msg;
-  try {
-    // Use case-insensitive plain substring scan to avoid RegExp.lastIndex state.
-    const ql = q.toLowerCase();
-    const ml = msg.toLowerCase();
-    const out: React.ReactNode[] = [];
-    let i = 0;
-    while (i < msg.length) {
-      const found = ml.indexOf(ql, i);
-      if (found < 0) { out.push(msg.slice(i)); break; }
-      if (found > i) out.push(msg.slice(i, found));
-      out.push(<mark key={found}>{msg.slice(found, found + q.length)}</mark>);
-      i = found + q.length;
-    }
-    return out;
-  } catch { return msg; }
 }
 
 function exportLines(lines: LogEntry[], serial: string) {

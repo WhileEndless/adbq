@@ -64,7 +64,9 @@ ikili (binary) olarak çalışır.
   yorumlayıcını kullanır; CodeMirror editörlü script kütüphanesi; Frida CodeShare
   arama/içe aktarma; uygulama başına script bağlama; ve scriptlerinle uygulamayı
   spawn/attach edip `console.log`/`send()`/hataları canlı konsola akıtan tek tıkla
-  **Start/Attach with Frida**.
+  **Start/Attach with Frida**. Konsol aranabilir ve türe göre süzülebilir
+  (log / send / uyarı / hata / oturum olayları); eşleşmeler vurgulanır, yukarı
+  kaydırınca auto-scroll devredilir, görünen satırlar metin olarak dışa aktarılır.
 - **Ağ** — arayüzler, IPv4/MAC/ağ geçidi/DNS, Wi-Fi SSID, `settings put global
   http_proxy` ile genel HTTP proxy ayarlama/okuma/temizleme.
 - **Paket yakalama** — uygulama içi canlı yakalama ve analiz (gopacket), cihazda

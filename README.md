@@ -62,7 +62,9 @@ frontend), it ships as a small native binary on macOS, Windows, and Linux.
   interpreter; a script library with a CodeMirror editor; Frida CodeShare search/
   import; per-app script bindings; and one-click **Start/Attach with Frida** that
   spawns or attaches an app with your scripts and streams its `console.log`/
-  `send()`/errors into a live console.
+  `send()`/errors into a live console — searchable and filterable by kind
+  (logs / sends / warnings / errors / lifecycle events), with match highlighting,
+  auto-scroll handover, and text export of whatever is on screen.
 - **Network** — interfaces, IPv4/MAC/gateway/DNS, Wi-Fi SSID, global HTTP proxy
   set/get/clear via `settings put global http_proxy`.
 - **Packet capture** — in-app live capture & analysis (gopacket), on-device
