@@ -1,10 +1,11 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useLayoutEffect, useMemo, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOn, EventsOff} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
 import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
+import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
 import {CodeEditor} from '../components/CodeEditor';
 
 export function FridaScreen({device}: {device: adb.Device}) {
@@ -918,44 +919,37 @@ function SessionStatusBadge({slice}: {slice: import('../store').FridaSessionSlic
   return <Badge kind='ok'>live</Badge>;
 }
 
-function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
-  const store = useStore();
-  const wrap = React.useRef<HTMLDivElement>(null);
-  const [autoscroll, setAutoscroll] = useState(true);
-  const id = slice.info.id;
+// The buckets the console toolbar filters on. They are coarser than the raw
+// message kinds on purpose: a reader wants "hide the lifecycle chatter" or
+// "errors only", not a checkbox per protocol kind.
+type FridaCat = 'log' | 'send' | 'warn' | 'err' | 'meta';
 
-  // Keep the latest line in view unless the user scrolled up.
-  useEffect(() => {
-    if (autoscroll && wrap.current) wrap.current.scrollTop = wrap.current.scrollHeight;
-  }, [slice.rev, autoscroll]);
+const FRIDA_CATS: {key: FridaCat; label: string; title: string}[] = [
+  {key: 'log',  label: 'Logs',     title: 'console.log / console.info from the script'},
+  {key: 'send', label: 'Sends',    title: 'send() payloads from the script'},
+  {key: 'warn', label: 'Warnings', title: 'console.warn from the script'},
+  {key: 'err',  label: 'Errors',   title: 'Script exceptions and fatal session failures'},
+  {key: 'meta', label: 'Events',   title: 'Session lifecycle: driver ready, script loaded, resumed, detached'},
+];
+const ALL_CATS = FRIDA_CATS.map(c => c.key);
 
-  return (
-    <div style={{display: 'flex', flexDirection: 'column', minHeight: 0, gap: 8}}>
-      <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
-        <span className='mono' style={{fontSize: 12}}>{slice.info.package}</span>
-        <SessionStatusBadge slice={slice}/>
-        {slice.info.statusNote && <span className='subtle' style={{fontSize: 11, color: 'var(--err)'}}>{slice.info.statusNote}</span>}
-        <div style={{flex: 1}}/>
-        <label className='muted' style={{display: 'flex', alignItems: 'center', gap: 4, fontSize: 11}}>
-          <input type='checkbox' checked={autoscroll} onChange={e => setAutoscroll(e.target.checked)}/> follow
-        </label>
-        <button className='btn sm' onClick={() => store.clearFridaSession(id)}>Clear</button>
-        {!slice.ended && slice.info.status === 'running'
-          ? <button className='btn sm danger' onClick={() => store.stopFridaSession(id)}><Icon.Stop/>Stop</button>
-          : <button className='btn sm' onClick={() => store.removeFridaSession(id)}><Icon.Trash width={11} height={11}/>Remove</button>}
-      </div>
-      <div ref={wrap} className='frida-console'>
-        {slice.messages.length === 0 && <div className='muted' style={{padding: 12, fontSize: 12}}>Waiting for output…</div>}
-        {slice.messages.map((m, i) => <FridaLogLine key={m.seq || i} m={m}/>)}
-      </div>
-    </div>
-  );
+interface FridaRow {
+  m: adb.FridaMsg;
+  cat: FridaCat;
+  tag: string;
+  text: string;
 }
 
-function FridaLogLine({m}: {m: adb.FridaMsg}) {
-  const t = new Date(m.time).toLocaleTimeString(undefined, {hour12: false});
-  // Map a message to a console row class for coloring.
-  const kindClass =
+/**
+ * Renders one message into the parts the console shows. Filtering, search and
+ * export all go through here so a query matches exactly the text on screen — a
+ * reader searching for `detached` should find the lifecycle line even though
+ * that word never appears in the raw payload.
+ *
+ * Returns null for messages that have nothing to display.
+ */
+function fridaRow(m: adb.FridaMsg): FridaRow | null {
+  const cat: FridaCat =
     m.kind === 'error' || m.kind === 'fatal' ? 'err'
     : m.kind === 'send' ? 'send'
     : m.kind === 'log' ? (m.level === 'error' ? 'err' : m.level === 'warning' ? 'warn' : 'log')
@@ -967,15 +961,152 @@ function FridaLogLine({m}: {m: adb.FridaMsg}) {
   else if (m.kind === 'ready') text = '— driver ready —';
   else if (m.kind === 'status') text = m.detail ? `— ${m.detail} —` : '';
   else if (m.kind === 'fatal') text = `✕ ${m.payload || ''}${m.detail ? ': ' + m.detail : ''}`;
-  if (m.kind === 'status' && !text) return null;
+  if (m.stack) text += `\n${m.stack}`;
+  if (!text) return null;
   const tag = m.kind === 'send' ? 'send' : m.kind === 'log' ? (m.level || 'log') : m.kind;
+  return {m, cat, tag, text};
+}
+
+function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
+  const store = useStore();
+  const wrap = React.useRef<HTMLDivElement>(null);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [cats, setCats] = useState<FridaCat[]>(ALL_CATS);
+  const [follow, setFollow] = useState(true);
+  const id = slice.info.id;
+  // Whether the console is parked at its newest line; a fresh mount renders the
+  // tail, so it starts true.
+  const atBottom = React.useRef(true);
+  // Row count at the moment following was switched off, so the jump pill can
+  // report how much has arrived since.
+  const missedFrom = React.useRef(0);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const rows = useMemo(() => {
+    const q = search.toLowerCase();
+    const keep = new Set(cats);
+    const out: FridaRow[] = [];
+    for (const m of slice.messages) {
+      const r = fridaRow(m);
+      if (!r) continue;
+      if (!keep.has(r.cat)) continue;
+      if (q && !r.text.toLowerCase().includes(q) && !r.tag.toLowerCase().includes(q)) continue;
+      out.push(r);
+    }
+    return out;
+  }, [slice.messages, search, cats]);
+
+  // Keep the latest line in view while following. useLayoutEffect so the jump
+  // lands in the same frame the rows paint, instead of flashing the old offset.
+  useLayoutEffect(() => {
+    if (follow && wrap.current) wrap.current.scrollTop = wrap.current.scrollHeight;
+  }, [slice.rev, follow, rows.length]);
+
+  const stopFollowing = () => { setFollow(false); missedFrom.current = rows.length; };
+  const resumeFollow = () => {
+    atBottom.current = true;
+    setFollow(true);
+    if (wrap.current) wrap.current.scrollTop = wrap.current.scrollHeight;
+  };
+  const missed = follow ? 0 : Math.max(0, rows.length - missedFrom.current);
+
+  // Never let the last kind be switched off: an empty console with every filter
+  // dark looks like a broken session rather than a filter the reader set.
+  const toggleCat = (c: FridaCat) => setCats(prev =>
+    prev.includes(c) ? (prev.length === 1 ? prev : prev.filter(x => x !== c)) : [...prev, c]);
+  const filtering = cats.length !== ALL_CATS.length || !!search;
+
   return (
-    <div className={`frida-line ${kindClass}`}>
-      <span className='t'>{t}</span>
-      <span className='k'>{tag}</span>
-      <span className='msg'>{text}{m.stack ? `\n${m.stack}` : ''}</span>
+    <div style={{display: 'flex', flexDirection: 'column', minHeight: 0, gap: 8}}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+        <span className='mono' style={{fontSize: 12}}>{slice.info.package}</span>
+        <SessionStatusBadge slice={slice}/>
+        {slice.info.statusNote && <span className='subtle' style={{fontSize: 11, color: 'var(--err)'}}>{slice.info.statusNote}</span>}
+        <div style={{flex: 1}}/>
+        <span className='subtle mono' style={{fontSize: 11}}>
+          {filtering ? `${rows.length} / ${slice.messages.length}` : `${slice.messages.length}`} lines
+        </span>
+        <button className={`btn sm${follow ? ' primary' : ''}`} title={follow ? 'Auto-scroll on' : 'Auto-scroll off'}
+                onClick={() => (follow ? stopFollowing() : resumeFollow())}>
+          <Icon.Activity width={12} height={12}/>Follow
+        </button>
+        <button className='btn sm' title='Save the visible lines to a text file'
+                disabled={rows.length === 0} onClick={() => exportFridaLog(rows, slice.info)}>
+          <Icon.Download width={12} height={12}/>Export
+        </button>
+        <button className='btn sm' onClick={() => store.clearFridaSession(id)}>Clear</button>
+        {!slice.ended && slice.info.status === 'running'
+          ? <button className='btn sm danger' onClick={() => store.stopFridaSession(id)}><Icon.Stop/>Stop</button>
+          : <button className='btn sm' onClick={() => store.removeFridaSession(id)}><Icon.Trash width={11} height={11}/>Remove</button>}
+      </div>
+
+      <div className='frida-console-toolbar'>
+        <SearchInput value={searchInput} onChange={setSearchInput} placeholder='Search session output' style={{width: 240}}/>
+        <div style={{flex: 1}}/>
+        {FRIDA_CATS.map(c => (
+          <button key={c.key} className={`btn sm${cats.includes(c.key) ? ' primary' : ''}`}
+                  title={c.title} onClick={() => toggleCat(c.key)}>{c.label}</button>
+        ))}
+        <button className='btn sm' title='Clear the search and show every kind again'
+                disabled={!filtering} onClick={() => { setSearchInput(''); setSearch(''); setCats(ALL_CATS); }}>Reset</button>
+      </div>
+
+      <div className='frida-console-viewport'>
+        <div ref={wrap} className='frida-console' onScroll={e => {
+          const el = e.currentTarget;
+          const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          // Scrolling up is an explicit "let me read this", so it takes over
+          // from auto-scroll instead of fighting it. Our own scroll-to-bottom
+          // lands at the bottom, so it never trips this.
+          if (!bottom && atBottom.current && follow) stopFollowing();
+          // Scrolling the whole way back down means "I'm caught up" — same
+          // intent as pressing the jump pill.
+          if (bottom && !follow) setFollow(true);
+          atBottom.current = bottom;
+        }}>
+          {slice.messages.length === 0 && <div className='muted' style={{padding: 12, fontSize: 12}}>Waiting for output…</div>}
+          {slice.messages.length > 0 && rows.length === 0 && (
+            <div className='muted' style={{padding: 12, fontSize: 12}}>No matching lines. Clear the search, or re-enable a kind above.</div>
+          )}
+          {rows.map((r, i) => <FridaLogLine key={r.m.seq || i} row={r} q={search}/>)}
+        </div>
+        {!follow && (
+          <button className='logcat-jump' onClick={resumeFollow}>
+            <Icon.ChevronDown width={13} height={13}/>
+            {missed > 0 ? `${missed} new line${missed === 1 ? '' : 's'}` : 'Jump to latest'}
+          </button>
+        )}
+      </div>
     </div>
   );
+}
+
+function FridaLogLine({row, q}: {row: FridaRow; q: string}) {
+  const t = new Date(row.m.time).toLocaleTimeString(undefined, {hour12: false});
+  return (
+    <div className={`frida-line ${row.cat}`}>
+      <span className='t'>{t}</span>
+      <span className='k'>{row.tag}</span>
+      <span className='msg'>{highlight(row.text, q)}</span>
+    </div>
+  );
+}
+
+function exportFridaLog(rows: FridaRow[], info: adb.FridaSessionInfo) {
+  const header = `# adbq frida session export — ${info.package} — ${new Date().toISOString()}\n`
+    + `# mode=${info.mode} · frida ${info.runtime} · ${rows.length} lines\n\n`;
+  const text = header + rows.map(r => `${new Date(r.m.time).toISOString()}  ${r.tag.padEnd(8)} ${r.text}`).join('\n');
+  const blob = new Blob([text], {type: 'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `frida-${info.package}-${Date.now()}.txt`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast({title: 'Session log exported', body: `${rows.length} lines`, kind: 'ok'});
 }
 
 function fmtMB(n: number): string {

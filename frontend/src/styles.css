@@ -686,6 +686,22 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* Frida live session console — reuses the log color tokens for consistency. */
+/* Holds the scrolling console plus the floating "jump to latest" pill, the same
+   arrangement the logcat viewport uses. */
+.frida-console-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.frida-console-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
 .frida-console {
   flex: 1;
   min-height: 0;
@@ -717,13 +733,15 @@ input, select, textarea { font: inherit; color: inherit; }
 .frida-line.err { border-left-color: rgba(236,106,115,0.6); }
 .frida-line.err .msg, .frida-line.err .k { color: var(--log-e); }
 .frida-line.meta .msg { color: var(--text-subtle); font-style: italic; }
-.logrow .tag-msg .msg mark {
+.logrow .tag-msg .msg mark,
+.frida-line .msg mark {
   background: var(--accent-soft-strong);
   color: var(--accent-strong);
   border-radius: 3px;
   padding: 0 2px;
 }
-:root[data-theme="dark"] .logrow .tag-msg .msg mark { color: #c5a3ff; }
+:root[data-theme="dark"] .logrow .tag-msg .msg mark,
+:root[data-theme="dark"] .frida-line .msg mark { color: #c5a3ff; }
 
 .logcat-status {
   display: flex; align-items: center; gap: 14px;

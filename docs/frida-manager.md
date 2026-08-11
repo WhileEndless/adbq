@@ -45,7 +45,10 @@ Apps ekranında **Start / Restart / Attach with Frida**:
 - Loglar **sekme kapalıyken de toplanır**: backend halka tamponu (5000) + monoton `seq`; frontend abone olunca `GetFridaSessionLog(sinceSeq)` ile backfill yapar ve `seq` ile tekilleştirir. Wails olayları fire-and-forget olduğundan, `resume`'dan ~50 ms sonra gelen ilk `console.log`'lar bu sayede kaçmaz.
 - Teslimat **kayıpsız ve toplu**: halka tamponu tek doğruluk kaynağıdır, `app.go` 100 ms'de bir `LogSince(last)` ile boşaltıp tek olayda dizi gönderir. Her mesaj için ayrı olay yayan eski yol, her çağrıda log basan bir hook'un altında olay köprüsünün gerisinde kalıp satırları sessizce düşürüyordu.
 
-İlgili: `internal/adb/frida_session.go`, `frontend/src/store.tsx` (frida slice), `frontend/src/screens/Frida.tsx`.
+- Konsol okuması Logcat ekranıyla aynı davranır: **debounce'lu arama** (eşleşmeler `<mark>` ile vurgulanır), **tür süzgeci** (Logs · Sends · Warnings · Errors · Events), görünen satırlar için **Export**, ve **auto-scroll devri** — yukarı kaydırmak takibi bırakır, "Jump to latest" pili o sırada kaç satır geldiğini söyler, en alta dönmek takibi geri açar. Arama/süzgeç yalnızca görünümü etkiler; halka tamponu dokunulmaz kalır, süzgeci kaldırınca satırlar geri gelir.
+- Arama ekranda **görünen** metinle eşleşir: `fridaRow()` her mesajı (ham `payload`, yaşam-döngüsü satırları ve `stack`) tek bir metne indirir; süzgeç, vurgulama ve export aynı fonksiyondan geçer, böylece `detached` gibi yalnızca türetilmiş satırlarda geçen bir kelime de bulunur. Son tür süzgeci kapatılamaz — hepsi kapalı bir konsol, kullanıcının kurduğu süzgeç değil bozuk oturum gibi görünür.
+
+İlgili: `internal/adb/frida_session.go`, `frontend/src/store.tsx` (frida slice), `frontend/src/screens/Frida.tsx`, `frontend/src/lib/logSearch.tsx` (Logcat ile paylaşılan vurgulama).
 
 ## Java/ObjC/Swift bridge sürümü
 
