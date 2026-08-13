@@ -139,5 +139,50 @@ Her faz: küçük commit'ler; her commit `gofmt`/`go vet ./...`/`go test ./...`
   genişlerken yapılabilir.
 - **P2** API24+ hidepid'e özel ayrı banner (mevcut "limited view" zaten "Android
   7+" diyor).
-- `Capabilities`'in SDK/SELinux/Has alanları şimdilik az tüketiliyor (ABI aktif
-  kullanımda) — yeni ihtiyaçta oradan okunmalı (tekrar prob açmadan).
+
+---
+
+## Sürüme göre strateji katmanı (`strategy.go`)
+
+Bir cihaz bilgisini okumanın birden fazla yolu olabilir ve hangisinin en iyi
+olduğu Android sürümüne bağlıdır: yeni seviyeler ucuz, amaca özel komutlar
+ekler; eski seviyelerde yalnızca geniş ve pahalı olanlar bulunur. Bu seçim
+eskiden her çağrı yerinde ayrı ayrı yapılıyordu — her yeni sürüm özellik
+koduna dokunmayı gerektiriyor ve hangi yolun tuttuğu hiçbir yerde
+hatırlanmıyordu.
+
+`Resolver` bu kararın tek adresi. Özellik kodu dışa açık tek bir method
+çağırır (örnek: `Client.SSID`), altta sürüm koşullu uygulamalar durur:
+
+- **Kayıt sırası = tercih sırası.** En iyi (ucuz, doğru) yol başa yazılır.
+- **`Requirements`** ile kapı: `MinSDK`/`MaxSDK`, gereken ikililer (`capBins`
+  adları), `Root`. Süzme `Capabilities` üzerinden yapılır — ek prob açılmaz.
+- **`ErrUnsupported`** dönen strateji o cihaz için kalıcı olarak elenir, yani
+  seçim maliyeti bir kez ödenir. Geçici hata bilinçli olarak elemez.
+- **`Requirements.Costly`**: cihazda yan etkisi olan ya da ağır olan yol.
+  Yalnızca çağıranın verdiği *tazelik anahtarı* değiştiğinde koşar. Böylece
+  pahalı bir prob, poll yolunda gösterilen bir değeri bayatlamadan besleyebilir:
+  cihazın durumu değiştiğinde anahtar da değişir.
+
+Yeni bir sürüm yeni bir komut getirdiğinde yapılacak tek şey listeye `MinSDK`
+etiketli bir strateji eklemek; hiçbir çağrı yeri değişmez.
+
+**İlk tüketici — `wifi.ssid`:** API 30+ hedefli Wi-Fi shell sorgusu, altında
+son çare olarak Wi-Fi servis dökümü. Döküm `Costly`: bazı build'lerde diğer
+problardan kat kat pahalı olmakla kalmıyor, her çağrıda cihaz içi depolamaya
+hiçbir şeyin budamadığı bir tanılama görüntüsü yazıyor — uzun oturumlarda veri
+bölümünü tüketip sonraki push'ları düşürebiliyor. Tazelik anahtarı wlan0'ın
+adresi + link durumu; ikisi de zenginleştirmenin hâlihazırda yaptığı `ip`
+çağrısından türetilir, ek tur maliyeti yoktur. **Her çağrı yeri anahtarı aynı
+fonksiyonla türetmek zorunda** (`wlanStateFromIfaces`) — ayrışan anahtarlar
+birbirinin önbelleğini her poll'de geçersiz kılar.
+
+Bilinçli olarak dışarıda bırakılan: `IsAppRunning`'in `pidof`/procfs fallback'i.
+Orada seçim sürüme değil *sonuca* bakar (boş `pidof` yanıtı "çalışmıyor" ile
+"pidof kullanılamaz" arasında belirsizdir; procfs taraması tam bunun için
+vardır), dolayısıyla ilk-başarı-kazanır zinciri davranışı düzeltmez, değiştirir.
+
+`Capabilities` artık aktif tüketiliyor: zenginleştirme `Release`/`SDK`/`ABI`'yi
+oradan okur (üç ayrı `getprop` yerine), sertifika kurulumu da SDK seviyesini
+oradan alır — poll başına düşen tur sayısı azalır ve seviye için tek doğruluk
+kaynağı kalır.
