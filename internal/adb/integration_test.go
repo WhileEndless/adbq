@@ -223,3 +223,114 @@ func TestScreenshot_Integration(t *testing.T) {
 	}
 	t.Logf("saved screenshot: %s (%d bytes)", path, info.Size())
 }
+
+// TestSSIDStaysOffPollingPath_Integration guards the property that makes the
+// SSID safe to show on a 5-second poll: while the Wi-Fi link state is unchanged,
+// repeated reads must not re-run a Costly strategy. On a device where the cheap
+// path applies nothing is cached and the check is vacuous but still valid.
+func TestSSIDStaysOffPollingPath_Integration(t *testing.T) {
+	c, serial := integrationDevice(t)
+	if serial == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// readAt reports when a Costly strategy last produced a value, or the zero
+	// time when no expensive path is in play on this device.
+	readAt := func() time.Time { return costlySSIDReadAt(c, serial) }
+
+	_, link := c.detectIP(ctx, serial)
+	first, err := c.SSID(ctx, serial, link)
+	if err != nil {
+		t.Skipf("no SSID strategy applies to this device: %v", err)
+	}
+	afterFirst := readAt()
+
+	for i := range 5 {
+		got, err := c.SSID(ctx, serial, link)
+		if err != nil {
+			t.Fatalf("read %d: SSID: %v", i, err)
+		}
+		if got != first {
+			t.Errorf("read %d: SSID = %q, want %q — value must be stable while the link is", i, got, first)
+		}
+	}
+	if afterFirst.IsZero() {
+		t.Log("cheap strategy in play; no caching expected")
+		return
+	}
+	if again := readAt(); !again.Equal(afterFirst) {
+		t.Errorf("costly strategy re-ran on an unchanged link (%v → %v)", afterFirst, again)
+	}
+
+	// An explicit refresh must still reach the device, or the UI could never
+	// recover from a stale value.
+	if _, err := c.RefreshSSID(ctx, serial, link); err != nil {
+		t.Fatalf("RefreshSSID: %v", err)
+	}
+	if refreshed := readAt(); refreshed.Equal(afterFirst) {
+		t.Error("RefreshSSID served the cached value instead of re-reading")
+	}
+
+	// Exercise the real polling caller too: Enrich derives the freshness key
+	// itself, so a key it computed differently on each pass would defeat the
+	// cache without any of the checks above noticing.
+	afterRefresh := readAt()
+	for i := range 5 {
+		d := Device{ID: serial, State: "device", Online: true}
+		c.Enrich(ctx, &d)
+		if d.WiFi != first {
+			t.Errorf("Enrich %d: WiFi = %q, want %q", i, d.WiFi, first)
+		}
+	}
+	if again := readAt(); !again.Equal(afterRefresh) {
+		t.Errorf("Enrich re-ran the costly strategy (%v → %v) — the freshness key is not stable across polls", afterRefresh, again)
+	}
+}
+
+// costlySSIDReadAt reports when a Costly SSID strategy last produced a value for
+// serial, or the zero time when the cheap path applies and nothing is cached.
+func costlySSIDReadAt(c *Client, serial string) time.Time {
+	c.factMu.Lock()
+	defer c.factMu.Unlock()
+	if st := c.facts[factKey("wifi.ssid", serial)]; st != nil && st.cached {
+		return st.at
+	}
+	return time.Time{}
+}
+
+// TestNetworkSnapshotReadsSSIDFresh_Integration is the counterpart to
+// TestSSIDStaysOffPollingPath_Integration: the network snapshot is built on
+// demand, not on a timer, so it must read the SSID fresh. Without this the
+// Network screen's Refresh button could never recover from a stale name.
+func TestNetworkSnapshotReadsSSIDFresh_Integration(t *testing.T) {
+	c, serial := integrationDevice(t)
+	if serial == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, link := c.detectIP(ctx, serial)
+	primed, err := c.SSID(ctx, serial, link)
+	if err != nil {
+		t.Skipf("no SSID strategy applies to this device: %v", err)
+	}
+	before := costlySSIDReadAt(c, serial)
+
+	info, err := c.GetNetworkInfo(ctx, serial)
+	if err != nil {
+		t.Fatalf("GetNetworkInfo: %v", err)
+	}
+	if info.WiFiSSID != primed {
+		t.Errorf("snapshot SSID = %q, poll SSID = %q — the two views disagree", info.WiFiSSID, primed)
+	}
+	if before.IsZero() {
+		t.Log("cheap strategy in play; every read already reaches the device")
+		return
+	}
+	if after := costlySSIDReadAt(c, serial); after.Equal(before) {
+		t.Error("network snapshot served the cached SSID instead of re-reading")
+	}
+}

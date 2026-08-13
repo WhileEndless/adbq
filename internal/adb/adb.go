@@ -35,6 +35,11 @@ type Client struct {
 	capMu sync.Mutex
 	caps  map[string]*Capabilities
 
+	// factMu guards facts, the per-(fact, serial) record of which read strategy
+	// a device answers to and what it last returned — see strategy.go.
+	factMu sync.Mutex
+	facts  map[string]*factState
+
 	// ipt holds the per-(serial, family) iptables undo ring (see iptables.go).
 	// Per-Client so multiple clients / tests don't share undo history.
 	ipt iptablesState
@@ -330,6 +335,7 @@ func (c *Client) Disconnect(ctx context.Context, addr string) (string, error) {
 	// come back rooted, with a different SELinux mode, etc.).
 	if addr != "" {
 		c.InvalidateCapabilities(addr)
+		c.InvalidateFacts(addr)
 	}
 	args := []string{"disconnect"}
 	if addr != "" {
