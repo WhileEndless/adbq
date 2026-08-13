@@ -108,6 +108,27 @@ func TestResolverGatesOnCapabilities(t *testing.T) {
 	}
 }
 
+func TestResolverRootGate(t *testing.T) {
+	var rootRuns, plainRuns int
+	c := testClient(&Capabilities{SDK: 33})
+	// Seed the su-style cache so the gate resolves without probing a device.
+	c.suStyles = map[string]suStyle{testSerial: suSimple}
+	r := NewResolver("test.fact",
+		fakeStrategy{name: "needs-root", req: Requirements{Root: true}, val: "root", runs: &rootRuns},
+		fakeStrategy{name: "plain", val: "plain", runs: &plainRuns},
+	)
+	got, err := r.Resolve(context.Background(), c, testSerial, "")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got != "root" {
+		t.Errorf("Resolve() = %q, want root — the gate should pass on a rooted device", got)
+	}
+	if rootRuns != 1 || plainRuns != 0 {
+		t.Errorf("runs = root:%d plain:%d, want root:1 plain:0", rootRuns, plainRuns)
+	}
+}
+
 func TestResolverNoEligibleStrategy(t *testing.T) {
 	var runs int
 	r := NewResolver("test.fact",
