@@ -129,21 +129,17 @@ func (c *Client) Enrich(parent context.Context, d *Device) {
 	if d.Product == "" {
 		d.Product = get("ro.product.name")
 	}
-	d.AndroidVersion = get("ro.build.version.release")
-	if sdk := get("ro.build.version.sdk"); sdk != "" {
-		// best-effort parse
-		var n int
-		for _, r := range sdk {
-			if r < '0' || r > '9' {
-				break
-			}
-			n = n*10 + int(r-'0')
-		}
-		d.SDK = n
-	}
+	// Release, SDK level and ABI come from the capability scan rather than three
+	// more getprops: it batches them into one round trip and caches the result
+	// for the device's connected lifetime, and none of the three can change
+	// while a device stays connected. Enrichment runs on a poll, so every probe
+	// it avoids is paid back on every cycle.
+	caps := c.Capabilities(ctx, d.ID)
+	d.AndroidVersion = caps.Release
+	d.SDK = caps.SDK
+	d.Arch = caps.ABI
 	d.BuildID = get("ro.build.id")
 	d.CPU = get("ro.hardware") // generic; not great but stdlib only
-	d.Arch = get("ro.product.cpu.abi")
 	// Kernel
 	if k, err := c.Shell(ctx, d.ID, "uname -r"); err == nil {
 		d.Kernel = strings.TrimSpace(k)

@@ -145,7 +145,7 @@ func (c *Client) InstallSystemCert(ctx context.Context, serial, localCertPath st
 	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	hash := androidSubjectHash(cert)
 
-	res := &CertInstallResult{Subject: subjectString(cert), SDK: c.sdkInt(ctx, serial)}
+	res := &CertInstallResult{Subject: subjectString(cert), SDK: c.Capabilities(ctx, serial).SDK}
 
 	// Stage the PEM on the device via `adb push` (works without root, and unlike
 	// shell `printf`/`echo` heredocs it doesn't depend on which utilities the
@@ -325,13 +325,6 @@ func (c *Client) pickCacertFileName(ctx context.Context, serial, hash string, pe
 		}
 	}
 	return hash + ".0"
-}
-
-// sdkInt reads ro.build.version.sdk; 0 when unknown.
-func (c *Client) sdkInt(ctx context.Context, serial string) int {
-	out, _ := c.Shell(ctx, serial, "getprop ro.build.version.sdk")
-	n, _ := strconv.Atoi(strings.TrimSpace(out))
-	return n
 }
 
 // loadCertificate reads a DER or PEM certificate file and returns the parsed
