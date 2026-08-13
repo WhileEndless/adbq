@@ -101,9 +101,10 @@ func (c *Client) SSID(ctx context.Context, serial string, link wlanState) (strin
 	return ssidResolver.Resolve(ctx, c, serial, link.freshKey())
 }
 
-// RefreshSSID re-reads the SSID even when the link state has not moved. It backs
-// an explicit user-initiated refresh; ordinary reads should use SSID so an
-// expensive probe stays off the polling path.
+// RefreshSSID re-reads the SSID even when the link state has not moved, and
+// updates what later SSID calls will serve. Use it for on-demand reads — a
+// screen the user opened, a refresh they asked for — and SSID everywhere that
+// repeats on a timer, so an expensive probe never lands on a polling path.
 func (c *Client) RefreshSSID(ctx context.Context, serial string, link wlanState) (string, error) {
 	ssidResolver.Invalidate(c, serial)
 	return c.SSID(ctx, serial, link)

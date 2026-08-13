@@ -127,7 +127,11 @@ func (c *Client) GetNetworkInfo(ctx context.Context, serial string) (*NetworkInf
 			info.Proxy = p
 		}
 	}
-	if ssid, err := c.SSID(ctx, serial, link); err == nil {
+	// This snapshot is built on demand — opening the Network screen, hitting its
+	// Refresh, or switching device — never on a repeating timer, so it reads the
+	// SSID fresh the way it always has. Only the device-list poll settles for the
+	// remembered value. The fresh read also updates what that poll will serve.
+	if ssid, err := c.RefreshSSID(ctx, serial, link); err == nil {
 		info.WiFiSSID = ssid
 	}
 	return info, nil

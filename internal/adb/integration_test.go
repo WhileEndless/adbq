@@ -238,14 +238,7 @@ func TestSSIDStaysOffPollingPath_Integration(t *testing.T) {
 
 	// readAt reports when a Costly strategy last produced a value, or the zero
 	// time when no expensive path is in play on this device.
-	readAt := func() time.Time {
-		c.factMu.Lock()
-		defer c.factMu.Unlock()
-		if st := c.facts[factKey("wifi.ssid", serial)]; st != nil && st.cached {
-			return st.at
-		}
-		return time.Time{}
-	}
+	readAt := func() time.Time { return costlySSIDReadAt(c, serial) }
 
 	_, link := c.detectIP(ctx, serial)
 	first, err := c.SSID(ctx, serial, link)
@@ -293,5 +286,51 @@ func TestSSIDStaysOffPollingPath_Integration(t *testing.T) {
 	}
 	if again := readAt(); !again.Equal(afterRefresh) {
 		t.Errorf("Enrich re-ran the costly strategy (%v → %v) — the freshness key is not stable across polls", afterRefresh, again)
+	}
+}
+
+// costlySSIDReadAt reports when a Costly SSID strategy last produced a value for
+// serial, or the zero time when the cheap path applies and nothing is cached.
+func costlySSIDReadAt(c *Client, serial string) time.Time {
+	c.factMu.Lock()
+	defer c.factMu.Unlock()
+	if st := c.facts[factKey("wifi.ssid", serial)]; st != nil && st.cached {
+		return st.at
+	}
+	return time.Time{}
+}
+
+// TestNetworkSnapshotReadsSSIDFresh_Integration is the counterpart to
+// TestSSIDStaysOffPollingPath_Integration: the network snapshot is built on
+// demand, not on a timer, so it must read the SSID fresh. Without this the
+// Network screen's Refresh button could never recover from a stale name.
+func TestNetworkSnapshotReadsSSIDFresh_Integration(t *testing.T) {
+	c, serial := integrationDevice(t)
+	if serial == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, link := c.detectIP(ctx, serial)
+	primed, err := c.SSID(ctx, serial, link)
+	if err != nil {
+		t.Skipf("no SSID strategy applies to this device: %v", err)
+	}
+	before := costlySSIDReadAt(c, serial)
+
+	info, err := c.GetNetworkInfo(ctx, serial)
+	if err != nil {
+		t.Fatalf("GetNetworkInfo: %v", err)
+	}
+	if info.WiFiSSID != primed {
+		t.Errorf("snapshot SSID = %q, poll SSID = %q — the two views disagree", info.WiFiSSID, primed)
+	}
+	if before.IsZero() {
+		t.Log("cheap strategy in play; every read already reaches the device")
+		return
+	}
+	if after := costlySSIDReadAt(c, serial); after.Equal(before) {
+		t.Error("network snapshot served the cached SSID instead of re-reading")
 	}
 }
