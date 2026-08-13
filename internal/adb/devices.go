@@ -151,9 +151,10 @@ func (c *Client) Enrich(parent context.Context, d *Device) {
 	// Root detection
 	d.Root, d.RootMethod = c.detectRoot(ctx, d.ID)
 	// Network
-	d.IP = c.detectIP(ctx, d.ID)
-	if w, err := c.Shell(ctx, d.ID, "dumpsys wifi"); err == nil {
-		d.WiFi = parseWifiSSID(w)
+	var link wlanState
+	d.IP, link = c.detectIP(ctx, d.ID)
+	if ssid, err := c.SSID(ctx, d.ID, link); err == nil {
+		d.WiFi = ssid
 	}
 	if m, err := c.Shell(ctx, d.ID, "cat /sys/class/net/wlan0/address"); err == nil {
 		d.MAC = strings.TrimSpace(m)
@@ -203,21 +204,38 @@ func (c *Client) detectRoot(ctx context.Context, serial string) (bool, string) {
 	return false, ""
 }
 
-func (c *Client) detectIP(ctx context.Context, serial string) string {
+// detectIP returns the address to display for the device and the wlan0 link
+// state that keys its Wi-Fi facts, both from a single `ip` call.
+//
+// The two differ on purpose: the address falls back to any non-loopback
+// interface so the UI shows something useful, while the link state is derived
+// from wlan0 through parseIfaces alone. Every caller must key Wi-Fi facts the
+// same way, or two call sites would keep invalidating each other's cached value
+// (see wlanState).
+func (c *Client) detectIP(ctx context.Context, serial string) (string, wlanState) {
+	var link wlanState
+	ip := ""
 	// awk/head are absent on stripped ROMs; pull the raw `ip` output and parse
 	// the `inet <addr>/<cidr>` lines host-side instead.
 	if out, err := c.Shell(ctx, serial, "ip -f inet addr show wlan0"); err == nil {
-		if ip := firstInetAddr(out, false); ip != "" {
-			return ip
+		link = wlanStateFromIfaces(parseIfaces(out))
+		ip = link.IP
+		if ip == "" {
+			// Some ROMs' `ip` output doesn't shape into interface records even
+			// though the inet line is there.
+			ip = firstInetAddr(out, false)
 		}
+	}
+	if ip != "" {
+		return ip, link
 	}
 	// fallback: any non-loopback inet
 	if out, err := c.Shell(ctx, serial, "ip -f inet addr"); err == nil {
 		if ip := firstInetAddr(out, true); ip != "" {
-			return ip
+			return ip, link
 		}
 	}
-	return ""
+	return "", link
 }
 
 // firstInetAddr returns the first IPv4 address from `ip ... addr` output,
@@ -246,7 +264,7 @@ func firstInetAddr(out string, skipLoopback bool) string {
 	return ""
 }
 
-// parseWifiSSID extracts the connected Wi-Fi SSID from `dumpsys wifi` output,
+// parseWifiSSID extracts the connected Wi-Fi SSID from a Wi-Fi service dump,
 // host-side (no device `grep`). Returns "" when not present or redacted.
 func parseWifiSSID(out string) string {
 	for _, ln := range strings.Split(out, "\n") {
@@ -254,15 +272,9 @@ func parseWifiSSID(out string) string {
 		if !ok {
 			continue
 		}
-		rest := strings.TrimSpace(after)
-		if before, _, ok := strings.Cut(rest, ","); ok {
-			rest = before
+		if ssid := cleanSSID(after); ssid != "" {
+			return ssid
 		}
-		rest = strings.Trim(rest, `" `)
-		if rest == "" || rest == "<unknown ssid>" || rest == "<none>" {
-			continue
-		}
-		return rest
 	}
 	return ""
 }

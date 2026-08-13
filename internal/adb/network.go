@@ -60,8 +60,15 @@ func (c *Client) GetNetworkInfo(ctx context.Context, serial string) (*NetworkInf
 	info := &NetworkInfo{}
 	// Interfaces: prefer iproute2 `ip`, but it's absent on API 21-23 toolbox and
 	// stripped ROMs — fall back to ifconfig then netcfg so Overview isn't blank.
+	//
+	// The Wi-Fi link state comes from the `ip` output alone, never from the
+	// fallbacks: device enrichment derives it the same way, and the two must
+	// agree or they would keep invalidating each other's cached Wi-Fi facts
+	// (see wlanState).
+	var link wlanState
 	if out, err := c.Shell(ctx, serial, "ip -f inet addr"); err == nil {
 		info.NetIfaces = parseIfaces(out)
+		link = wlanStateFromIfaces(info.NetIfaces)
 	}
 	if len(info.NetIfaces) == 0 {
 		if out, err := c.Shell(ctx, serial, "ifconfig"); err == nil {
@@ -120,8 +127,8 @@ func (c *Client) GetNetworkInfo(ctx context.Context, serial string) (*NetworkInf
 			info.Proxy = p
 		}
 	}
-	if ssid, err := c.Shell(ctx, serial, "dumpsys wifi"); err == nil {
-		info.WiFiSSID = parseWifiSSID(ssid)
+	if ssid, err := c.SSID(ctx, serial, link); err == nil {
+		info.WiFiSSID = ssid
 	}
 	return info, nil
 }
