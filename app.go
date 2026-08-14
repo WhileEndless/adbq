@@ -57,6 +57,7 @@ type App struct {
 	host     *adb.HostStore
 	sdk      *adb.SDKManager
 	emu      *adb.EmulatorManager
+	pkgs     *adb.PackageManager
 
 	fridaMu   sync.Mutex
 	fridaSess map[string]*adb.FridaSession
@@ -81,6 +82,7 @@ func NewApp() *App {
 		host:        host,
 		sdk:         sdk,
 		emu:         adb.NewEmulatorManager(sdk, client),
+		pkgs:        adb.NewPackageManager(sdk),
 		tasks:       adb.NewTaskManager(),
 		logcats:     map[string]*logcatFeed{},
 		shells:      map[string]*adb.ShellSession{},
@@ -296,6 +298,69 @@ func (a *App) EmulatorLog(name string, sinceSeq int) []adb.HostLogLine {
 
 // ClearEmulatorLog empties one AVD's log buffer.
 func (a *App) ClearEmulatorLog(name string) { a.emu.ClearLog(name) }
+
+// ─── System images and AVD creation ─────────────────────────────────────
+
+// ListInstalledSystemImages reads the SDK tree directly — instant, offline, and
+// always correct about what is already on disk.
+func (a *App) ListInstalledSystemImages() []adb.SystemImage { return a.pkgs.ListInstalledImages() }
+
+// ListSystemImages merges the installed images with everything installable.
+// The remote half is cached; pass refresh to force a re-fetch.
+func (a *App) ListSystemImages(refresh bool) ([]adb.SystemImage, error) {
+	return a.pkgs.ListSystemImages(a.ctx, refresh)
+}
+
+// InstallSystemImage downloads a system image, reporting progress as a task.
+func (a *App) InstallSystemImage(pkg string) error {
+	id, ctx := a.tasks.Create("sdk-install", "Install "+pkg, "starting")
+	go func() {
+		err := a.pkgs.InstallSystemImage(ctx, pkg, func(stage string, pct int) {
+			a.tasks.Update(id, func(t *adb.TaskState) {
+				t.Detail = stage
+				t.Progress = pct
+			})
+		})
+		if err != nil {
+			a.tasks.Finish(id, "err", "", err.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", "", "installed "+pkg)
+	}()
+	return nil
+}
+
+// UninstallSystemImage removes an installed image. Destructive — the UI must
+// confirm first, showing the command.
+func (a *App) UninstallSystemImage(pkg string) error {
+	return a.pkgs.UninstallSystemImage(a.ctx, pkg)
+}
+
+// ListDeviceProfiles returns the hardware definitions available when creating.
+func (a *App) ListDeviceProfiles() ([]adb.DeviceProfile, error) {
+	return a.emu.ListDeviceProfiles(a.ctx)
+}
+
+// CreateAVDCommand renders the creation command for the confirm dialog.
+func (a *App) CreateAVDCommand(spec adb.AVDSpec) string {
+	return adb.CreateAVDCommand(a.sdk.Info().AVDManager, spec)
+}
+
+// DeleteAVDCommand renders the deletion command for the confirm dialog.
+func (a *App) DeleteAVDCommand(name string) string {
+	return adb.DeleteAVDCommand(a.sdk.Info().AVDManager, name)
+}
+
+// CreateAVD creates a new AVD and returns it.
+func (a *App) CreateAVD(spec adb.AVDSpec) (*adb.AVD, error) { return a.emu.CreateAVD(a.ctx, spec) }
+
+// DeleteAVD removes an AVD and its data. Irreversible.
+func (a *App) DeleteAVD(name string) error { return a.emu.DeleteAVD(a.ctx, name) }
+
+// DeleteAVDSnapshot removes one saved snapshot.
+func (a *App) DeleteAVDSnapshot(name, snapshot string) error {
+	return a.emu.DeleteSnapshot(name, snapshot)
+}
 
 // ─── scrcpy ─────────────────────────────────────────────────────────────
 

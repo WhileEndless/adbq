@@ -1,6 +1,7 @@
 package adb
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -42,5 +43,40 @@ func TestHostSDKDetection(t *testing.T) {
 	}
 	if i.Error != "" {
 		t.Errorf("available SDK must not carry an error: %s", i.Error)
+	}
+}
+
+func TestHostInstalledSystemImages(t *testing.T) {
+	m := hostSDK(t)
+	imgs := NewPackageManager(m).ListInstalledImages()
+	if len(imgs) == 0 {
+		t.Skip("no system images installed on this host")
+	}
+	for _, i := range imgs {
+		t.Logf("%-58s api=%-3d tag=%-24s abi=%-12s play=%-5v rev=%s",
+			i.Pkg, i.API, i.Tag, i.ABI, i.PlayStore, i.Revision)
+		if !i.Installed || i.Location == "" {
+			t.Errorf("%s: read from disk but not marked installed", i.Pkg)
+		}
+		if len(i.Commands) == 0 {
+			t.Errorf("%s: no command shown (CLAUDE.md §4.1)", i.Pkg)
+		}
+	}
+}
+
+func TestHostDeviceProfiles(t *testing.T) {
+	m := hostSDK(t)
+	profiles, err := NewEmulatorManager(m, NewClient()).ListDeviceProfiles(context.Background())
+	if err != nil {
+		t.Skipf("avdmanager unavailable: %v", err)
+	}
+	if len(profiles) == 0 {
+		t.Fatal("avdmanager listed no device profiles")
+	}
+	t.Logf("%d device profiles, first: %+v", len(profiles), profiles[0])
+	for _, p := range profiles {
+		if p.ID == "" || p.Name == "" {
+			t.Errorf("incomplete profile: %+v", p)
+		}
 	}
 }
