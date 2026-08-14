@@ -1396,9 +1396,11 @@ const fridaFlushInterval = 100 * time.Millisecond
 
 // StartFridaSession launches a host-side frida driver under the runtime matching
 // runtimeVer, instrumenting pkg with the given library scripts. mode is "spawn"
-// (cold-start) or "attach". Messages stream via the "frida-session:<id>" event;
-// call GetFridaSessionLog right after subscribing to backfill the start race.
-func (a *App) StartFridaSession(serial, pkg, mode, runtimeVer string, scriptIDs []string) (adb.FridaSessionInfo, error) {
+// (cold-start) or "attach". port is the device port the frida-server listens on
+// (0 = frida's default); a non-default one is reached through an adb forward.
+// Messages stream via the "frida-session:<id>" event; call GetFridaSessionLog
+// right after subscribing to backfill the start race.
+func (a *App) StartFridaSession(serial, pkg, mode, runtimeVer string, port int, scriptIDs []string) (adb.FridaSessionInfo, error) {
 	if a.frida == nil {
 		return adb.FridaSessionInfo{}, fmt.Errorf("frida store unavailable")
 	}
@@ -1416,7 +1418,7 @@ func (a *App) StartFridaSession(serial, pkg, mode, runtimeVer string, scriptIDs 
 	id := fmt.Sprintf("f-%d", a.fridaSeq)
 	a.fridaMu.Unlock()
 
-	sess, err := adb.StartFridaSession(a.ctx, rt, id, serial, pkg, mode, scripts)
+	sess, err := adb.StartFridaSession(a.ctx, a.client, rt, id, serial, pkg, mode, port, scripts)
 	if err != nil {
 		return adb.FridaSessionInfo{}, err
 	}
@@ -1569,7 +1571,7 @@ func (a *App) StartAppWithFrida(serial, pkg, mode string) (adb.FridaSessionInfo,
 	}
 
 	progress("ensuring frida-server")
-	ver, err := a.ensureDeviceFridaServer(serial)
+	ver, port, err := a.ensureDeviceFridaServer(serial, progress)
 	if err != nil {
 		return adb.FridaSessionInfo{}, err
 	}
@@ -1587,44 +1589,145 @@ func (a *App) StartAppWithFrida(serial, pkg, mode string) (adb.FridaSessionInfo,
 	}
 
 	progress("launching")
-	return a.StartFridaSession(serial, pkg, mode, ver, binding.ScriptIDs)
+	return a.StartFridaSession(serial, pkg, mode, ver, port, binding.ScriptIDs)
 }
 
-// ensureDeviceFridaServer returns the running frida-server's version, starting an
-// installed binary first when none is running and the choice is unambiguous.
-func (a *App) ensureDeviceFridaServer(serial string) (string, error) {
-	if ver, err := a.client.DetectRunningFridaVersion(a.ctx, serial); err == nil && ver != "" {
-		return ver, nil
-	}
+// ensureDeviceFridaServer returns the running frida-server's version and the
+// port it listens on, starting an installed binary first when none is running.
+func (a *App) ensureDeviceFridaServer(serial string, progress func(string)) (string, int, error) {
 	servers, err := a.client.ListFridaServers(a.ctx, serial)
 	if err != nil {
-		return "", fmt.Errorf("check frida-server: %w", err)
+		return "", 0, fmt.Errorf("check frida-server: %w", err)
 	}
+	if ver, port, ok := a.runningFridaServer(serial, servers); ok {
+		return ver, port, nil
+	}
+
+	pick := a.pickFridaServer(serial, servers)
+	if pick == nil {
+		if len(servers) == 0 {
+			return "", 0, fmt.Errorf("no frida-server on the device — install one in Frida → Server first")
+		}
+		return "", 0, fmt.Errorf("none of the %d frida-server binaries on the device can run here — install one for this device's architecture in Frida → Server", len(servers))
+	}
+	progress("starting frida-server " + pick.Version)
+	if _, err := a.client.StartFrida(a.ctx, serial, pick.Path, "", 0); err != nil {
+		return "", 0, fmt.Errorf("start frida-server: %w", err)
+	}
+	// Give it a moment, then read back what actually came up.
+	for range 10 {
+		time.Sleep(300 * time.Millisecond)
+		fresh, err := a.client.ListFridaServers(a.ctx, serial)
+		if err != nil {
+			continue
+		}
+		if ver, port, ok := a.runningFridaServer(serial, fresh); ok {
+			return ver, port, nil
+		}
+	}
+	return "", 0, fmt.Errorf("frida-server did not come up — check its log in Frida → Server")
+}
+
+// runningFridaServer reports the version and port of the server already running,
+// if there is one.
+func (a *App) runningFridaServer(serial string, servers []adb.FridaServer) (string, int, bool) {
 	for _, s := range servers {
-		if s.Active {
-			if s.Version != "" {
-				return s.Version, nil
-			}
+		if !s.Active {
+			continue
+		}
+		if s.Version != "" {
+			return s.Version, s.Port, true
+		}
+		// Running, but the filename says nothing about the version — ask the
+		// binary itself, which is authoritative anyway.
+		if ver, err := a.client.DetectRunningFridaVersion(a.ctx, serial); err == nil && ver != "" {
+			return ver, s.Port, true
 		}
 	}
-	switch len(servers) {
-	case 0:
-		return "", fmt.Errorf("no frida-server on the device — install one in Frida → Server first")
-	case 1:
-		if _, err := a.client.StartFrida(a.ctx, serial, servers[0].Path, "", 0); err != nil {
-			return "", fmt.Errorf("start frida-server: %w", err)
+	// A server started from a path we don't inventory still answers this, and it
+	// will be on frida's default port or nothing would reach it.
+	if ver, err := a.client.DetectRunningFridaVersion(a.ctx, serial); err == nil && ver != "" {
+		return ver, adb.FridaDefaultPort, true
+	}
+	return "", 0, false
+}
+
+// pickFridaServer gathers what the choice depends on and defers to
+// chooseFridaServer.
+func (a *App) pickFridaServer(serial string, servers []adb.FridaServer) *adb.FridaServer {
+	arches := map[string]bool{}
+	if info, err := a.client.FridaArchInfo(a.ctx, serial); err == nil && info != nil {
+		for _, x := range info.Supported {
+			arches[x] = true
 		}
-		// Give it a moment, then read the authoritative version.
-		for i := 0; i < 10; i++ {
-			time.Sleep(300 * time.Millisecond)
-			if ver, err := a.client.DetectRunningFridaVersion(a.ctx, serial); err == nil && ver != "" {
-				return ver, nil
+	}
+	lastUsed := map[string]bool{}
+	hasRuntime := func(string) bool { return false }
+	if a.frida != nil {
+		for _, h := range a.frida.ListHistory() {
+			if h.RuntimeVer != "" {
+				lastUsed[h.RuntimeVer] = true
 			}
 		}
-		return "", fmt.Errorf("frida-server did not come up — check Frida → Server")
-	default:
-		return "", fmt.Errorf("multiple frida-server binaries and none running — start the one you want in Frida → Server")
+		hasRuntime = func(ver string) bool {
+			_, kind := a.frida.ResolveForVersion(ver)
+			return kind != "none"
+		}
 	}
+	return chooseFridaServer(servers, arches, hasRuntime, lastUsed)
+}
+
+// chooseFridaServer decides which installed binary the one-click flow should
+// launch. Having several installed is normal — a pentest device accumulates them
+// — and refusing to choose meant the flow could never start a server on any
+// well-used device; it just said "multiple frida-server binaries" and stopped.
+//
+// Preference, strongest first: an architecture this device can actually execute,
+// then a version the host already has a matching frida for (so no venv has to be
+// built), then one previously used here, then the newest. arches may be empty
+// when the probe told us nothing, in which case arch is not held against any
+// candidate.
+func chooseFridaServer(
+	servers []adb.FridaServer,
+	arches map[string]bool,
+	hasRuntime func(string) bool,
+	lastUsed map[string]bool,
+) *adb.FridaServer {
+	score := func(s adb.FridaServer) int {
+		// An arch the device cannot execute is not a candidate at all.
+		if len(arches) > 0 && s.Arch != "" && !arches[s.Arch] {
+			return -1
+		}
+		n := 0
+		if s.Arch != "" && arches[s.Arch] {
+			n += 4
+		}
+		if hasRuntime != nil && hasRuntime(s.Version) {
+			n += 2
+		}
+		if lastUsed[s.Version] {
+			n++
+		}
+		return n
+	}
+
+	var best *adb.FridaServer
+	bestScore := -1
+	for i := range servers {
+		s := servers[i]
+		if !s.Runnable || s.Version == "" {
+			continue
+		}
+		sc := score(s)
+		if sc < 0 {
+			continue
+		}
+		if best == nil || sc > bestScore ||
+			(sc == bestScore && adb.CompareFridaVersions(s.Version, best.Version) > 0) {
+			best, bestScore = &servers[i], sc
+		}
+	}
+	return best
 }
 
 // ─── Network ─────────────────────────────────────────────────────────────

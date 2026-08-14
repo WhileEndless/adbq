@@ -234,10 +234,20 @@ export function FridaScreen({device}: {device: adb.Device}) {
                 <div className='muted' style={{fontSize: 11, marginTop: 8}}>
                   Connect from host: <span className='mono'>frida-ps -H {device.ip || '127.0.0.1'}:{active.port}</span>
                 </div>
+                {active.port !== 27042 && (
+                  <div className='muted' style={{fontSize: 11, marginTop: 4}}>
+                    Frida's Android backend only dials <span className='mono'>27042</span>, so adbq reaches this
+                    server through an <span className='mono'>adb forward</span> it opens for the duration of each
+                    session. Sessions work as usual; an external <span className='mono'>frida -U</span> will not see it.
+                  </div>
+                )}
               </>
             ) : (
               <div className='muted' style={{fontSize: 12}}>
                 Pick a binary below and click <strong>Start</strong>. Interface defaults to <span className='mono'>0.0.0.0</span>, port <span className='mono'>{port}</span>.
+                {port !== 27042 && <div style={{marginTop: 4}}>
+                  Off the default port, adbq forwards the port per session so instrumentation still works.
+                </div>}
                 {!device.root && <div style={{marginTop: 6, color: 'var(--warn)'}}>
                   {rootUnavailableReason(device)} frida-server cannot bind without root
                   — use frida-gadget (LD_PRELOAD via repackaging) instead.
@@ -908,7 +918,11 @@ function FridaSessionsTab({device}: {device: adb.Device}) {
     if (!device?.id) { showToast({title: 'No device', body: 'Connect a device first', kind: 'err'}); return; }
     setRepeating(h.package);
     try {
-      const info = await store.startFridaSession(device.id, h.package, h.mode, h.runtimeVer, h.scriptIds || []);
+      // Repeat a past launch against whatever server is up now, on its own port
+      // — it may not be the one (or the port) the original run used.
+      const list = await API.ListFridaServers(device.id).catch(() => [] as adb.FridaServer[]);
+      const active = (list || []).find(x => x.active);
+      const info = await store.startFridaSession(device.id, h.package, h.mode, h.runtimeVer, active?.port || 0, h.scriptIds || []);
       setSelId(info.id);
       loadHistory();
     } catch (e) {

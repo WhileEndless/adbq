@@ -188,13 +188,26 @@ def main():
 
     emit({"type": "ready", "driverProto": DRIVER_PROTO, "fridaVersion": getattr(frida, "__version__", "")})
 
-    # Resolve the device by adb serial (multi-device safe; needs frida-server
-    # already running on the device).
+    # Resolve the device. Normally by adb serial (multi-device safe), which uses
+    # frida's Android backend — but that backend only ever dials frida's default
+    # port on the device, so a server on any other port is reached through an adb
+    # forward the Go side opened for us, as a remote device.
+    remote_address = job.get("remoteAddress") or ""
+    device_manager = frida.get_device_manager()
     try:
-        device = frida.get_device(serial, timeout=10) if serial else frida.get_usb_device(timeout=10)
+        if remote_address:
+            device = device_manager.add_remote_device(remote_address)
+        elif serial:
+            device = frida.get_device(serial, timeout=10)
+        else:
+            device = frida.get_usb_device(timeout=10)
     except Exception as e:
-        emit({"type": "fatal", "error": "no-device",
-              "detail": "could not reach the device — is it connected and frida-server running? (%s)" % e})
+        if remote_address:
+            detail = ("could not reach frida-server on port %s through %s (%s)"
+                      % (job.get("port") or "?", remote_address, e))
+        else:
+            detail = "could not reach the device — is it connected and frida-server running? (%s)" % e
+        emit({"type": "fatal", "error": "no-device", "detail": detail})
         return 1
 
     stop = threading.Event()
@@ -352,6 +365,13 @@ def main():
             session.detach()
     except Exception:
         pass
+    # Drop the remote device too, or frida keeps the forwarded connection open
+    # and the Go side's adb forward outlives the session it belonged to.
+    if remote_address:
+        try:
+            device_manager.remove_remote_device(remote_address)
+        except Exception:
+            pass
     emit({"type": "status", "stage": "stopped"})
     return 0
 

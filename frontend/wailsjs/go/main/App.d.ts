@@ -285,7 +285,7 @@ export function StartDNSSniffer(arg1:string):Promise<main.DNSSnifferStatus>;
 
 export function StartFrida(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
 
-export function StartFridaSession(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<adb.FridaSessionInfo>;
+export function StartFridaSession(arg1:string,arg2:string,arg3:string,arg4:string,arg5:number,arg6:Array<string>):Promise<adb.FridaSessionInfo>;
 
 export function StartLiveCapture(arg1:string,arg2:string,arg3:string,arg4:adb.LiveCaptureOptions):Promise<adb.LiveCaptureState>;
 

@@ -443,3 +443,8 @@ func (c *Client) DetectRunningFridaVersion(ctx context.Context, serial string) (
 	}
 	return "", fmt.Errorf("could not determine the running frida-server version")
 }
+
+// CompareFridaVersions orders two dotted frida version strings, returning 1, 0
+// or -1. Exported so app-level server selection can prefer the newest build
+// without duplicating the parsing.
+func CompareFridaVersions(a, b string) int { return compareVersions(a, b) }

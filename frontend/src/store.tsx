@@ -101,7 +101,7 @@ interface Store {
 
   // frida sessions — keyed by session id
   fridaSessions: Record<string, FridaSessionSlice>;
-  startFridaSession: (serial: string, pkg: string, mode: string, runtimeVer: string, scriptIds: string[]) => Promise<adb.FridaSessionInfo>;
+  startFridaSession: (serial: string, pkg: string, mode: string, runtimeVer: string, port: number, scriptIds: string[]) => Promise<adb.FridaSessionInfo>;
   adoptFridaSession: (info: adb.FridaSessionInfo) => void;
   attachFridaSession: (id: string) => void;
   stopFridaSession: (id: string) => Promise<void>;
@@ -284,8 +284,10 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
     attachFridaSession(info.id);
   }, [attachFridaSession]);
 
-  const startFridaSession = useCallback(async (serial: string, pkg: string, mode: string, runtimeVer: string, scriptIds: string[]): Promise<adb.FridaSessionInfo> => {
-    const info = await API.StartFridaSession(serial, pkg, mode, runtimeVer, scriptIds);
+  // port is the device port the frida-server listens on; 0 means frida's
+  // default, anything else is reached through an adb forward the backend opens.
+  const startFridaSession = useCallback(async (serial: string, pkg: string, mode: string, runtimeVer: string, port: number, scriptIds: string[]): Promise<adb.FridaSessionInfo> => {
+    const info = await API.StartFridaSession(serial, pkg, mode, runtimeVer, port, scriptIds);
     adoptFridaSession(info);
     return info;
   }, [adoptFridaSession]);

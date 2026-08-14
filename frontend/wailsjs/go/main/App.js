@@ -566,8 +566,8 @@ export function StartFrida(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['StartFrida'](arg1, arg2, arg3, arg4);
 }
 
-export function StartFridaSession(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['StartFridaSession'](arg1, arg2, arg3, arg4, arg5);
+export function StartFridaSession(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['StartFridaSession'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function StartLiveCapture(arg1, arg2, arg3, arg4) {
