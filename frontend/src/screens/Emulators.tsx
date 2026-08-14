@@ -296,28 +296,28 @@ function BootOptions({opts, onChange, snapshots}: {
         ))}
       </div>
       <div style={{display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap'}}>
-        <div className='field' style={{margin: 0}}>
+        <div className='field' style={fitCell}>
           <label>GPU</label>
-          <select className='input' value={opts.gpu || ''} onChange={e => set({gpu: e.target.value})}>
+          <select className='input' style={fitInput} value={opts.gpu || ''} onChange={e => set({gpu: e.target.value})}>
             <option value=''>AVD default</option>
             {['auto', 'host', 'swiftshader_indirect', 'angle_indirect', 'off'].map(g => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
         {snapshots.length > 0 && (
-          <div className='field' style={{margin: 0}}>
+          <div className='field' style={fitCell}>
             <label>Snapshot</label>
-            <select className='input' value={opts.snapshot || ''} onChange={e => set({snapshot: e.target.value})}>
+            <select className='input' style={fitInput} value={opts.snapshot || ''} onChange={e => set({snapshot: e.target.value})}>
               <option value=''>default</option>
               {snapshots.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
         )}
-        <div className='field' style={{margin: 0}}>
+        <div className='field' style={fitCell}>
           <label>Proxy</label>
           <input className='input mono' style={{width: 150}} placeholder='127.0.0.1:8080'
                  value={opts.httpProxy || ''} onChange={e => set({httpProxy: e.target.value})}/>
         </div>
-        <div className='field' style={{margin: 0}}>
+        <div className='field' style={fitCell}>
           <label>DNS</label>
           <input className='input mono' style={{width: 130}} placeholder='1.1.1.1'
                  value={opts.dns || ''} onChange={e => set({dns: e.target.value})}/>
@@ -432,7 +432,7 @@ function HardwareEditor({avd, onSaved}: {avd: adb.AVD; onSaved: () => void}) {
       </button>
       {open && (
         <div style={{marginTop: 8}}>
-          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6}}>
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6}}>
             <NumField label='RAM (MB)' value={hw.ramMB} onChange={v => set({ramMB: v})}/>
             <NumField label='CPU cores' value={hw.cores} onChange={v => set({cores: v})}/>
             <TextField label='Data partition' value={hw.dataSize} placeholder='8G' onChange={v => set({dataSize: v})}/>
@@ -440,9 +440,9 @@ function HardwareEditor({avd, onSaved}: {avd: adb.AVD; onSaved: () => void}) {
             <NumField label='Width' value={hw.width} onChange={v => set({width: v})}/>
             <NumField label='Height' value={hw.height} onChange={v => set({height: v})}/>
             <NumField label='Density (dpi)' value={hw.density} onChange={v => set({density: v})}/>
-            <div className='field' style={{margin: 0}}>
+            <div className='field' style={fitCell}>
               <label>GPU mode</label>
-              <select className='input' value={hw.gpuMode || ''} onChange={e => set({gpuMode: e.target.value})}>
+              <select className='input' style={fitInput} value={hw.gpuMode || ''} onChange={e => set({gpuMode: e.target.value})}>
                 <option value=''>unchanged</option>
                 {['auto', 'host', 'swiftshader_indirect', 'angle_indirect', 'guest', 'off'].map(g => <option key={g} value={g}>{g}</option>)}
               </select>
@@ -467,20 +467,27 @@ function HardwareEditor({avd, onSaved}: {avd: adb.AVD; onSaved: () => void}) {
   );
 }
 
+// `.input` sets no width and a grid/flex item defaults to min-width:auto, so a
+// bare input keeps its ~170px intrinsic width and pushes its container wider
+// than the modal. Both halves of that have to be undone for the field to fit.
+const fitCell: React.CSSProperties = {margin: 0, minWidth: 0};
+const fitInput: React.CSSProperties = {width: '100%', minWidth: 0, boxSizing: 'border-box'};
+
 function NumField({label, value, onChange}: {label: string; value?: number; onChange: (v: number) => void}) {
   return (
-    <div className='field' style={{margin: 0}}>
+    <div className='field' style={fitCell}>
       <label>{label}</label>
-      <input className='input mono' type='number' value={value || ''}
+      <input className='input mono' style={fitInput} type='number' value={value || ''}
              onChange={e => onChange(parseInt(e.target.value, 10) || 0)}/>
     </div>
   );
 }
 function TextField({label, value, placeholder, onChange}: {label: string; value?: string; placeholder?: string; onChange: (v: string) => void}) {
   return (
-    <div className='field' style={{margin: 0}}>
+    <div className='field' style={fitCell}>
       <label>{label}</label>
-      <input className='input mono' value={value || ''} placeholder={placeholder} onChange={e => onChange(e.target.value)}/>
+      <input className='input mono' style={fitInput} value={value || ''} placeholder={placeholder}
+             onChange={e => onChange(e.target.value)}/>
     </div>
   );
 }
@@ -597,21 +604,28 @@ function CreateAVDModal({onClose, onCreated}: {onClose: () => void; onCreated: (
   const [busy, setBusy] = useState(false);
   const touchedName = useRef(false);
 
-  useEffect(() => {
-    API.ListInstalledSystemImages().then(l => setImages(l ?? [])).catch(() => {});
-    API.ListDeviceProfiles().then(l => setDevices(l ?? [])).catch(() => {});
-  }, []);
-
   // Picking an image fills the whole form: the emulator's own defaults (1.5 GB
   // RAM, 2 cores) make a modern image feel broken, and a blank form gives the
-  // user nothing to go on.
-  const chooseImage = (pkg: string) => {
+  // user nothing to go on. A name the user has typed is never overwritten.
+  const chooseImage = useCallback((pkg: string) => {
     setSpec(prev => ({...prev, pkg} as adb.AVDSpec));
     if (!pkg) return;
     API.DefaultAVDSpec(pkg).then(d => {
       setSpec(prev => ({...d, name: touchedName.current ? prev.name : d.name} as adb.AVDSpec));
     }).catch(() => {});
-  };
+  }, []);
+
+  // Open with a complete, valid proposal rather than a blank form: preselect the
+  // newest image this computer can actually run and fill the hardware from it.
+  useEffect(() => {
+    API.ListInstalledSystemImages().then(l => {
+      const list = l ?? [];
+      setImages(list);
+      const first = list.find(i => i.compatible);
+      if (first) chooseImage(first.pkg);
+    }).catch(() => {});
+    API.ListDeviceProfiles().then(l => setDevices(l ?? [])).catch(() => {});
+  }, [chooseImage]);
 
   useEffect(() => {
     if (!spec.name || !spec.pkg) { setCmd(''); return; }
@@ -649,7 +663,7 @@ function CreateAVDModal({onClose, onCreated}: {onClose: () => void; onCreated: (
            </>}>
       <div className='field'>
         <label>System image</label>
-        <select className='input' value={spec.pkg} onChange={e => chooseImage(e.target.value)}>
+        <select className='input' style={fitInput} value={spec.pkg} onChange={e => chooseImage(e.target.value)}>
           <option value=''>Choose an installed image…</option>
           {usable.map(i => (
             <option key={i.pkg} value={i.pkg}>
@@ -675,19 +689,19 @@ function CreateAVDModal({onClose, onCreated}: {onClose: () => void; onCreated: (
 
       <div className='field'>
         <label>Name</label>
-        <input className='input mono' value={spec.name} placeholder='Android_34_GApis'
+        <input className='input mono' style={fitInput} value={spec.name} placeholder='Android_34_GApis'
                onChange={e => { touchedName.current = true; setSpec({...spec, name: e.target.value} as adb.AVDSpec); }}/>
         <div className='muted' style={{fontSize: 11, marginTop: 3}}>Letters, digits, dot, dash and underscore only.</div>
       </div>
 
       <div className='field'>
         <label>Device profile</label>
-        <div style={{display: 'flex', gap: 6}}>
-          <select className='input' style={{width: 130, flexShrink: 0}} value={form} onChange={e => setForm(e.target.value)}>
+        <div style={{display: 'flex', gap: 6, minWidth: 0}}>
+          <select className='input' style={{width: 120, flexShrink: 0}} value={form} onChange={e => setForm(e.target.value)}>
             {formFactors.map(f => <option key={f} value={f}>{f}</option>)}
             <option value='all'>all ({devices.length})</option>
           </select>
-          <select className='input' style={{flex: 1}} value={spec.device}
+          <select className='input' style={{flex: 1, minWidth: 0}} value={spec.device}
                   onChange={e => setSpec({...spec, device: e.target.value} as adb.AVDSpec)}>
             <option value=''>avdmanager default</option>
             {shownDevices.map(d => (
@@ -697,16 +711,16 @@ function CreateAVDModal({onClose, onCreated}: {onClose: () => void; onCreated: (
         </div>
       </div>
 
-      <div style={{display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8}}>
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8}}>
         <NumField label='RAM (MB)' value={spec.ramMB} onChange={v => setSpec({...spec, ramMB: v} as adb.AVDSpec)}/>
         <NumField label='CPU cores' value={spec.cores} onChange={v => setSpec({...spec, cores: v} as adb.AVDSpec)}/>
         <TextField label='Data' value={spec.dataSize} placeholder='8G' onChange={v => setSpec({...spec, dataSize: v} as adb.AVDSpec)}/>
         <TextField label='SD card' value={spec.sdCard} placeholder='512M' onChange={v => setSpec({...spec, sdCard: v} as adb.AVDSpec)}/>
       </div>
-      <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8}}>
-        <div className='field' style={{margin: 0}}>
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 8}}>
+        <div className='field' style={fitCell}>
           <label>GPU mode</label>
-          <select className='input' value={spec.gpuMode || ''} onChange={e => setSpec({...spec, gpuMode: e.target.value} as adb.AVDSpec)}>
+          <select className='input' style={fitInput} value={spec.gpuMode || ''} onChange={e => setSpec({...spec, gpuMode: e.target.value} as adb.AVDSpec)}>
             <option value=''>image default</option>
             {['auto', 'host', 'swiftshader_indirect', 'angle_indirect', 'guest', 'off'].map(g => <option key={g} value={g}>{g}</option>)}
           </select>
