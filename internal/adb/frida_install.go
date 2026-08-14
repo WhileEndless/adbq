@@ -242,12 +242,18 @@ func (c *Client) InstallFridaServer(ctx context.Context, serial, version, arch s
 	}
 
 	progress("pushing")
-	remote := "/data/local/tmp/" + binName
+	remote := fridaServerDir + "/" + binName
 	if _, err := c.PushFile(ctx, serial, binPath, remote); err != nil {
 		return "", fmt.Errorf("push to device: %w", err)
 	}
-	if _, err := c.Shell(ctx, serial, "chmod 755 "+remote); err != nil {
-		return remote, fmt.Errorf("chmod on device: %w", err)
+	// Reinstalling over a copy left by an earlier root-owned push fails a plain
+	// chmod, so try as root first and keep the unprivileged path as the fallback
+	// for devices without it.
+	chmod := "chmod 755 " + shQuote(remote)
+	if _, _, err := c.ShellSU(ctx, serial, chmod); err != nil {
+		if _, err := c.Shell(ctx, serial, chmod); err != nil {
+			return remote, fmt.Errorf("chmod on device: %w", err)
+		}
 	}
 	return remote, nil
 }

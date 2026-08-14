@@ -122,13 +122,14 @@ func StartFridaSession(ctx context.Context, c *Client, rt FridaRuntime, id, seri
 	// reference them work like they do under the `frida` CLI. Best-effort and
 	// cached: a failure just means a Java-using script will report the same
 	// "Java is not defined" as before, but non-bridge scripts still run.
-	bridgesDir := ""
+	bridgesDir, bridgeErr := "", error(nil)
 	if rt.FridaVersion != "" {
 		bctx, bcancel := context.WithTimeout(ctx, 60*time.Second)
-		if d, err := ensureFridaBridges(bctx, rt.FridaVersion); err == nil {
-			bridgesDir = d
-		}
+		bridgesDir, bridgeErr = ensureFridaBridges(bctx, rt.FridaVersion)
 		bcancel()
+		if bridgeErr != nil {
+			bridgesDir = ""
+		}
 	}
 
 	job := fridaJob{Serial: serial, Package: pkg, Mode: mode, Scripts: scripts, BridgesDir: bridgesDir, Port: port}
@@ -197,6 +198,17 @@ func StartFridaSession(ctx context.Context, c *Client, rt FridaRuntime, id, seri
 		cleanup: cleanup,
 		status:  "running",
 		done:    make(chan struct{}),
+	}
+	// Resolving the bridges needs PyPI on first use for a given frida version.
+	// Offline, it silently used to leave Java undefined and the script would fail
+	// with a ReferenceError that looks like the script's fault — say so up front,
+	// in the session log where the failure will appear.
+	if bridgeErr != nil {
+		s.ingest(FridaMsg{
+			Kind: "log", Level: "warning", Script: "driver",
+			Payload: "Java/ObjC/Swift bridges unavailable (" + firstLine(bridgeErr.Error()) +
+				") — scripts using Java will fail with \"Java is not defined\" until this host can reach PyPI once.",
+		})
 	}
 	go s.pump(stdout, stderr)
 	return s, nil
