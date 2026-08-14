@@ -94,6 +94,23 @@ Kısa kurallar:
    - varsa kırıcı değişiklikleri açıkça belirten,
    - eklenmiş bağımlılığın gerekçesini içeren.
 
+## 4.1. Komut şeffaflığı (bağlayıcı)
+
+adbq bir adb sarmalayıcısıdır; kullanıcı bir düğmeye bastığında cihazda bir
+`adb …` komutu çalışır. **Bu komut kullanıcıdan gizlenmez.**
+
+- Cihazda etki yaratan **her** UI eylemi, çalıştıracağı komutu gösterebilmelidir.
+- Komut metnini **backend üretir** (`Commands []string` / `…Plan` / `StepPreview`);
+  frontend'de elle string birleştirilmez — yanlış komut göstermek, hiç
+  göstermemekten kötüdür.
+- Komutu üreten fonksiyon **saf ve birim testli** olur.
+- Yıkıcı/geri alınamaz eylemlerde komut **onay diyaloğunda** görünür.
+- Akan işlemlerde (capture, logcat, frida-server) komut panelde **canlı** durur.
+- Metin terminale yapıştırıldığında çalışmalıdır; sır/token içermez.
+
+Yeni bir cihaz eylemi, komut gösterimi olmadan tamamlanmış sayılmaz.
+Desen, envanter ve geriye dönük fazlı plan: [`docs/command-visibility.md`](docs/command-visibility.md).
+
 ## 5. Asla yapma listesi
 
 - Kullanıcıya sormadan **yıkıcı** komut (`rm -rf`, `git reset --hard`, `git push --force`, drop table, vb.) çalıştırma.
