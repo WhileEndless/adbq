@@ -54,6 +54,8 @@ type App struct {
 	icons    *adb.IconCache
 	profiles *adb.ProfileStore
 	frida    *adb.FridaStore
+	host     *adb.HostStore
+	sdk      *adb.SDKManager
 
 	fridaMu   sync.Mutex
 	fridaSess map[string]*adb.FridaSession
@@ -70,8 +72,11 @@ func NewApp() *App {
 	store, _ := adb.NewSessionStore()
 	profiles, _ := adb.NewProfileStore()
 	frida, _ := adb.NewFridaStore()
+	host := adb.NewHostStore()
 	return &App{
 		client:      adb.NewClient(),
+		host:        host,
+		sdk:         adb.NewSDKManager(host),
 		tasks:       adb.NewTaskManager(),
 		logcats:     map[string]*logcatFeed{},
 		shells:      map[string]*adb.ShellSession{},
@@ -100,6 +105,11 @@ func (a *App) startup(ctx context.Context) {
 	a.tasks.OnUpdate(func(t *adb.TaskState) {
 		runtime.EventsEmit(a.ctx, "task:update", t)
 	})
+	// An explicit adb path from Settings must win before the first adb call, or
+	// the client caches whichever binary it found on PATH for the whole session.
+	if p := strings.TrimSpace(a.host.Get().ADBPath); p != "" {
+		a.client.SetBinary(p)
+	}
 	_ = a.client.StartServer(ctx)
 	// Reconcile persisted sessions: anything we left running on a device when
 	// adbq crashed/closed comes back as a task entry the user can see.
@@ -193,6 +203,46 @@ func (a *App) Version() string { return version.Version }
 func (a *App) ListTasks() []adb.TaskState { return a.tasks.List() }
 func (a *App) CancelTask(id string)       { a.tasks.Cancel(id) }
 func (a *App) RemoveTask(id string)       { a.tasks.Remove(id) }
+
+// ─── Android SDK / Android Studio (host toolchain) ──────────────────────
+
+// AndroidSDK reports the Android SDK / Studio toolchain found on this computer.
+func (a *App) AndroidSDK() adb.AndroidSDKInfo { return a.sdk.Info() }
+
+// RecheckAndroidSDK re-probes after the user installs something or changes the
+// SDK path, so they don't have to restart adbq.
+func (a *App) RecheckAndroidSDK() adb.AndroidSDKInfo { return a.sdk.Recheck() }
+
+// HostSettings returns the user's host-machine overrides.
+func (a *App) HostSettings() adb.HostSettings { return a.host.Get() }
+
+// SetSDKRoot pins the Android SDK location. An empty string clears the override
+// and returns adbq to auto-detection.
+func (a *App) SetSDKRoot(path string) (adb.AndroidSDKInfo, error) {
+	hs := a.host.Get()
+	hs.SDKRoot = strings.TrimSpace(path)
+	if err := a.host.Set(hs); err != nil {
+		return adb.AndroidSDKInfo{}, err
+	}
+	return a.sdk.Recheck(), nil
+}
+
+// PickSDKRoot opens a folder chooser for the Android SDK root.
+func (a *App) PickSDKRoot() (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select the Android SDK folder",
+	})
+}
+
+// OpenAndroidStudio launches the IDE, for the few things adbq deliberately
+// leaves to Studio (project work, deep AVD hardware editing).
+func (a *App) OpenAndroidStudio() error {
+	info := a.sdk.Info()
+	if info.StudioPath == "" {
+		return fmt.Errorf("Android Studio not found on this computer")
+	}
+	return a.OpenPath(info.StudioPath)
+}
 
 // ─── scrcpy ─────────────────────────────────────────────────────────────
 

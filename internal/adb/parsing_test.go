@@ -68,12 +68,12 @@ func TestParseLsLine(t *testing.T) {
 }
 
 func TestParseForwardList(t *testing.T) {
-	out := "ce0517 tcp:8080 tcp:8080\nce0517 tcp:9229 tcp:9229\nemulator-5554 tcp:27042 tcp:27042"
+	out := "abcdef01 tcp:8080 tcp:8080\nabcdef01 tcp:9229 tcp:9229\nemulator-5554 tcp:27042 tcp:27042"
 	all := parseForwardList(out, "")
 	if len(all) != 3 {
 		t.Fatalf("expected 3 forwards, got %d", len(all))
 	}
-	filt := parseForwardList(out, "ce0517")
+	filt := parseForwardList(out, "abcdef01")
 	if len(filt) != 2 {
 		t.Fatalf("expected 2 filtered forwards, got %d", len(filt))
 	}
