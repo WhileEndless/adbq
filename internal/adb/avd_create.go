@@ -266,6 +266,150 @@ func writeIni(path string, kv map[string]string) error {
 	return os.Rename(tmp, path)
 }
 
+// AVDHardware is the editable half of an AVD's config.ini — the settings a user
+// actually changes after creating one. Every field is optional: a zero value
+// means "leave whatever is there", so the UI can send a partial edit without
+// having to round-trip settings it doesn't show.
+type AVDHardware struct {
+	RAMMB    int    `json:"ramMB"`
+	Cores    int    `json:"cores"`
+	DataSize string `json:"dataSize"` // disk.dataPartition.size, e.g. "8G"
+	SDCard   string `json:"sdCard"`   // sdcard.size
+	GPUMode  string `json:"gpuMode"`  // auto|host|swiftshader_indirect|angle_indirect|off
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Density  int    `json:"density"`
+	Keyboard *bool  `json:"keyboard"` // pointer: false is a real choice, not "unset"
+}
+
+// gpuModes are the values `hw.gpu.mode` accepts. A typo here produces an
+// emulator that refuses to start, so the value is checked before it is written.
+var gpuModes = map[string]bool{
+	"auto": true, "host": true, "swiftshader_indirect": true,
+	"angle_indirect": true, "guest": true, "off": true,
+}
+
+// avdSizeOK validates a partition size the way the emulator expects it: a
+// number with an optional K/M/G suffix.
+func avdSizeOK(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return true // "leave alone"
+	}
+	last := s[len(s)-1]
+	if last == 'K' || last == 'k' || last == 'M' || last == 'm' || last == 'G' || last == 'g' {
+		s = s[:len(s)-1]
+	}
+	if s == "" {
+		return false
+	}
+	n, err := strconv.Atoi(s)
+	return err == nil && n > 0
+}
+
+// AVDHardwareChanges turns an edit into the exact config.ini keys it writes.
+// Pure and tested, so the UI can show the user precisely what will change
+// before anything is written (CLAUDE.md §4.1).
+func AVDHardwareChanges(h AVDHardware) (map[string]string, error) {
+	out := map[string]string{}
+	if h.RAMMB != 0 {
+		// Below ~512 MB Android will not boot at all; above 64 GB is a typo.
+		if h.RAMMB < 512 || h.RAMMB > 65536 {
+			return nil, fmt.Errorf("RAM must be between 512 and 65536 MB, got %d", h.RAMMB)
+		}
+		out["hw.ramSize"] = strconv.Itoa(h.RAMMB)
+	}
+	if h.Cores != 0 {
+		if h.Cores < 1 || h.Cores > 16 {
+			return nil, fmt.Errorf("CPU cores must be between 1 and 16, got %d", h.Cores)
+		}
+		out["hw.cpu.ncore"] = strconv.Itoa(h.Cores)
+	}
+	if v := strings.TrimSpace(h.DataSize); v != "" {
+		if !avdSizeOK(v) {
+			return nil, fmt.Errorf("%q is not a valid data partition size — use a number with an optional K, M or G suffix", v)
+		}
+		out["disk.dataPartition.size"] = v
+	}
+	if v := strings.TrimSpace(h.SDCard); v != "" {
+		if !avdSizeOK(v) {
+			return nil, fmt.Errorf("%q is not a valid SD card size — use a number with an optional K, M or G suffix", v)
+		}
+		out["sdcard.size"] = v
+		out["hw.sdCard"] = "yes"
+	}
+	if v := strings.TrimSpace(h.GPUMode); v != "" {
+		if !gpuModes[v] {
+			return nil, fmt.Errorf("%q is not a GPU mode the emulator accepts", v)
+		}
+		out["hw.gpu.enabled"] = "yes"
+		out["hw.gpu.mode"] = v
+		if v == "off" {
+			out["hw.gpu.enabled"] = "no"
+		}
+	}
+	// Width and height are meaningless apart, so they move together.
+	if (h.Width == 0) != (h.Height == 0) {
+		return nil, fmt.Errorf("set both width and height, or neither")
+	}
+	if h.Width != 0 {
+		if h.Width < 240 || h.Width > 8192 || h.Height < 240 || h.Height > 8192 {
+			return nil, fmt.Errorf("resolution %dx%d is out of range", h.Width, h.Height)
+		}
+		out["hw.lcd.width"] = strconv.Itoa(h.Width)
+		out["hw.lcd.height"] = strconv.Itoa(h.Height)
+	}
+	if h.Density != 0 {
+		if h.Density < 80 || h.Density > 960 {
+			return nil, fmt.Errorf("screen density must be between 80 and 960 dpi, got %d", h.Density)
+		}
+		out["hw.lcd.density"] = strconv.Itoa(h.Density)
+	}
+	if h.Keyboard != nil {
+		out["hw.keyboard"] = "no"
+		if *h.Keyboard {
+			out["hw.keyboard"] = "yes"
+		}
+	}
+	return out, nil
+}
+
+// UpdateAVDHardware rewrites an AVD's config.ini with the requested changes and
+// returns the reloaded AVD.
+//
+// The emulator reads config.ini once at boot, so an edit made while the AVD is
+// running takes effect on its next start. That is worth saying in the UI, but
+// not worth refusing: pre-configuring a running AVD is a reasonable thing to do.
+func (m *EmulatorManager) UpdateAVDHardware(ctx context.Context, name string, h AVDHardware) (*AVD, error) {
+	if !avdNameOK(name) {
+		return nil, fmt.Errorf("%q is not a valid AVD name", name)
+	}
+	changes, err := AVDHardwareChanges(h)
+	if err != nil {
+		return nil, err
+	}
+	if len(changes) == 0 {
+		return m.AVDByName(ctx, name)
+	}
+	info := m.sdk.Info()
+	top, err := readIni(avdIniPath(info.AVDHome, name))
+	if err != nil {
+		return nil, fmt.Errorf("cannot read the definition of %s: %w", name, err)
+	}
+	cfgPath := filepath.Join(top["path"], "config.ini")
+	cfg, err := readIni(cfgPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read the config of %s: %w", name, err)
+	}
+	for k, v := range changes {
+		cfg[k] = v
+	}
+	if err := writeIni(cfgPath, cfg); err != nil {
+		return nil, fmt.Errorf("cannot save the config of %s: %w", name, err)
+	}
+	return m.AVDByName(ctx, name)
+}
+
 // DeleteAVD removes an AVD definition and its data. Irreversible: callers must
 // confirm with the user first (CLAUDE.md §5).
 func (m *EmulatorManager) DeleteAVD(ctx context.Context, name string) error {

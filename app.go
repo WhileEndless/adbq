@@ -362,6 +362,104 @@ func (a *App) DeleteAVDSnapshot(name, snapshot string) error {
 	return a.emu.DeleteSnapshot(name, snapshot)
 }
 
+// AVDHardwareChanges previews exactly which config.ini keys an edit would
+// write, so the UI can show them before anything is saved (CLAUDE.md §4.1).
+func (a *App) AVDHardwareChanges(hw adb.AVDHardware) (map[string]string, error) {
+	return adb.AVDHardwareChanges(hw)
+}
+
+// UpdateAVDHardware applies CPU/RAM/disk/display changes to an AVD. Changes
+// take effect the next time it boots.
+func (a *App) UpdateAVDHardware(name string, hw adb.AVDHardware) (*adb.AVD, error) {
+	return a.emu.UpdateAVDHardware(a.ctx, name, hw)
+}
+
+// ─── rootAVD (third-party, user-consented) ──────────────────────────────
+
+// RootAVDInfo describes the tool, its provenance and the risks, for the consent
+// dialog shown before anything is downloaded.
+func (a *App) RootAVDInfo() adb.RootAVDInfo { return adb.RootAVDStatus() }
+
+// RootAVDAdvice says whether rooting is needed, possible, or pointless for one
+// AVD, and why. The UI shows the reason verbatim.
+func (a *App) RootAVDAdvice(name string) (map[string]string, error) {
+	avd, err := a.emu.AVDByName(a.ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	action, reason := adb.RootAVDAdvice(avd.API, avd.PlayStore, avd.Root, avd.Patched)
+	return map[string]string{
+		"action":  action,
+		"reason":  reason,
+		"offered": boolString(adb.RootAVDOffered(action)),
+	}, nil
+}
+
+// DownloadRootAVD fetches and verifies the pinned rootAVD tree. The caller must
+// have shown RootAVDInfo.Disclosures and obtained consent first.
+func (a *App) DownloadRootAVD() (adb.RootAVDInfo, error) {
+	id, ctx := a.tasks.Create("rootavd-download", "Download rootAVD", "starting")
+	info, err := adb.InstallRootAVD(ctx, func(stage string) {
+		a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+	})
+	if err != nil {
+		a.tasks.Finish(id, "err", "", err.Error())
+		return adb.RootAVDInfo{}, err
+	}
+	a.tasks.Finish(id, "ok", "", "verified "+info.Commit[:12])
+	return info, nil
+}
+
+// RemoveRootAVD deletes the downloaded copy of the tool.
+func (a *App) RemoveRootAVD() error { return adb.RemoveRootAVD() }
+
+// RootAVDCommand renders the command that would run, for the confirm dialog.
+func (a *App) RootAVDCommand(name string, restore bool) (string, error) {
+	avd, err := a.emu.AVDByName(a.ctx, name)
+	if err != nil {
+		return "", err
+	}
+	return adb.RootAVDCommand(adb.RootAVDStatus().Dir, avd.RamdiskRel, restore), nil
+}
+
+// RootAVD patches an AVD's system image with Magisk, cold-boots it and verifies
+// root. Reported as a task; the transcript lands in the AVD's own log.
+func (a *App) RootAVD(name string) error {
+	a.runRootAVDTask("avd-root", "Root "+name, name, false)
+	return nil
+}
+
+// RestoreAVDRamdisk reverts a rootAVD patch from the backup it left behind.
+func (a *App) RestoreAVDRamdisk(name string) error {
+	a.runRootAVDTask("avd-restore", "Restore "+name, name, true)
+	return nil
+}
+
+func (a *App) runRootAVDTask(kind, title, name string, restore bool) {
+	id, ctx := a.tasks.Create(kind, title, "starting")
+	go func() {
+		fn := a.emu.RootAVD
+		if restore {
+			fn = a.emu.RestoreAVDRamdisk
+		}
+		err := fn(ctx, name, func(stage string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+		})
+		if err != nil {
+			a.tasks.Finish(id, "err", "", err.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", "", name+" done")
+	}()
+}
+
+func boolString(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
 // ─── scrcpy ─────────────────────────────────────────────────────────────
 
 func (a *App) ScrcpyAvailable() bool           { return a.scrcpy.Available() }
