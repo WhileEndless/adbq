@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CodeBlock, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {sdkLabel, rootUnavailableReason} from '../lib/android';
 
@@ -208,9 +208,6 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                   const ok = await confirmDialog({title: `Clear data for ${sel.name || sel.pkg}?`, body: 'Wipes app preferences, cache, and database. The app will start fresh.', confirmLabel: 'Clear', danger: true});
                   if (ok) doAction(API.ClearApp, 'Clear data');
                 }}>Clear data</button>
-                <button className='btn' onClick={() => {
-                  API.ExportAPK(device.id, sel.pkg).then(() => showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}));
-                }}><Icon.Download/>Export APK</button>
                 {setScreen && (
                   <button className='btn' onClick={() => {
                     if (!sel) return;
@@ -235,6 +232,7 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                   <Icon.Download/>Export data{!device.root && ' (root)'}
                 </button>
               </div>
+              <ApkTransferSection device={device} pkg={sel.pkg}/>
               <FridaAppSection device={device} pkg={sel.pkg} running={!!running?.running} setScreen={setScreen}/>
               <button className='btn danger' style={{marginTop: 6, width: '100%'}}
                       onClick={async () => {
@@ -385,6 +383,108 @@ function ManageFridaScriptsModal({pkg, onClose}: {pkg: string; onClose: () => vo
         </div>
       )}
     </Modal>
+  );
+}
+
+// ─── APK export / install ───────────────────────────────────────────────
+//
+// App Bundle installs are several APKs (base + config splits). Exporting only
+// the base produces a file that fails to install later with
+// INSTALL_FAILED_MISSING_SPLIT, so split apps are exported as one .apks
+// archive and reinstalled through a single `install-multiple` session.
+function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
+  const [set, setSet] = useState<adb.ApkSet | null>(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setSet(null); setErr('');
+    API.ApkSetOf(device.id, pkg)
+      .then(s => { if (live) setSet(s); })
+      .catch(e => { if (live) setErr(String(e)); });
+    return () => { live = false; };
+  }, [device.id, pkg]);
+
+  const split = !!set?.split;
+  const count = set ? set.splits.length + 1 : 0;
+
+  async function pickAndInstall() {
+    setBusy(true);
+    try {
+      const file = await API.PickApkFile();
+      if (!file) return;
+      const plan = await API.PlanApkInstall(device.id, file);
+      const ok = await confirmDialog({
+        title: `Install ${file.replace(/^.*[\\/]/, '')}?`,
+        body: (
+          <div style={{fontSize: 12}}>
+            <div style={{marginBottom: 6}}>
+              {plan.split
+                ? `${plan.install.length} APKs will be committed in one pm session.`
+                : 'A single APK will be installed.'}
+            </div>
+            <CodeBlock multiline>{plan.commands.join('\n')}</CodeBlock>
+            {plan.skipped?.length > 0 && (
+              <div className='muted' style={{marginTop: 8}}>
+                Not installed on this device:
+                <ul style={{margin: '4px 0 0 16px', padding: 0}}>
+                  {plan.skipped.map(s => <li key={s}>{s}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        ),
+        confirmLabel: 'Install',
+      });
+      if (!ok) return;
+      await API.InstallApkBundleFromPath(device.id, file);
+      showToast({title: 'Install started', body: 'Watch the Tasks panel for progress', kind: 'info'});
+    } catch (e) {
+      showToast({title: 'Install failed', body: String(e), kind: 'err'});
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className='app-detail-section'>
+      <div className='app-detail-section-title'>APK export &amp; install</div>
+      {err && <div className='muted' style={{fontSize: 12, color: 'var(--danger)'}}>Could not read the APK layout: {err}</div>}
+      {set && (
+        <>
+          <div className='app-detail-row'>
+            <span className='app-detail-k'>Layout</span>
+            <span className='app-detail-v'>
+              {split
+                ? <>App Bundle · base + {set.splits.length} split APK(s)</>
+                : <>Single APK</>}
+            </span>
+          </div>
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 8}}>
+            <button className='btn' disabled={busy} onClick={() => {
+              API.ExportApks(device.id, pkg)
+                .then(id => id && showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
+                .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}));
+            }}>
+              <Icon.Download/>Export {split ? '.apks' : '.apk'}
+            </button>
+            <button className='btn' disabled={busy} onClick={pickAndInstall}>
+              <Icon.Upload/>Install .apk / .apks…
+            </button>
+          </div>
+          {split && (
+            <div className='muted' style={{fontSize: 11, marginTop: 6}}>
+              All {count} APKs go into one .apks archive. Installing only the base would fail with INSTALL_FAILED_MISSING_SPLIT.
+            </div>
+          )}
+          <div style={{marginTop: 10, fontSize: 11}}>
+            <span className='muted'>Underlying command (click to copy):</span>{' '}
+            <CodeBlock multiline>{set.commands.join('\n')}</CodeBlock>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

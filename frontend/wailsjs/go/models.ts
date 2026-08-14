@@ -1,5 +1,47 @@
 export namespace adb {
 	
+	export class ApkInstallPlan {
+	    file: string;
+	    install: string[];
+	    skipped: string[];
+	    split: boolean;
+	    commands: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ApkInstallPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file = source["file"];
+	        this.install = source["install"];
+	        this.skipped = source["skipped"];
+	        this.split = source["split"];
+	        this.commands = source["commands"];
+	    }
+	}
+	export class ApkSet {
+	    pkg: string;
+	    base: string;
+	    splits: string[];
+	    split: boolean;
+	    suggested: string;
+	    commands: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ApkSet(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkg = source["pkg"];
+	        this.base = source["base"];
+	        this.splits = source["splits"];
+	        this.split = source["split"];
+	        this.suggested = source["suggested"];
+	        this.commands = source["commands"];
+	    }
+	}
 	export class App {
 	    pkg: string;
 	    path: string;

@@ -13,6 +13,8 @@ export function AdoptExternalCapture(arg1:string):Promise<void>;
 
 export function AndroidVersionMap():Promise<Record<number, string>>;
 
+export function ApkSetOf(arg1:string,arg2:string):Promise<adb.ApkSet>;
+
 export function AppIcon(arg1:string,arg2:string):Promise<string>;
 
 export function AppendIptablesRule(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<adb.IPTSnapshot>;
@@ -83,6 +85,8 @@ export function EnsureLogcat(arg1:string,arg2:string,arg3:boolean):Promise<boole
 
 export function ExportAPK(arg1:string,arg2:string):Promise<string>;
 
+export function ExportApks(arg1:string,arg2:string):Promise<string>;
+
 export function ExportAppDataWithPicker(arg1:string,arg2:string):Promise<string>;
 
 export function ExportIptables(arg1:string,arg2:string):Promise<string>;
@@ -128,6 +132,8 @@ export function ImportIptables(arg1:string,arg2:string,arg3:string):Promise<void
 export function InsertIptablesRule(arg1:string,arg2:string,arg3:string,arg4:string,arg5:number,arg6:Array<string>):Promise<adb.IPTSnapshot>;
 
 export function InstallAPKFromPath(arg1:string,arg2:string):Promise<string>;
+
+export function InstallApkBundleFromPath(arg1:string,arg2:string):Promise<string>;
 
 export function InstallFridaServer(arg1:string,arg2:string,arg3:string):Promise<string>;
 
@@ -199,7 +205,11 @@ export function OpenShell(arg1:string,arg2:boolean):Promise<string>;
 
 export function PickAndInstallAPK(arg1:string):Promise<string>;
 
+export function PickApkFile():Promise<string>;
+
 export function PickExternalFridaInterpreter():Promise<adb.FridaRuntime>;
+
+export function PlanApkInstall(arg1:string,arg2:string):Promise<adb.ApkInstallPlan>;
 
 export function PlanTcpdumpAutoInstall(arg1:string):Promise<adb.TcpdumpAutoPlan>;
 

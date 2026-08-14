@@ -991,20 +991,78 @@ func (a *App) InstallAPKFromPath(serial, localPath string) (string, error) {
 }
 
 func (a *App) PickAndInstallAPK(serial string) (string, error) {
-	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select APK to install",
-		Filters: []runtime.FileFilter{
-			{DisplayName: "Android packages", Pattern: "*.apk"},
-		},
-	})
+	path, err := a.PickApkFile()
 	if err != nil || path == "" {
 		return "", err
 	}
-	id, _ := a.tasks.Create("install", "Installing "+filepath.Base(path), path)
+	return a.InstallApkBundleFromPath(serial, path)
+}
+
+// PickApkFile opens the host file picker and returns the chosen path without
+// installing anything, so the UI can show the install plan and its adb command
+// before the user commits.
+func (a *App) PickApkFile() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select APK or APKS to install",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Android packages", Pattern: "*.apk;*.apks;*.xapk;*.zip"},
+		},
+	})
+}
+
+// PlanApkInstall reports which APKs inside a file apply to this device and the
+// exact adb command the install will run. Read-only.
+func (a *App) PlanApkInstall(serial, localPath string) (*adb.ApkInstallPlan, error) {
+	return a.client.PlanApkInstall(a.ctx, serial, localPath)
+}
+
+// InstallApkBundleFromPath installs a single APK or a multi-APK container
+// (.apks/.xapk/.zip) as one pm session.
+func (a *App) InstallApkBundleFromPath(serial, localPath string) (string, error) {
+	if localPath == "" {
+		return "", fmt.Errorf("no file selected")
+	}
+	id, _ := a.tasks.Create("install", "Installing "+filepath.Base(localPath), localPath)
 	go func() {
-		out, err := a.client.InstallAPK(a.ctx, serial, path)
+		out, err := a.client.InstallApkBundle(a.ctx, serial, localPath, func(s string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = s })
+		})
 		if err != nil {
 			a.tasks.Finish(id, "err", out, err.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", out, "")
+	}()
+	return id, nil
+}
+
+// ApkSetOf reports the package's APK layout (base + splits) and the commands
+// an export would run.
+func (a *App) ApkSetOf(serial, pkg string) (*adb.ApkSet, error) {
+	return a.client.ApkSetOf(a.ctx, serial, pkg)
+}
+
+// ExportApks packs every APK of a split install into one .apks archive that
+// adbq (and SAI/bundletool-style installers) can install again later.
+func (a *App) ExportApks(serial, pkg string) (string, error) {
+	set, err := a.client.ApkSetOf(a.ctx, serial, pkg)
+	if err != nil {
+		return "", err
+	}
+	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save APKS as…",
+		DefaultFilename: set.Suggested,
+	})
+	if err != nil || dst == "" {
+		return "", err
+	}
+	id, _ := a.tasks.Create("export-apk", "Exporting "+pkg, fmt.Sprintf("%d APK(s) → %s", len(set.Splits)+1, dst))
+	go func() {
+		out, err := a.client.ExportApks(a.ctx, serial, pkg, dst, func(s string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = s })
+		})
+		if err != nil {
+			a.tasks.Finish(id, "err", "", err.Error())
 			return
 		}
 		a.tasks.Finish(id, "ok", out, "")
