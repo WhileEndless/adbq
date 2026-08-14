@@ -1,5 +1,175 @@
 export namespace adb {
 	
+	export class AVD {
+	    name: string;
+	    display: string;
+	    path: string;
+	    target: string;
+	    api: number;
+	    androidVer: string;
+	    tag: string;
+	    tagDisplay: string;
+	    playStore: boolean;
+	    abi: string;
+	    device: string;
+	    deviceMfr: string;
+	    skin: string;
+	    ramMB: number;
+	    cores: number;
+	    density: number;
+	    resolution: string;
+	    sdCard: string;
+	    dataSize: string;
+	    gpuMode: string;
+	    diskBytes: number;
+	    sysImgDir: string;
+	    ramdiskRel: string;
+	    patched: boolean;
+	    snapshots: string[] | null;
+	    state: string;
+	    serial: string;
+	    port: number;
+	    managed: boolean;
+	    root: string;
+	    error: string;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new AVD(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.display = source["display"];
+	        this.path = source["path"];
+	        this.target = source["target"];
+	        this.api = source["api"];
+	        this.androidVer = source["androidVer"];
+	        this.tag = source["tag"];
+	        this.tagDisplay = source["tagDisplay"];
+	        this.playStore = source["playStore"];
+	        this.abi = source["abi"];
+	        this.device = source["device"];
+	        this.deviceMfr = source["deviceMfr"];
+	        this.skin = source["skin"];
+	        this.ramMB = source["ramMB"];
+	        this.cores = source["cores"];
+	        this.density = source["density"];
+	        this.resolution = source["resolution"];
+	        this.sdCard = source["sdCard"];
+	        this.dataSize = source["dataSize"];
+	        this.gpuMode = source["gpuMode"];
+	        this.diskBytes = source["diskBytes"];
+	        this.sysImgDir = source["sysImgDir"];
+	        this.ramdiskRel = source["ramdiskRel"];
+	        this.patched = source["patched"];
+	        this.snapshots = source["snapshots"];
+	        this.state = source["state"];
+	        this.serial = source["serial"];
+	        this.port = source["port"];
+	        this.managed = source["managed"];
+	        this.root = source["root"];
+	        this.error = source["error"];
+	        this.commands = source["commands"];
+	    }
+	}
+	export class AVDHardware {
+	    ramMB: number;
+	    cores: number;
+	    dataSize: string;
+	    sdCard: string;
+	    gpuMode: string;
+	    width: number;
+	    height: number;
+	    density: number;
+	    keyboard?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AVDHardware(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ramMB = source["ramMB"];
+	        this.cores = source["cores"];
+	        this.dataSize = source["dataSize"];
+	        this.sdCard = source["sdCard"];
+	        this.gpuMode = source["gpuMode"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.density = source["density"];
+	        this.keyboard = source["keyboard"];
+	    }
+	}
+	export class AVDSpec {
+	    name: string;
+	    pkg: string;
+	    device: string;
+	    sdCard: string;
+	    force: boolean;
+	    ramMB: number;
+	    cores: number;
+	    dataSize: string;
+	    keyboard: boolean;
+	    gpuMode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AVDSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.pkg = source["pkg"];
+	        this.device = source["device"];
+	        this.sdCard = source["sdCard"];
+	        this.force = source["force"];
+	        this.ramMB = source["ramMB"];
+	        this.cores = source["cores"];
+	        this.dataSize = source["dataSize"];
+	        this.keyboard = source["keyboard"];
+	        this.gpuMode = source["gpuMode"];
+	    }
+	}
+	export class AndroidSDKInfo {
+	    available: boolean;
+	    sdkRoot: string;
+	    source: string;
+	    emulator: string;
+	    emulatorVer: string;
+	    avdManager: string;
+	    sdkManager: string;
+	    adb: string;
+	    avdHome: string;
+	    studioPath: string;
+	    studioVer: string;
+	    accelerated: boolean;
+	    accelNote: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AndroidSDKInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.sdkRoot = source["sdkRoot"];
+	        this.source = source["source"];
+	        this.emulator = source["emulator"];
+	        this.emulatorVer = source["emulatorVer"];
+	        this.avdManager = source["avdManager"];
+	        this.sdkManager = source["sdkManager"];
+	        this.adb = source["adb"];
+	        this.avdHome = source["avdHome"];
+	        this.studioPath = source["studioPath"];
+	        this.studioVer = source["studioVer"];
+	        this.accelerated = source["accelerated"];
+	        this.accelNote = source["accelNote"];
+	        this.error = source["error"];
+	    }
+	}
 	export class ApkInstallPlan {
 	    file: string;
 	    install: string[] | null;
@@ -484,6 +654,28 @@ export namespace adb {
 	        this.hardwareSerial = source["hardwareSerial"];
 	    }
 	}
+	export class DeviceProfile {
+	    id: string;
+	    name: string;
+	    oem: string;
+	    tag: string;
+	    formFactor: string;
+	    recommended: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeviceProfile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.oem = source["oem"];
+	        this.tag = source["tag"];
+	        this.formFactor = source["formFactor"];
+	        this.recommended = source["recommended"];
+	    }
+	}
 	export class DeviceRecord {
 	    key: string;
 	    adbSerial: string;
@@ -510,6 +702,52 @@ export namespace adb {
 	        this.firstSeen = source["firstSeen"];
 	        this.lastSeen = source["lastSeen"];
 	        this.boundProfileId = source["boundProfileId"];
+	    }
+	}
+	export class EmulatorOpts {
+	    coldBoot: boolean;
+	    noSnapshotSave: boolean;
+	    noSnapshot: boolean;
+	    snapshot: string;
+	    wipeData: boolean;
+	    noWindow: boolean;
+	    noBootAnim: boolean;
+	    writableSystem: boolean;
+	    readOnly: boolean;
+	    gpu: string;
+	    memoryMB: number;
+	    cores: number;
+	    netSpeed: string;
+	    netDelay: string;
+	    dns: string;
+	    httpProxy: string;
+	    selinux: string;
+	    extra: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmulatorOpts(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.coldBoot = source["coldBoot"];
+	        this.noSnapshotSave = source["noSnapshotSave"];
+	        this.noSnapshot = source["noSnapshot"];
+	        this.snapshot = source["snapshot"];
+	        this.wipeData = source["wipeData"];
+	        this.noWindow = source["noWindow"];
+	        this.noBootAnim = source["noBootAnim"];
+	        this.writableSystem = source["writableSystem"];
+	        this.readOnly = source["readOnly"];
+	        this.gpu = source["gpu"];
+	        this.memoryMB = source["memoryMB"];
+	        this.cores = source["cores"];
+	        this.netSpeed = source["netSpeed"];
+	        this.netDelay = source["netDelay"];
+	        this.dns = source["dns"];
+	        this.httpProxy = source["httpProxy"];
+	        this.selinux = source["selinux"];
+	        this.extra = source["extra"];
 	    }
 	}
 	export class FileEntry {
@@ -871,6 +1109,38 @@ export namespace adb {
 	    }
 	}
 	
+	export class HostLogLine {
+	    seq: number;
+	    text: string;
+	    err: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostLogLine(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.seq = source["seq"];
+	        this.text = source["text"];
+	        this.err = source["err"];
+	    }
+	}
+	export class HostSettings {
+	    sdkRoot?: string;
+	    adbPath?: string;
+	    avdHome?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sdkRoot = source["sdkRoot"];
+	        this.adbPath = source["adbPath"];
+	        this.avdHome = source["avdHome"];
+	    }
+	}
 	export class HostsApplyResult {
 	    path: string;
 	    strategy: string;
@@ -1345,6 +1615,36 @@ export namespace adb {
 	}
 	
 	
+	export class RootAVDInfo {
+	    installed: boolean;
+	    dir: string;
+	    script: string;
+	    commit: string;
+	    source: string;
+	    archive: string;
+	    license: string;
+	    scriptSHA: string;
+	    magiskSHA: string;
+	    disclosures: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new RootAVDInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.installed = source["installed"];
+	        this.dir = source["dir"];
+	        this.script = source["script"];
+	        this.commit = source["commit"];
+	        this.source = source["source"];
+	        this.archive = source["archive"];
+	        this.license = source["license"];
+	        this.scriptSHA = source["scriptSHA"];
+	        this.magiskSHA = source["magiskSHA"];
+	        this.disclosures = source["disclosures"];
+	    }
+	}
 	export class ScrollbackEntry {
 	    path: string;
 	    serial: string;
@@ -1424,6 +1724,46 @@ export namespace adb {
 	    }
 	}
 	
+	export class SystemImage {
+	    pkg: string;
+	    level: string;
+	    api: number;
+	    androidVer: string;
+	    tag: string;
+	    abi: string;
+	    playStore: boolean;
+	    revision: string;
+	    desc: string;
+	    installed: boolean;
+	    location: string;
+	    rootable: boolean;
+	    compatible: boolean;
+	    note: string;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new SystemImage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkg = source["pkg"];
+	        this.level = source["level"];
+	        this.api = source["api"];
+	        this.androidVer = source["androidVer"];
+	        this.tag = source["tag"];
+	        this.abi = source["abi"];
+	        this.playStore = source["playStore"];
+	        this.revision = source["revision"];
+	        this.desc = source["desc"];
+	        this.installed = source["installed"];
+	        this.location = source["location"];
+	        this.rootable = source["rootable"];
+	        this.compatible = source["compatible"];
+	        this.note = source["note"];
+	        this.commands = source["commands"];
+	    }
+	}
 	export class TaskState {
 	    id: string;
 	    kind: string;

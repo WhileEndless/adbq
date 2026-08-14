@@ -18,6 +18,7 @@ import {NetworkScreen} from './screens/Network';
 import {CaptureScreen} from './screens/Capture';
 import {IptablesScreen} from './screens/Iptables';
 import {ProcessesScreen} from './screens/Processes';
+import {EmulatorsScreen} from './screens/Emulators';
 import {ProfileSelector, ProfileEditor, ApplyConfirm, PastDevices, deviceKey} from './screens/Profiles';
 import {prefetchData} from './cache';
 
@@ -94,6 +95,11 @@ export default function App() {
     </StoreProvider>
   );
 }
+
+// Screens that describe this computer rather than an attached device. They stay
+// reachable with nothing plugged in — otherwise the one screen that can start an
+// emulator would be hidden behind having a device already.
+const HOST_SCREENS: Screen[] = ['emulators'];
 
 function AppInner() {
   const {mode: themeMode, setMode: setTheme, theme, accent, setAccent} = useTheme();
@@ -241,7 +247,7 @@ function AppInner() {
     const order: Screen[] = [
       'overview', 'logcat', 'shell', 'processes', 'apps',
       'files', 'frida', 'forwards', 'network',
-      'capture', 'iptables',
+      'capture', 'iptables', 'emulators',
     ];
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
@@ -268,6 +274,7 @@ function AppInner() {
     capture:    CaptureScreen,
     iptables:   IptablesScreen,
     processes:  ProcessesScreen,
+    emulators:  EmulatorsScreen,
   }[screen];
 
   return (
@@ -286,12 +293,15 @@ function AppInner() {
                   onClose={(id) => API.DisconnectDevice(id).then(reload)}/>
       <Sidebar device={device} screen={screen} setScreen={setScreen} counts={counts}/>
       <main className='main'>
-        {device
-          ? <ScreenComp device={device} setScreen={setScreen as any}/>
+        {device || HOST_SCREENS.includes(screen)
+          ? <ScreenComp device={device as adb.Device} setScreen={setScreen as any}/>
           : <div style={{padding: 40, textAlign: 'center'}}>
               <div style={{fontSize: 16, marginBottom: 6}}>No devices connected</div>
-              <div className='muted' style={{marginBottom: 14}}>Plug in a USB device or connect over Wi-Fi.</div>
-              <button className='btn primary' onClick={() => setConnectOpen(true)}><Icon.Plus/>Connect</button>
+              <div className='muted' style={{marginBottom: 14}}>Plug in a USB device, connect over Wi-Fi, or start an emulator.</div>
+              <div style={{display: 'flex', gap: 6, justifyContent: 'center'}}>
+                <button className='btn primary' onClick={() => setConnectOpen(true)}><Icon.Plus/>Connect</button>
+                <button className='btn' onClick={() => setScreen('emulators')}><Icon.Layers/>Emulators</button>
+              </div>
             </div>}
       </main>
 
@@ -436,6 +446,13 @@ function Sidebar({device, screen, setScreen, counts}:{device?: adb.Device; scree
           </div>
         </div>
       )}
+      <div className='group'>
+        <div className='label'>Host</div>
+        <div className={`nav${screen === 'emulators' ? ' active' : ''}`} onClick={() => setScreen('emulators')}>
+          <span className='icon'><Icon.Layers/></span>
+          <span>Emulators</span>
+        </div>
+      </div>
       <div className='group'>
         <div className='label'>Device</div>
         {items.map(it => (

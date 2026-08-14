@@ -341,6 +341,27 @@ func (a *App) ListDeviceProfiles() ([]adb.DeviceProfile, error) {
 	return a.emu.ListDeviceProfiles(a.ctx)
 }
 
+// HostABIs lists the Android ABIs this computer can run, best first, so the UI
+// can explain why an x86 image is not an option on an arm64 machine.
+func (a *App) HostABIs() []string { return adb.HostABIs() }
+
+// DefaultAVDSpec proposes sensible settings for a new AVD from a chosen system
+// image, so the create form opens filled in rather than blank.
+func (a *App) DefaultAVDSpec(pkg string) (adb.AVDSpec, error) {
+	var img adb.SystemImage
+	for _, i := range a.pkgs.ListInstalledImages() {
+		if i.Pkg == pkg {
+			img = i
+			break
+		}
+	}
+	if img.Pkg == "" {
+		return adb.AVDSpec{}, fmt.Errorf("%q is not an installed system image", pkg)
+	}
+	profiles, _ := a.emu.ListDeviceProfiles(a.ctx)
+	return adb.DefaultAVDSpec(img, profiles), nil
+}
+
 // CreateAVDCommand renders the creation command for the confirm dialog.
 func (a *App) CreateAVDCommand(spec adb.AVDSpec) string {
 	return adb.CreateAVDCommand(a.sdk.Info().AVDManager, spec)

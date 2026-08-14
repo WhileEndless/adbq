@@ -5,11 +5,17 @@ import {main} from '../models';
 
 export function ADBVersion():Promise<string>;
 
+export function AVDDetail(arg1:string):Promise<adb.AVD>;
+
+export function AVDHardwareChanges(arg1:adb.AVDHardware):Promise<Record<string, string>>;
+
 export function AddForward(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function AddReverse(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function AdoptExternalCapture(arg1:string):Promise<void>;
+
+export function AndroidSDK():Promise<adb.AndroidSDKInfo>;
 
 export function AndroidVersionMap():Promise<Record<number, string>>;
 
@@ -41,6 +47,8 @@ export function ChownFile(arg1:string,arg2:string,arg3:string,arg4:boolean):Prom
 
 export function ClearApp(arg1:string,arg2:string):Promise<string>;
 
+export function ClearEmulatorLog(arg1:string):Promise<void>;
+
 export function ClearFridaHistory():Promise<void>;
 
 export function ClearLogcat(arg1:string):Promise<string>;
@@ -53,9 +61,21 @@ export function CloseShell(arg1:string):Promise<void>;
 
 export function ConnectTCP(arg1:string):Promise<string>;
 
+export function CreateAVD(arg1:adb.AVDSpec):Promise<adb.AVD>;
+
+export function CreateAVDCommand(arg1:adb.AVDSpec):Promise<string>;
+
 export function CreateIptablesChain(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function DNSLookup(arg1:string,arg2:string):Promise<string>;
+
+export function DefaultAVDSpec(arg1:string):Promise<adb.AVDSpec>;
+
+export function DeleteAVD(arg1:string):Promise<void>;
+
+export function DeleteAVDCommand(arg1:string):Promise<string>;
+
+export function DeleteAVDSnapshot(arg1:string,arg2:string):Promise<void>;
 
 export function DeleteFile(arg1:string,arg2:string,arg3:boolean,arg4:boolean):Promise<string>;
 
@@ -78,6 +98,12 @@ export function DeviceDetails(arg1:string):Promise<adb.Device>;
 export function DeviceKey(arg1:string):Promise<string>;
 
 export function DisconnectDevice(arg1:string):Promise<string>;
+
+export function DownloadRootAVD():Promise<adb.RootAVDInfo>;
+
+export function EmulatorLaunchCommand(arg1:string,arg2:adb.EmulatorOpts):Promise<string>;
+
+export function EmulatorLog(arg1:string,arg2:number):Promise<Array<adb.HostLogLine> | null>;
 
 export function EnsureFridaVenv(arg1:string):Promise<adb.FridaRuntime>;
 
@@ -121,7 +147,11 @@ export function GetProxy(arg1:string):Promise<string>;
 
 export function GetStats(arg1:string):Promise<adb.Stats>;
 
+export function HostABIs():Promise<Array<string> | null>;
+
 export function HostLANIPs(arg1:string):Promise<Array<string> | null>;
+
+export function HostSettings():Promise<adb.HostSettings>;
 
 export function HostsDrifted(arg1:string):Promise<boolean>;
 
@@ -139,6 +169,8 @@ export function InstallFridaServer(arg1:string,arg2:string,arg3:string):Promise<
 
 export function InstallSystemCertWithPicker(arg1:string):Promise<adb.CertInstallResult>;
 
+export function InstallSystemImage(arg1:string):Promise<void>;
+
 export function InstallTcpdumpAuto(arg1:string,arg2:boolean):Promise<adb.TcpdumpInfo>;
 
 export function InstallTcpdumpWithPicker(arg1:string):Promise<adb.TcpdumpInfo>;
@@ -149,6 +181,8 @@ export function KillExternalCapture(arg1:string):Promise<adb.CaptureState>;
 
 export function LaunchApp(arg1:string,arg2:string):Promise<string>;
 
+export function ListAVDs():Promise<Array<adb.AVD> | null>;
+
 export function ListAppFridaScripts():Promise<Array<adb.AppScripts> | null>;
 
 export function ListApps(arg1:string,arg2:boolean):Promise<Array<adb.App> | null>;
@@ -156,6 +190,8 @@ export function ListApps(arg1:string,arg2:boolean):Promise<Array<adb.App> | null
 export function ListCACerts(arg1:string):Promise<Array<adb.CACert> | null>;
 
 export function ListConnections(arg1:string):Promise<Array<adb.Connection> | null>;
+
+export function ListDeviceProfiles():Promise<Array<adb.DeviceProfile> | null>;
 
 export function ListDeviceRecords():Promise<Array<adb.DeviceRecord> | null>;
 
@@ -177,6 +213,8 @@ export function ListFridaServers(arg1:string):Promise<Array<adb.FridaServer> | n
 
 export function ListFridaSessions():Promise<Array<adb.FridaSessionInfo> | null>;
 
+export function ListInstalledSystemImages():Promise<Array<adb.SystemImage> | null>;
+
 export function ListIptables(arg1:string,arg2:string,arg3:string):Promise<adb.IPTSnapshot>;
 
 export function ListPackageUIDs(arg1:string):Promise<Record<number, string>>;
@@ -186,6 +224,8 @@ export function ListProfiles():Promise<Array<adb.Profile> | null>;
 export function ListReverses(arg1:string):Promise<Array<adb.Forward> | null>;
 
 export function ListShellHistory():Promise<Array<adb.ScrollbackEntry> | null>;
+
+export function ListSystemImages(arg1:boolean):Promise<Array<adb.SystemImage> | null>;
 
 export function ListTasks():Promise<Array<adb.TaskState> | null>;
 
@@ -199,6 +239,8 @@ export function Mkdir(arg1:string,arg2:string,arg3:boolean):Promise<string>;
 
 export function MoveFile(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<string>;
 
+export function OpenAndroidStudio():Promise<void>;
+
 export function OpenPath(arg1:string):Promise<void>;
 
 export function OpenShell(arg1:string,arg2:boolean):Promise<string>;
@@ -208,6 +250,8 @@ export function PickAndInstallAPK(arg1:string):Promise<string>;
 export function PickApkFile():Promise<string>;
 
 export function PickExternalFridaInterpreter():Promise<adb.FridaRuntime>;
+
+export function PickSDKRoot():Promise<string>;
 
 export function PlanApkInstall(arg1:string,arg2:string):Promise<adb.ApkInstallPlan>;
 
@@ -233,6 +277,8 @@ export function ReadShellHistory(arg1:string,arg2:string):Promise<string>;
 
 export function Reboot(arg1:string,arg2:string):Promise<string>;
 
+export function RecheckAndroidSDK():Promise<adb.AndroidSDKInfo>;
+
 export function RecordingActive(arg1:string):Promise<boolean>;
 
 export function RegisterDevice(arg1:adb.Device):Promise<void>;
@@ -249,11 +295,23 @@ export function RemoveFridaSession(arg1:string):Promise<void>;
 
 export function RemoveReverse(arg1:string,arg2:string):Promise<string>;
 
+export function RemoveRootAVD():Promise<void>;
+
 export function RemoveTask(arg1:string):Promise<void>;
 
 export function ResizeShell(arg1:string,arg2:number,arg3:number):Promise<void>;
 
+export function RestoreAVDRamdisk(arg1:string):Promise<void>;
+
 export function RevealPath(arg1:string):Promise<void>;
+
+export function RootAVD(arg1:string):Promise<void>;
+
+export function RootAVDAdvice(arg1:string):Promise<Record<string, string>>;
+
+export function RootAVDCommand(arg1:string,arg2:boolean):Promise<string>;
+
+export function RootAVDInfo():Promise<adb.RootAVDInfo>;
 
 export function RunCommand(arg1:string,arg2:string):Promise<string>;
 
@@ -287,6 +345,10 @@ export function SetLogcatSystem(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetProxy(arg1:string,arg2:string):Promise<string>;
 
+export function SetSDKRoot(arg1:string):Promise<adb.AndroidSDKInfo>;
+
+export function StartAVD(arg1:string,arg2:adb.EmulatorOpts):Promise<string>;
+
 export function StartAppWithFrida(arg1:string,arg2:string,arg3:string):Promise<adb.FridaSessionInfo>;
 
 export function StartCapture(arg1:string,arg2:string,arg3:string):Promise<adb.CaptureState>;
@@ -304,6 +366,8 @@ export function StartProcStream(arg1:string,arg2:number):Promise<main.ProcStream
 export function StartScrcpy(arg1:string):Promise<void>;
 
 export function StartScreenRecord(arg1:string,arg2:number):Promise<string>;
+
+export function StopAVD(arg1:string):Promise<void>;
 
 export function StopCapture(arg1:string):Promise<adb.CaptureState>;
 
@@ -332,6 +396,10 @@ export function TcpipMode(arg1:string,arg2:number):Promise<string>;
 export function UndoIptables(arg1:string,arg2:string):Promise<adb.IPTSnapshot>;
 
 export function UninstallApp(arg1:string,arg2:string):Promise<string>;
+
+export function UninstallSystemImage(arg1:string):Promise<void>;
+
+export function UpdateAVDHardware(arg1:string,arg2:adb.AVDHardware):Promise<adb.AVD>;
 
 export function Version():Promise<string>;
 

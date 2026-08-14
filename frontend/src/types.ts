@@ -2,6 +2,8 @@
 export type {adb} from '../wailsjs/go/models';
 
 export type Screen =
+  // Host-side screens work without a device attached; see HOST_SCREENS in App.tsx.
+  | 'emulators'
   | 'overview'
   | 'logcat'
   | 'shell'

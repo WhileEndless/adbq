@@ -6,6 +6,14 @@ export function ADBVersion() {
   return window['go']['main']['App']['ADBVersion']();
 }
 
+export function AVDDetail(arg1) {
+  return window['go']['main']['App']['AVDDetail'](arg1);
+}
+
+export function AVDHardwareChanges(arg1) {
+  return window['go']['main']['App']['AVDHardwareChanges'](arg1);
+}
+
 export function AddForward(arg1, arg2, arg3) {
   return window['go']['main']['App']['AddForward'](arg1, arg2, arg3);
 }
@@ -16,6 +24,10 @@ export function AddReverse(arg1, arg2, arg3) {
 
 export function AdoptExternalCapture(arg1) {
   return window['go']['main']['App']['AdoptExternalCapture'](arg1);
+}
+
+export function AndroidSDK() {
+  return window['go']['main']['App']['AndroidSDK']();
 }
 
 export function AndroidVersionMap() {
@@ -78,6 +90,10 @@ export function ClearApp(arg1, arg2) {
   return window['go']['main']['App']['ClearApp'](arg1, arg2);
 }
 
+export function ClearEmulatorLog(arg1) {
+  return window['go']['main']['App']['ClearEmulatorLog'](arg1);
+}
+
 export function ClearFridaHistory() {
   return window['go']['main']['App']['ClearFridaHistory']();
 }
@@ -102,12 +118,36 @@ export function ConnectTCP(arg1) {
   return window['go']['main']['App']['ConnectTCP'](arg1);
 }
 
+export function CreateAVD(arg1) {
+  return window['go']['main']['App']['CreateAVD'](arg1);
+}
+
+export function CreateAVDCommand(arg1) {
+  return window['go']['main']['App']['CreateAVDCommand'](arg1);
+}
+
 export function CreateIptablesChain(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreateIptablesChain'](arg1, arg2, arg3, arg4);
 }
 
 export function DNSLookup(arg1, arg2) {
   return window['go']['main']['App']['DNSLookup'](arg1, arg2);
+}
+
+export function DefaultAVDSpec(arg1) {
+  return window['go']['main']['App']['DefaultAVDSpec'](arg1);
+}
+
+export function DeleteAVD(arg1) {
+  return window['go']['main']['App']['DeleteAVD'](arg1);
+}
+
+export function DeleteAVDCommand(arg1) {
+  return window['go']['main']['App']['DeleteAVDCommand'](arg1);
+}
+
+export function DeleteAVDSnapshot(arg1, arg2) {
+  return window['go']['main']['App']['DeleteAVDSnapshot'](arg1, arg2);
 }
 
 export function DeleteFile(arg1, arg2, arg3, arg4) {
@@ -152,6 +192,18 @@ export function DeviceKey(arg1) {
 
 export function DisconnectDevice(arg1) {
   return window['go']['main']['App']['DisconnectDevice'](arg1);
+}
+
+export function DownloadRootAVD() {
+  return window['go']['main']['App']['DownloadRootAVD']();
+}
+
+export function EmulatorLaunchCommand(arg1, arg2) {
+  return window['go']['main']['App']['EmulatorLaunchCommand'](arg1, arg2);
+}
+
+export function EmulatorLog(arg1, arg2) {
+  return window['go']['main']['App']['EmulatorLog'](arg1, arg2);
 }
 
 export function EnsureFridaVenv(arg1) {
@@ -238,8 +290,16 @@ export function GetStats(arg1) {
   return window['go']['main']['App']['GetStats'](arg1);
 }
 
+export function HostABIs() {
+  return window['go']['main']['App']['HostABIs']();
+}
+
 export function HostLANIPs(arg1) {
   return window['go']['main']['App']['HostLANIPs'](arg1);
+}
+
+export function HostSettings() {
+  return window['go']['main']['App']['HostSettings']();
 }
 
 export function HostsDrifted(arg1) {
@@ -274,6 +334,10 @@ export function InstallSystemCertWithPicker(arg1) {
   return window['go']['main']['App']['InstallSystemCertWithPicker'](arg1);
 }
 
+export function InstallSystemImage(arg1) {
+  return window['go']['main']['App']['InstallSystemImage'](arg1);
+}
+
 export function InstallTcpdumpAuto(arg1, arg2) {
   return window['go']['main']['App']['InstallTcpdumpAuto'](arg1, arg2);
 }
@@ -294,6 +358,10 @@ export function LaunchApp(arg1, arg2) {
   return window['go']['main']['App']['LaunchApp'](arg1, arg2);
 }
 
+export function ListAVDs() {
+  return window['go']['main']['App']['ListAVDs']();
+}
+
 export function ListAppFridaScripts() {
   return window['go']['main']['App']['ListAppFridaScripts']();
 }
@@ -308,6 +376,10 @@ export function ListCACerts(arg1) {
 
 export function ListConnections(arg1) {
   return window['go']['main']['App']['ListConnections'](arg1);
+}
+
+export function ListDeviceProfiles() {
+  return window['go']['main']['App']['ListDeviceProfiles']();
 }
 
 export function ListDeviceRecords() {
@@ -350,6 +422,10 @@ export function ListFridaSessions() {
   return window['go']['main']['App']['ListFridaSessions']();
 }
 
+export function ListInstalledSystemImages() {
+  return window['go']['main']['App']['ListInstalledSystemImages']();
+}
+
 export function ListIptables(arg1, arg2, arg3) {
   return window['go']['main']['App']['ListIptables'](arg1, arg2, arg3);
 }
@@ -368,6 +444,10 @@ export function ListReverses(arg1) {
 
 export function ListShellHistory() {
   return window['go']['main']['App']['ListShellHistory']();
+}
+
+export function ListSystemImages(arg1) {
+  return window['go']['main']['App']['ListSystemImages'](arg1);
 }
 
 export function ListTasks() {
@@ -394,6 +474,10 @@ export function MoveFile(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['MoveFile'](arg1, arg2, arg3, arg4);
 }
 
+export function OpenAndroidStudio() {
+  return window['go']['main']['App']['OpenAndroidStudio']();
+}
+
 export function OpenPath(arg1) {
   return window['go']['main']['App']['OpenPath'](arg1);
 }
@@ -412,6 +496,10 @@ export function PickApkFile() {
 
 export function PickExternalFridaInterpreter() {
   return window['go']['main']['App']['PickExternalFridaInterpreter']();
+}
+
+export function PickSDKRoot() {
+  return window['go']['main']['App']['PickSDKRoot']();
 }
 
 export function PlanApkInstall(arg1, arg2) {
@@ -462,6 +550,10 @@ export function Reboot(arg1, arg2) {
   return window['go']['main']['App']['Reboot'](arg1, arg2);
 }
 
+export function RecheckAndroidSDK() {
+  return window['go']['main']['App']['RecheckAndroidSDK']();
+}
+
 export function RecordingActive(arg1) {
   return window['go']['main']['App']['RecordingActive'](arg1);
 }
@@ -494,6 +586,10 @@ export function RemoveReverse(arg1, arg2) {
   return window['go']['main']['App']['RemoveReverse'](arg1, arg2);
 }
 
+export function RemoveRootAVD() {
+  return window['go']['main']['App']['RemoveRootAVD']();
+}
+
 export function RemoveTask(arg1) {
   return window['go']['main']['App']['RemoveTask'](arg1);
 }
@@ -502,8 +598,28 @@ export function ResizeShell(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResizeShell'](arg1, arg2, arg3);
 }
 
+export function RestoreAVDRamdisk(arg1) {
+  return window['go']['main']['App']['RestoreAVDRamdisk'](arg1);
+}
+
 export function RevealPath(arg1) {
   return window['go']['main']['App']['RevealPath'](arg1);
+}
+
+export function RootAVD(arg1) {
+  return window['go']['main']['App']['RootAVD'](arg1);
+}
+
+export function RootAVDAdvice(arg1) {
+  return window['go']['main']['App']['RootAVDAdvice'](arg1);
+}
+
+export function RootAVDCommand(arg1, arg2) {
+  return window['go']['main']['App']['RootAVDCommand'](arg1, arg2);
+}
+
+export function RootAVDInfo() {
+  return window['go']['main']['App']['RootAVDInfo']();
 }
 
 export function RunCommand(arg1, arg2) {
@@ -570,6 +686,14 @@ export function SetProxy(arg1, arg2) {
   return window['go']['main']['App']['SetProxy'](arg1, arg2);
 }
 
+export function SetSDKRoot(arg1) {
+  return window['go']['main']['App']['SetSDKRoot'](arg1);
+}
+
+export function StartAVD(arg1, arg2) {
+  return window['go']['main']['App']['StartAVD'](arg1, arg2);
+}
+
 export function StartAppWithFrida(arg1, arg2, arg3) {
   return window['go']['main']['App']['StartAppWithFrida'](arg1, arg2, arg3);
 }
@@ -604,6 +728,10 @@ export function StartScrcpy(arg1) {
 
 export function StartScreenRecord(arg1, arg2) {
   return window['go']['main']['App']['StartScreenRecord'](arg1, arg2);
+}
+
+export function StopAVD(arg1) {
+  return window['go']['main']['App']['StopAVD'](arg1);
 }
 
 export function StopCapture(arg1) {
@@ -660,6 +788,14 @@ export function UndoIptables(arg1, arg2) {
 
 export function UninstallApp(arg1, arg2) {
   return window['go']['main']['App']['UninstallApp'](arg1, arg2);
+}
+
+export function UninstallSystemImage(arg1) {
+  return window['go']['main']['App']['UninstallSystemImage'](arg1);
+}
+
+export function UpdateAVDHardware(arg1, arg2) {
+  return window['go']['main']['App']['UpdateAVDHardware'](arg1, arg2);
 }
 
 export function Version() {

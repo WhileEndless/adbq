@@ -67,13 +67,25 @@ func TestParseSDKManagerList(t *testing.T) {
 	}
 }
 
-// Newest API first is what a user scanning the list expects.
-func TestParseSDKManagerListSortsNewestFirst(t *testing.T) {
+// Newest API first is what a user scanning the list expects — but only within a
+// compatibility group, because an image this computer cannot run is never the
+// answer however new it is.
+func TestParseSDKManagerListSortsNewestFirstWithinCompatibility(t *testing.T) {
 	imgs := parseSDKManagerList(sdkManagerListSample)
+
+	seenIncompatible := false
 	prev := 1 << 30
 	for _, i := range imgs {
+		if !i.Compatible {
+			if !seenIncompatible {
+				seenIncompatible = true
+				prev = 1 << 30 // a new group restarts the ordering
+			}
+		} else if seenIncompatible {
+			t.Fatalf("a runnable image sorted after an unrunnable one: %s", i.Pkg)
+		}
 		if i.API > prev {
-			t.Fatalf("API levels are not descending: %+v", imgs)
+			t.Fatalf("API levels are not descending within a group: %s", i.Pkg)
 		}
 		prev = i.API
 	}
@@ -207,5 +219,59 @@ func TestScanLinesOrCRSplitsProgressRedraws(t *testing.T) {
 	}
 	if len(got) != 3 || got[0] != "[==   ] 20% A" || got[2] != "Done" {
 		t.Errorf("split = %q", got)
+	}
+}
+
+// An image whose ABI the host cannot run installs happily and then never boots.
+// The verdict belongs next to the Install button, not in the emulator's output.
+func TestHostCompatibilityMatchesThisMachine(t *testing.T) {
+	preferred := HostABIs()
+	if len(preferred) == 0 {
+		t.Skip("unknown host architecture")
+	}
+	native := newSystemImage("android-34", "google_apis", preferred[0])
+	if !native.Compatible || native.Note != "" {
+		t.Errorf("the host's own ABI must be compatible and unremarked: %+v", native)
+	}
+
+	foreign := "x86_64"
+	if preferred[0] == "x86_64" {
+		foreign = "arm64-v8a"
+	}
+	bad := newSystemImage("android-34", "google_apis", foreign)
+	if bad.Compatible {
+		t.Errorf("%s must not be reported as runnable on a %s host", foreign, preferred[0])
+	}
+	if !strings.Contains(bad.Note, preferred[0]) {
+		t.Errorf("the note must point at the ABI that does work: %q", bad.Note)
+	}
+
+	// A secondary ABI runs, but slowly — that is a warning, not a rejection.
+	if len(preferred) > 1 {
+		slow := newSystemImage("android-34", "google_apis", preferred[1])
+		if !slow.Compatible || slow.Note == "" {
+			t.Errorf("a secondary ABI must be usable but flagged as slow: %+v", slow)
+		}
+	}
+}
+
+// Sorting must put runnable images first: an incompatible one is never the
+// answer, however new it is.
+func TestSortSystemImagesPutsRunnableFirst(t *testing.T) {
+	preferred := HostABIs()
+	if len(preferred) == 0 {
+		t.Skip("unknown host architecture")
+	}
+	foreign := "x86_64"
+	if preferred[0] == "x86_64" {
+		foreign = "arm64-v8a"
+	}
+	imgs := []SystemImage{
+		newSystemImage("android-36", "google_apis", foreign),      // newer, unusable
+		newSystemImage("android-30", "google_apis", preferred[0]), // older, usable
+	}
+	sortSystemImages(imgs)
+	if !imgs[0].Compatible {
+		t.Errorf("a runnable image must sort ahead of a newer unrunnable one: %+v", imgs)
 	}
 }

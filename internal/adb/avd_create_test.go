@@ -286,3 +286,102 @@ func TestWriteIniPreservesUnrelatedKeys(t *testing.T) {
 		}
 	}
 }
+
+// The SDK ships ~90 device definitions and most are wear/TV/automotive/headset
+// profiles that bury the handful of phones an app tester actually wants.
+func TestDeviceFormFactorClassification(t *testing.T) {
+	cases := []struct {
+		p    DeviceProfile
+		want string
+	}{
+		{DeviceProfile{ID: "pixel_8", Name: "Pixel 8"}, "phone"},
+		{DeviceProfile{ID: "medium_phone", Name: "Medium Phone"}, "phone"},
+		{DeviceProfile{ID: "wearos_small_round", Name: "Wear OS Small Round", Tag: "android-wear"}, "wear"},
+		{DeviceProfile{ID: "tv_1080p", Name: "Television (1080p)", Tag: "android-tv"}, "tv"},
+		{DeviceProfile{ID: "automotive_1024p_landscape", Name: "Automotive", Tag: "android-automotive-playstore"}, "automotive"},
+		{DeviceProfile{ID: "desktop_medium", Name: "Medium Desktop", Tag: "android-desktop"}, "desktop"},
+		{DeviceProfile{ID: "ai_glasses_device", Name: "AI Glasses", Tag: "ai-glasses"}, "xr"},
+		{DeviceProfile{ID: "xr_device", Name: "XR", Tag: "android-xr"}, "xr"},
+		{DeviceProfile{ID: "pixel_fold", Name: "Pixel Fold"}, "foldable"},
+		{DeviceProfile{ID: "pixel_tablet", Name: "Pixel Tablet"}, "tablet"},
+		{DeviceProfile{ID: "nexus_9", Name: "Nexus 9"}, "tablet"},
+	}
+	for _, tc := range cases {
+		if got := deviceFormFactor(tc.p); got != tc.want {
+			t.Errorf("deviceFormFactor(%s) = %q, want %q", tc.p.ID, got, tc.want)
+		}
+	}
+}
+
+func TestClassifyDeviceProfilesRecommendsOnePhone(t *testing.T) {
+	profiles := classifyDeviceProfiles([]DeviceProfile{
+		{ID: "ai_glasses_device", Name: "AI Glasses", Tag: "ai-glasses"},
+		{ID: "medium_phone", Name: "Medium Phone"},
+		{ID: "pixel_8", Name: "Pixel 8"},
+		{ID: "tv_1080p", Name: "TV", Tag: "android-tv"},
+	})
+	var rec []string
+	for _, p := range profiles {
+		if p.Recommended {
+			rec = append(rec, p.ID)
+		}
+	}
+	if len(rec) != 1 || rec[0] != "pixel_8" {
+		t.Errorf("recommended = %v, want exactly [pixel_8]", rec)
+	}
+	// With no Pixel present the generic phone every SDK ships must win.
+	fallback := classifyDeviceProfiles([]DeviceProfile{
+		{ID: "medium_phone", Name: "Medium Phone"},
+		{ID: "tv_1080p", Name: "TV", Tag: "android-tv"},
+	})
+	if !fallback[0].Recommended {
+		t.Errorf("with no Pixel, medium_phone must be recommended: %+v", fallback)
+	}
+}
+
+// The emulator's own defaults (1.5 GB RAM, 2 cores, ~800 MB of data) make a
+// modern image feel broken, and a blank form gives the user nothing to go on.
+func TestDefaultAVDSpecIsUsable(t *testing.T) {
+	img := newSystemImage("android-34", "google_apis", "arm64-v8a")
+	profiles := classifyDeviceProfiles([]DeviceProfile{
+		{ID: "tv_1080p", Name: "TV", Tag: "android-tv"},
+		{ID: "pixel_8", Name: "Pixel 8"},
+	})
+	spec := DefaultAVDSpec(img, profiles)
+
+	if spec.Device != "pixel_8" {
+		t.Errorf("Device = %q, want the recommended phone profile", spec.Device)
+	}
+	if spec.RAMMB < 2048 || spec.Cores < 2 {
+		t.Errorf("defaults are too frugal to be usable: %+v", spec)
+	}
+	if spec.Pkg != img.Pkg || spec.DataSize == "" || spec.SDCard == "" || !spec.Keyboard {
+		t.Errorf("incomplete defaults: %+v", spec)
+	}
+	// The proposed name must pass the validator the form itself applies.
+	if !avdNameOK(spec.Name) {
+		t.Errorf("suggested name %q would be rejected by avdNameOK", spec.Name)
+	}
+	if _, err := AVDHardwareChanges(AVDHardware{RAMMB: spec.RAMMB, Cores: spec.Cores, DataSize: spec.DataSize, SDCard: spec.SDCard, GPUMode: spec.GPUMode}); err != nil {
+		t.Errorf("default hardware must pass validation: %v", err)
+	}
+}
+
+func TestSuggestAVDName(t *testing.T) {
+	cases := []struct{ level, tag, want string }{
+		{"android-34", "google_apis", "Android_34_GApis"},
+		{"android-33", "google_apis_playstore", "Android_33_Play"},
+		{"android-30", "default", "Android_30"},
+		{"android-36.1", "google_apis_playstore", "Android_36_Play"},
+		{"android-CinnamonBun", "google_apis_ps16k", "Android_CinnamonBun_Play"},
+	}
+	for _, tc := range cases {
+		got := suggestAVDName(newSystemImage(tc.level, tc.tag, "arm64-v8a"))
+		if got != tc.want {
+			t.Errorf("suggestAVDName(%s, %s) = %q, want %q", tc.level, tc.tag, got, tc.want)
+		}
+		if !avdNameOK(got) {
+			t.Errorf("suggested name %q is not a valid AVD name", got)
+		}
+	}
+}

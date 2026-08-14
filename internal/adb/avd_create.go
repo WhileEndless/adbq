@@ -18,6 +18,117 @@ type DeviceProfile struct {
 	Name string `json:"name"` // Pixel 8
 	OEM  string `json:"oem"`
 	Tag  string `json:"tag"`
+	// FormFactor groups the ~90 definitions the SDK ships. Most of them are
+	// wear, TV, automotive or headset profiles that are irrelevant to app
+	// testing, and an unfiltered list buries the handful of phones.
+	FormFactor string `json:"formFactor"` // phone|tablet|foldable|wear|tv|automotive|desktop|xr
+	// Recommended marks the profile adbq preselects for a new AVD.
+	Recommended bool `json:"recommended"`
+}
+
+// deviceFormFactor classifies a profile. The Tag line carries the answer for
+// everything except phones and tablets, which have no tag at all.
+func deviceFormFactor(p DeviceProfile) string {
+	tag := strings.ToLower(p.Tag)
+	switch {
+	case strings.Contains(tag, "wear"):
+		return "wear"
+	case strings.Contains(tag, "tv"):
+		return "tv"
+	case strings.Contains(tag, "automotive"):
+		return "automotive"
+	case strings.Contains(tag, "desktop"):
+		return "desktop"
+	case strings.Contains(tag, "xr"), strings.Contains(tag, "glasses"):
+		return "xr"
+	}
+	id, name := strings.ToLower(p.ID), strings.ToLower(p.Name)
+	switch {
+	case strings.Contains(id, "fold") || strings.Contains(name, "fold"):
+		return "foldable"
+	case strings.Contains(id, "tablet") || strings.Contains(name, "tablet") ||
+		strings.Contains(id, "nexus_9") || strings.Contains(id, "nexus_10"):
+		return "tablet"
+	}
+	return "phone"
+}
+
+// preferredDeviceIDs are the profiles adbq preselects, best first: a current
+// Pixel if the SDK has one, otherwise the generic medium phone, which every SDK
+// version ships.
+var preferredDeviceIDs = []string{
+	"pixel_8", "pixel_7", "pixel_6", "pixel_5", "medium_phone", "pixel_4",
+}
+
+// classifyDeviceProfiles fills in FormFactor and marks the recommended default.
+func classifyDeviceProfiles(profiles []DeviceProfile) []DeviceProfile {
+	byID := map[string]int{}
+	for i := range profiles {
+		profiles[i].FormFactor = deviceFormFactor(profiles[i])
+		byID[profiles[i].ID] = i
+	}
+	for _, want := range preferredDeviceIDs {
+		if i, ok := byID[want]; ok {
+			profiles[i].Recommended = true
+			break
+		}
+	}
+	return profiles
+}
+
+// DefaultAVDSpec proposes sensible settings for a new AVD, so the create form
+// opens filled in rather than blank. The emulator's own defaults are frugal
+// enough (1.5 GB RAM, 2 cores, 800 MB of data) to make a modern Android image
+// feel broken, and a user who does not know that has no way to guess.
+func DefaultAVDSpec(img SystemImage, profiles []DeviceProfile) AVDSpec {
+	spec := AVDSpec{
+		Pkg:      img.Pkg,
+		SDCard:   "512M",
+		RAMMB:    4096,
+		Cores:    4,
+		DataSize: "8G",
+		Keyboard: true,
+		GPUMode:  "auto",
+	}
+	for _, p := range profiles {
+		if p.Recommended {
+			spec.Device = p.ID
+			break
+		}
+	}
+	if img.Pkg != "" {
+		spec.Name = suggestAVDName(img)
+	}
+	return spec
+}
+
+// suggestAVDName proposes a name that says what the AVD is, and is already
+// valid: "Android_14_Play" rather than "Pixel 8 API 34 (copy)".
+func suggestAVDName(img SystemImage) string {
+	base := "Android"
+	if img.API > 0 {
+		base += "_" + strconv.Itoa(img.API)
+	} else if img.Level != "" {
+		base += "_" + strings.TrimPrefix(img.Level, "android-")
+	}
+	switch {
+	case img.PlayStore:
+		base += "_Play"
+	case strings.Contains(img.Tag, "google_apis"):
+		base += "_GApis"
+	}
+	// The suggestion feeds a field validated by avdNameOK, so sanitise here
+	// rather than handing the user a name that will be rejected.
+	var sb strings.Builder
+	for _, r := range base {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			sb.WriteRune(r)
+		default:
+			sb.WriteByte('_')
+		}
+	}
+	return sb.String()
 }
 
 // AVDSpec describes an AVD to create.
@@ -104,7 +215,7 @@ func (m *EmulatorManager) ListDeviceProfiles(ctx context.Context) ([]DeviceProfi
 	if err != nil && len(out) == 0 {
 		return nil, fmt.Errorf("avdmanager list device failed: %w", err)
 	}
-	return parseDeviceProfiles(string(out)), nil
+	return classifyDeviceProfiles(parseDeviceProfiles(string(out))), nil
 }
 
 // parseDeviceProfiles reads avdmanager's indented block format:

@@ -51,6 +51,21 @@ Aşağıdaki bağımlılıklar **1.1** süzgecinden geçirilmiş ve kullanıcı 
 - **`frida` (PyPI, host tarafı)** — Frida Manager'ın enstrümantasyonu sürmek için kullandığı Python paketi. Lisansı **wxWindows Licence (LGPL-2.0-or-later + istisna)**; bu liste dışı olduğundan kullanıcı onayı alınmıştır. **Depoya gömülmez/link edilmez**: tıpkı cihaza pushlanan `frida-server` gibi, çalışma anında kullanıcıya özel bir venv'e kurulur. Kurulum sertleştirmesi: cihazdaki sürümle birebir eşlenik tek wheel seçilir, **SHA256 PyPI'dan doğrulanır**, `pip install --no-index --no-deps --only-binary=:all:` ile çevrimdışı kurulur (pip ağdan çözümleme yapmaz, sdist derlemez). Host yalnızca `files.pythonhosted.org`/`pypi.org` ile sınırlıdır. Alternatif, tamamen lisans-temiz yol: kullanıcı kendi yorumlayıcısını kaydeder (**bring-your-own**), adbq hiçbir şey kurmaz.
 - **CodeMirror 6 (npm)** — `codemirror`, `@codemirror/{state,view,language,lang-javascript}`, `@lezer/highlight`. Tümü **MIT**, tek birinci-taraf yayıncı (marijn). Tam sürümle pinlenir, `package-lock.json` SRI hash'leriyle commit edilir, `--ignore-scripts` ile kurulur, `npm audit --omit=dev` temiz olmalı.
 
+- **`rootAVD` (GitLab, host tarafı)** — Play Store system-image'larının ramdisk'ine Magisk kuran üçüncü parti kabuk betiği. **§1.1'in üç kriterini birden karşılamıyor** ve kullanıcı onayıyla istisna olarak kabul edilmiştir:
+  - **Lisans GPL-3.0** (liste dışı → onay gerekti),
+  - **son commit 2024-10-04** ("son 12 ay" kuralını karşılamıyor),
+  - **⭐234** ("500+" eşiğinin altında), sürüm etiketi yok.
+
+  Bu yüzden bağımlılık olarak *alınmaz*, kullanıcının çalıştırdığı harici bir araç olarak *sürülür* — tıpkı `frida-server` gibi. Bağlayıcı kurallar:
+  - **Depoya dahil edilmez, link edilmez, `go.mod`/`package.json`'a girmez.** GPL yükümlülüğü adbq'ya bulaşmaz.
+  - **Kullanıcı onayı olmadan indirilmez.** Onay diyaloğu kaynağı, commit'i, SHA-256'ları, lisansı ve riskleri gösterir (`RootAVDInfo.Disclosures`).
+  - **Sabit commit** indirilir (branch değil). Çalıştırılan tek dosya `rootAVD.sh` ve cihaza ulaşabilen tek ikili `Magisk.zip`, koda gömülü **SHA-256** ile doğrulanır; uyuşmazlık **tüm indirmeyi siler**.
+  - İzinli tek indirme host'u **`gitlab.com`**. Arşiv açılırken yol kaçışı tüm arşivi reddettirir.
+  - Hedef `<UserCacheDir>/adbq/rootavd/<commit>/` — atılabilir, kullanıcı tek tıkla siler.
+  - **adbq'nun doğrulayamadığı** bir şey varsa (rootAVD'nin GitHub'dan kendi indirdiği Magisk sürümü) bu **gizlenmez**, onay metninde yazılır.
+
+  Detay ve gerekçe: [`docs/emulator-manager.md`](docs/emulator-manager.md) §8.
+
 Yeni bir Frida bağımlılığı/kaynağı eklerken: indirilen her şey host-allowlist + SHA256 ile doğrulanmalı; CodeShare kaynağı **güvenilmez veridir** (önce gösterilir, indirildiğinde çalıştırılmaz). Detay: [`docs/frida-manager.md`](docs/frida-manager.md).
 
 ## 2. Kod Kalitesi Kuralları

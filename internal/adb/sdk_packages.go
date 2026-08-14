@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,7 +37,70 @@ type SystemImage struct {
 	// images refuse it, which is the whole reason rootAVD exists.
 	Rootable bool `json:"rootable"`
 
+	// Compatible reports whether this image's ABI can actually run on this
+	// computer. An x86_64 image on an Apple Silicon Mac installs happily and
+	// then never boots, so the answer belongs next to the Install button rather
+	// than in the emulator's error output half an hour later.
+	Compatible bool   `json:"compatible"`
+	Note       string `json:"note"`
+
 	Commands []string `json:"commands"`
+}
+
+// hostABIs lists the Android ABIs this computer can emulate at native speed,
+// best first. The emulator will not run a foreign-architecture image at all on
+// Apple Silicon, and does so unusably slowly elsewhere.
+func hostABIs() []string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return []string{"arm64-v8a", "armeabi-v7a"}
+	case "amd64":
+		return []string{"x86_64", "x86"}
+	default:
+		return nil
+	}
+}
+
+// HostABIs exposes the preferred ABI order to the UI, so an image list can be
+// sorted and labelled without duplicating the rule in TypeScript.
+func HostABIs() []string {
+	abis := hostABIs()
+	if abis == nil {
+		return []string{}
+	}
+	return abis
+}
+
+// abiRank orders images by how well they suit this host: 0 is native, higher is
+// worse, and a negative result means the host has no opinion.
+func abiRank(abi string) int {
+	for i, a := range hostABIs() {
+		if a == abi {
+			return i
+		}
+	}
+	return -1
+}
+
+// applyHostCompat marks an image runnable-or-not on this computer.
+func applyHostCompat(img *SystemImage) {
+	preferred := hostABIs()
+	if len(preferred) == 0 {
+		// Unknown host architecture: claim nothing rather than mislabel.
+		img.Compatible = true
+		return
+	}
+	rank := abiRank(img.ABI)
+	switch {
+	case rank == 0:
+		img.Compatible = true
+	case rank > 0:
+		img.Compatible = true
+		img.Note = img.ABI + " runs on this computer but is emulated, so it will be slow — prefer " + preferred[0]
+	default:
+		img.Compatible = false
+		img.Note = "This computer is " + runtime.GOARCH + "; a " + img.ABI + " image will not run here. Choose " + preferred[0] + "."
+	}
 }
 
 // PackageManager wraps sdkmanager and the on-disk system-images tree.
@@ -275,6 +339,7 @@ func newSystemImage(level, tag, abi string) SystemImage {
 	// Google's Play Store images ship a production adbd that refuses `adb root`;
 	// every other tag boots a debuggable image where root is one command away.
 	img.Rootable = !img.PlayStore
+	applyHostCompat(&img)
 	return img
 }
 
@@ -396,6 +461,11 @@ func mergeSystemImages(installed, remote []SystemImage) []SystemImage {
 // looking for — then by tag and ABI for a stable list.
 func sortSystemImages(s []SystemImage) {
 	sort.SliceStable(s, func(i, j int) bool {
+		// Images this computer can actually run come first — an incompatible
+		// one is never the answer, however new it is.
+		if s[i].Compatible != s[j].Compatible {
+			return s[i].Compatible
+		}
 		if s[i].API != s[j].API {
 			return s[i].API > s[j].API
 		}
