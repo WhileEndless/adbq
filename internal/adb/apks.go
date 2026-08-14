@@ -108,12 +108,16 @@ func baseAndSplits(paths []string) (string, []string) {
 	return paths[baseIdx], splits
 }
 
-// ExportApks pulls every APK of the package and packs them into a single
-// `.apks` archive at dst. Entries sit at the archive root under their
-// on-device file names, which is the layout SAI and adbq's own installer read.
+// ExportApks writes the package to dst in the form that actually matches it:
+// a split (App Bundle) install becomes one `.apks` archive holding every APK,
+// and a plain single-APK app is simply pulled as an `.apk`. Wrapping a lone
+// APK in an archive would only make it harder to install elsewhere.
 //
-// A non-split app has nothing to pack, so callers get a clear error rather
-// than a one-file archive that no installer treats specially.
+// Archive entries sit at the root under their on-device file names, which is
+// the layout SAI and adbq's own installer read.
+//
+// The APK bytes are copied verbatim in both cases — nothing is re-zipped or
+// re-signed, so v1/v2/v3 signatures stay valid.
 func (c *Client) ExportApks(ctx context.Context, serial, pkg, dst string, progress func(string)) (string, error) {
 	note := func(s string) {
 		if progress != nil {
@@ -123,6 +127,13 @@ func (c *Client) ExportApks(ctx context.Context, serial, pkg, dst string, progre
 	set, err := c.ApkSetOf(ctx, serial, pkg)
 	if err != nil {
 		return "", err
+	}
+	if !set.Split {
+		note("pulling " + path.Base(set.Base))
+		if out, err := c.pullOne(ctx, serial, set.Base, dst); err != nil {
+			return "", fmt.Errorf("pull %s failed: %w (%s)", path.Base(set.Base), err, strings.TrimSpace(out))
+		}
+		return dst, nil
 	}
 	paths := append([]string{set.Base}, set.Splits...)
 

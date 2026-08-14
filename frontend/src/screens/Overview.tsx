@@ -4,6 +4,7 @@ import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, Dropdown, confirmDialog, showToast} from '../ui';
 import {getCached, mutateData} from '../cache';
+import {pickApkAndInstall} from '../lib/apk';
 
 export function OverviewScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
   // Seed from cache for an instant first paint when reopening Overview; the poll
@@ -118,8 +119,8 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
               }}/>
               <QA icon={<Icon.Terminal/>} label='Open shell' onClick={() => setScreen?.('shell')}/>
               <ScrcpyAction device={device}/>
-              <QA icon={<Icon.Upload/>} label='Install APK' onClick={() =>
-                API.PickAndInstallAPK(device.id).then(o => o && showToast({title: 'Installed', body: o, kind: 'ok', mono: true}))}/>
+              <QA icon={<Icon.Upload/>} label='Install APK / APKS' onClick={() =>
+                pickApkAndInstall(device.id)}/>
               <QA icon={<Icon.Wifi/>} label='Wi-Fi adb' onClick={async () => {
                 const ok = await confirmDialog({title: 'Enable Wi-Fi adb (tcpip 5555)?', body: `Runs adb -s ${device.id} tcpip 5555 on the host. Connect afterwards with adb connect ${device.ip || '<ip>'}:5555.`, confirmLabel: 'Enable'});
                 if (!ok) return;

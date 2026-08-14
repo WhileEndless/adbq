@@ -4,6 +4,7 @@ import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, CodeBlock, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
+import {pickApkAndInstall} from '../lib/apk';
 import {sdkLabel, rootUnavailableReason} from '../lib/android';
 
 export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
@@ -77,11 +78,9 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
         <button className={`btn sm${!onlyUser ? ' primary' : ''}`} onClick={() => setOnlyUser(false)}>All</button>
         <div className='spacer' style={{flex: 1}}/>
         <button className='btn' onClick={() => load(true)}><Icon.Refresh/>Reload</button>
-        <button className='btn primary' onClick={() =>
-          API.PickAndInstallAPK(device.id)
-            .then(o => o && showToast({title: 'Install', body: o, kind: 'ok', mono: true}))
-            .catch(e => showToast({title: 'Install failed', body: String(e), kind: 'err'}))}>
-          <Icon.Upload/>Install APK
+        <button className='btn primary' title='Single .apk, or a split bundle as .apks / .xapk'
+                onClick={() => pickApkAndInstall(device.id).then(done => { if (done) setTimeout(() => load(true), 2500); })}>
+          <Icon.Upload/>Install APK / APKS
         </button>
       </div>
       <div className='apps-layout' style={{flex: 1, minHeight: 0}}>
@@ -386,16 +385,18 @@ function ManageFridaScriptsModal({pkg, onClose}: {pkg: string; onClose: () => vo
   );
 }
 
-// ─── APK export / install ───────────────────────────────────────────────
+// ─── APK export ───────────────────────────────────────────────
 //
 // App Bundle installs are several APKs (base + config splits). Exporting only
 // the base produces a file that fails to install later with
-// INSTALL_FAILED_MISSING_SPLIT, so split apps are exported as one .apks
-// archive and reinstalled through a single `install-multiple` session.
+// INSTALL_FAILED_MISSING_SPLIT, so those are exported as one .apks archive —
+// and only those. A plain single-APK app stays a plain .apk.
+//
+// Installing lives in the screen header, not here: it targets the device, not
+// the app you happen to have selected.
 function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
   const [set, setSet] = useState<adb.ApkSet | null>(null);
   const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -411,47 +412,9 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
   const split = !!set?.split;
   const count = set ? splits.length + 1 : 0;
 
-  async function pickAndInstall() {
-    setBusy(true);
-    try {
-      const file = await API.PickApkFile();
-      if (!file) return;
-      const plan = await API.PlanApkInstall(device.id, file);
-      const ok = await confirmDialog({
-        title: `Install ${file.replace(/^.*[\\/]/, '')}?`,
-        body: (
-          <div style={{fontSize: 12}}>
-            <div style={{marginBottom: 6}}>
-              {plan.split
-                ? `${plan.install?.length ?? 0} APKs will be committed in one pm session.`
-                : 'A single APK will be installed.'}
-            </div>
-            <CodeBlock multiline>{(plan.commands ?? []).join('\n')}</CodeBlock>
-            {(plan.skipped?.length ?? 0) > 0 && (
-              <div className='muted' style={{marginTop: 8}}>
-                Not installed on this device:
-                <ul style={{margin: '4px 0 0 16px', padding: 0}}>
-                  {(plan.skipped ?? []).map(s => <li key={s}>{s}</li>)}
-                </ul>
-              </div>
-            )}
-          </div>
-        ),
-        confirmLabel: 'Install',
-      });
-      if (!ok) return;
-      await API.InstallApkBundleFromPath(device.id, file);
-      showToast({title: 'Install started', body: 'Watch the Tasks panel for progress', kind: 'info'});
-    } catch (e) {
-      showToast({title: 'Install failed', body: String(e), kind: 'err'});
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className='app-detail-section'>
-      <div className='app-detail-section-title'>APK export &amp; install</div>
+      <div className='app-detail-section-title'>APK export</div>
       {err && <div className='muted' style={{fontSize: 12, color: 'var(--danger)'}}>Could not read the APK layout: {err}</div>}
       {set && (
         <>
@@ -463,18 +426,13 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
                 : <>Single APK</>}
             </span>
           </div>
-          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 8}}>
-            <button className='btn' disabled={busy} onClick={() => {
-              API.ExportApks(device.id, pkg)
-                .then(id => id && showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
-                .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}));
-            }}>
-              <Icon.Download/>Export {split ? '.apks' : '.apk'}
-            </button>
-            <button className='btn' disabled={busy} onClick={pickAndInstall}>
-              <Icon.Upload/>Install .apk / .apks…
-            </button>
-          </div>
+          <button className='btn' style={{width: '100%', marginTop: 8}} onClick={() => {
+            API.ExportApks(device.id, pkg)
+              .then(id => id && showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
+              .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}));
+          }}>
+            <Icon.Download/>Export {split ? '.apks' : '.apk'}
+          </button>
           {split && (
             <div className='muted' style={{fontSize: 11, marginTop: 6}}>
               All {count} APKs go into one .apks archive. Installing only the base would fail with INSTALL_FAILED_MISSING_SPLIT.

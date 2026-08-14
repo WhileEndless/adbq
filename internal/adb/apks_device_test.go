@@ -3,6 +3,9 @@ package adb
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +120,80 @@ func TestDeviceExportApks(t *testing.T) {
 	// The base has to lead the session or pm rejects it.
 	if !strings.EqualFold(filepath.Base(plan.Install[0]), "base.apk") {
 		t.Logf("first entry is %q; ranking reorders it at install time", plan.Install[0])
+	}
+
+	// The APK bytes must be byte-identical to the device's, or the signature
+	// would no longer verify and the reinstall would be rejected.
+	sums := map[string]string{}
+	for _, p := range append([]string{set.Base}, set.Splits...) {
+		out, err := c.Shell(ctx, serial, "sha256sum "+p)
+		if err != nil || len(strings.Fields(out)) == 0 {
+			t.Skipf("no usable sha256sum on this device: %v", err)
+		}
+		sums[filepath.Base(p)] = strings.Fields(out)[0]
+	}
+	for _, f := range zr.File {
+		sum, ok := sums[f.Name]
+		if !ok {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := sha256.New()
+		_, err = io.Copy(h, rc)
+		rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := hex.EncodeToString(h.Sum(nil)); got != sum {
+			t.Errorf("%s was altered by the export: %s != %s (signature would break)", f.Name, got, sum)
+		}
+	}
+}
+
+// A non-split app must come out as a real APK, not a one-file container with
+// an .apk name that no installer would accept.
+func TestDeviceExportSingleApkIsNotAnArchiveWrapper(t *testing.T) {
+	c, serial := probeSerial(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
+	apps, err := c.ListApps(ctx, serial, true)
+	if err != nil {
+		t.Fatalf("ListApps: %v", err)
+	}
+	var pkg string
+	for _, a := range apps {
+		if set, err := c.ApkSetOf(ctx, serial, a.Pkg); err == nil && set != nil && !set.Split {
+			pkg = a.Pkg
+			break
+		}
+	}
+	if pkg == "" {
+		t.Skip("every user app on this device is a split install")
+	}
+	dst := filepath.Join(t.TempDir(), pkg+".apk")
+	if _, err := c.ExportApks(ctx, serial, pkg, dst, func(string) {}); err != nil {
+		t.Fatalf("ExportApks: %v", err)
+	}
+	zr, err := zip.OpenReader(dst)
+	if err != nil {
+		t.Fatalf("the export is not a readable zip/APK: %v", err)
+	}
+	defer zr.Close()
+	manifest, wrapper := false, false
+	for _, f := range zr.File {
+		switch {
+		case f.Name == "AndroidManifest.xml":
+			manifest = true
+		case f.Name == "meta.sai_v2.json" || strings.HasSuffix(f.Name, ".apk"):
+			wrapper = true
+		}
+	}
+	if wrapper || !manifest {
+		t.Errorf("a non-split app must be exported as the APK itself, got a container")
 	}
 }
 

@@ -1049,8 +1049,12 @@ func (a *App) ExportApks(serial, pkg string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	title := "Save APK as…"
+	if set.Split {
+		title = "Save APKS as…"
+	}
 	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "Save APKS as…",
+		Title:           title,
 		DefaultFilename: set.Suggested,
 	})
 	if err != nil || dst == "" {

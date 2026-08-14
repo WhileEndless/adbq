@@ -47,7 +47,18 @@ split_config.tr.apk
 meta.sai_v2.json
 ```
 
-Split olmayan uygulamalarda dosya adı `.apk` olur; davranış değişmez.
+**Yalnızca gerçekten split olan uygulamalar** `.apks` olur. Tek APK'lık bir
+uygulama doğrudan `.apk` olarak çekilir — tek dosyayı arşive sarmak onu başka
+araçlarla kurulamaz hâle getirirdi (`TestDeviceExportSingleApkIsNotAnArchiveWrapper`).
+
+### 2.1.1. İmza bozulmaz
+
+APK'lar **bayt bayt** kopyalanır: yeniden zip'lenmez, yeniden imzalanmaz,
+hizalama (`zipalign`) değiştirilmez. Dışa aktarılan her APK'nın SHA-256'sı
+cihazdaki dosyanınkiyle karşılaştırılarak doğrulanır
+(`TestDeviceExportApks`). Dolayısıyla v1/v2/v3 imzaları geçerli kalır ve
+arşiv aynı cihaza/başka cihaza sorunsuz kurulur. `.apks` sarmalayıcı zip'in
+kendisi imzalı değildir — zaten `pm` onu değil, içindeki APK'ları doğrular.
 
 ### 2.2. Geri kurma — `install-multiple`
 
@@ -94,11 +105,15 @@ kullanıcıya gösterilir.
 [`CLAUDE.md §4.1`](../CLAUDE.md) gereği her iki akış da çalıştırdığı komutu
 gösterir (bkz. [`command-visibility.md`](command-visibility.md)):
 
-- **Dışa aktarma**: Apps → uygulama detayı → *APK export & install* bölümü
-  `pm path` + her APK için `pull` satırlarını listeler (`ApkSet.Commands`).
-- **Kurma**: dosya seçildikten sonra **kurulumdan önce** onay diyaloğu açılır;
-  içinde `adb -s <serial> install-multiple -r …` komutu, kurulacak APK sayısı
-  ve elenen dosyalar yer alır (`ApkInstallPlan`).
+- **Dışa aktarma**: Apps → uygulama detayı → *APK export* bölümü, uygulamanın
+  düzenini (tek APK / App Bundle) ve `pm path` + her APK için `pull`
+  satırlarını gösterir (`ApkSet.Commands`).
+- **Kurma**: kurulum bir uygulamaya değil **cihaza** ait bir işlemdir; bu yüzden
+  uygulama detayında değil, Apps ekranının başlığındaki *Install APK / APKS*
+  düğmesinde (ve Overview hızlı eylemlerinde) durur. Dosya seçildikten sonra
+  **kurulumdan önce** onay diyaloğu açılır; içinde `adb -s <serial>
+  install-multiple -r …` komutu, kurulacak APK sayısı ve elenen dosyalar yer
+  alır (`ApkInstallPlan`). Ortak akış: `frontend/src/lib/apk.tsx`.
 
 ## 4. Hata eşlemesi
 
