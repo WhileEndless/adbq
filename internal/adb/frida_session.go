@@ -60,6 +60,9 @@ type FridaSession struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
 	tmp   string // per-session temp dir (driver + job)
+	// cleanup releases host-side resources the session owns beyond its process
+	// — currently the adb forward opened for a non-default frida-server port.
+	cleanup func()
 
 	mu     sync.Mutex
 	ring   []FridaMsg
@@ -77,13 +80,23 @@ type fridaJob struct {
 	Mode       string           `json:"mode"`
 	Scripts    []FridaScriptArg `json:"scripts"`
 	BridgesDir string           `json:"bridgesDir,omitempty"` // dir with java.js/objc.js/swift.js (Frida 17 needs these)
+	// RemoteAddress, when set, is a host:port the driver connects to as a remote
+	// device instead of resolving the adb serial. Used for a frida-server on a
+	// non-default port, which frida's own Android backend cannot reach.
+	RemoteAddress string `json:"remoteAddress,omitempty"`
+	// Port is the device-side port behind RemoteAddress, for error messages.
+	Port int `json:"port,omitempty"`
 }
 
 // StartFridaSession launches the embedded driver under the given host runtime,
 // instrumenting pkg on the device. mode is "spawn" (cold-start, default) or
 // "attach" (to a running process). The caller is responsible for ensuring a
 // matching frida-server is already running on the device.
-func StartFridaSession(ctx context.Context, rt FridaRuntime, id, serial, pkg, mode string, scripts []FridaScriptArg) (*FridaSession, error) {
+//
+// port is the device port that server listens on; pass 0 for frida's default.
+// Anything else needs an adb forward, because frida's Android backend only ever
+// dials the default port — see frida_remote.go.
+func StartFridaSession(ctx context.Context, c *Client, rt FridaRuntime, id, serial, pkg, mode string, port int, scripts []FridaScriptArg) (*FridaSession, error) {
 	py := resolveInterpreter(rt.PythonPath)
 	if py == "" || !fileExists(py) {
 		return nil, fmt.Errorf("host runtime interpreter not found: %s", rt.PythonPath)
@@ -94,6 +107,7 @@ func StartFridaSession(ctx context.Context, rt FridaRuntime, id, serial, pkg, mo
 	if mode != "attach" {
 		mode = "spawn"
 	}
+	port = fridaPortOrDefault(port)
 
 	tmp, err := os.MkdirTemp("", "adbq-frida-"+sanitize(id)+"-")
 	if err != nil {
@@ -108,18 +122,40 @@ func StartFridaSession(ctx context.Context, rt FridaRuntime, id, serial, pkg, mo
 	// reference them work like they do under the `frida` CLI. Best-effort and
 	// cached: a failure just means a Java-using script will report the same
 	// "Java is not defined" as before, but non-bridge scripts still run.
-	bridgesDir := ""
+	bridgesDir, bridgeErr := "", error(nil)
 	if rt.FridaVersion != "" {
 		bctx, bcancel := context.WithTimeout(ctx, 60*time.Second)
-		if d, err := ensureFridaBridges(bctx, rt.FridaVersion); err == nil {
-			bridgesDir = d
-		}
+		bridgesDir, bridgeErr = ensureFridaBridges(bctx, rt.FridaVersion)
 		bcancel()
+		if bridgeErr != nil {
+			bridgesDir = ""
+		}
+	}
+
+	job := fridaJob{Serial: serial, Package: pkg, Mode: mode, Scripts: scripts, BridgesDir: bridgesDir, Port: port}
+
+	// A server on frida's default port is reachable through frida's own Android
+	// backend; anything else has to be forwarded and dialled as a remote device.
+	var fwd *fridaForward
+	if port != FridaDefaultPort && c != nil {
+		f, err := c.ForwardFridaPort(ctx, serial, port)
+		if err != nil {
+			_ = os.RemoveAll(tmp)
+			return nil, fmt.Errorf("reach frida-server on port %d: %w", port, err)
+		}
+		fwd = f
+		job.RemoteAddress = f.Address
+	}
+	cleanup := func() {
+		if fwd != nil {
+			fwd.Close(context.Background(), c)
+		}
 	}
 
 	jobPath := filepath.Join(tmp, "job.json")
-	jobBytes, _ := json.Marshal(fridaJob{Serial: serial, Package: pkg, Mode: mode, Scripts: scripts, BridgesDir: bridgesDir})
+	jobBytes, _ := json.Marshal(job)
 	if err := os.WriteFile(jobPath, jobBytes, 0o600); err != nil {
+		cleanup()
 		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
@@ -129,20 +165,24 @@ func StartFridaSession(ctx context.Context, rt FridaRuntime, id, serial, pkg, mo
 	cmd := exec.Command(py, "-u", driverPath, jobPath)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cleanup()
 		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		cleanup()
 		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		cleanup()
 		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		cleanup()
 		_ = os.RemoveAll(tmp)
 		return nil, fmt.Errorf("launch frida driver: %w", err)
 	}
@@ -152,11 +192,23 @@ func StartFridaSession(ctx context.Context, rt FridaRuntime, id, serial, pkg, mo
 			ID: id, Serial: serial, Package: pkg, Mode: mode,
 			Runtime: rt.FridaVersion, StartedAt: time.Now().UnixMilli(), Status: "running",
 		},
-		cmd:    cmd,
-		stdin:  stdin,
-		tmp:    tmp,
-		status: "running",
-		done:   make(chan struct{}),
+		cmd:     cmd,
+		stdin:   stdin,
+		tmp:     tmp,
+		cleanup: cleanup,
+		status:  "running",
+		done:    make(chan struct{}),
+	}
+	// Resolving the bridges needs PyPI on first use for a given frida version.
+	// Offline, it silently used to leave Java undefined and the script would fail
+	// with a ReferenceError that looks like the script's fault — say so up front,
+	// in the session log where the failure will appear.
+	if bridgeErr != nil {
+		s.ingest(FridaMsg{
+			Kind: "log", Level: "warning", Script: "driver",
+			Payload: "Java/ObjC/Swift bridges unavailable (" + firstLine(bridgeErr.Error()) +
+				") — scripts using Java will fail with \"Java is not defined\" until this host can reach PyPI once.",
+		})
 	}
 	go s.pump(stdout, stderr)
 	return s, nil
@@ -287,6 +339,9 @@ func (s *FridaSession) Stop() {
 				_ = s.cmd.Process.Kill()
 			}
 			<-s.done
+		}
+		if s.cleanup != nil {
+			s.cleanup()
 		}
 		if s.tmp != "" {
 			_ = os.RemoveAll(s.tmp)

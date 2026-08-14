@@ -2,9 +2,10 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CodeBlock, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
-import {sdkLabel} from '../lib/android';
+import {pickApkAndInstall} from '../lib/apk';
+import {sdkLabel, rootUnavailableReason} from '../lib/android';
 
 export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
   const [apps, setApps] = useState<adb.App[]>([]);
@@ -77,11 +78,9 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
         <button className={`btn sm${!onlyUser ? ' primary' : ''}`} onClick={() => setOnlyUser(false)}>All</button>
         <div className='spacer' style={{flex: 1}}/>
         <button className='btn' onClick={() => load(true)}><Icon.Refresh/>Reload</button>
-        <button className='btn primary' onClick={() =>
-          API.PickAndInstallAPK(device.id)
-            .then(o => o && showToast({title: 'Install', body: o, kind: 'ok', mono: true}))
-            .catch(e => showToast({title: 'Install failed', body: String(e), kind: 'err'}))}>
-          <Icon.Upload/>Install APK
+        <button className='btn primary' title='Single .apk, or a split bundle as .apks / .xapk'
+                onClick={() => pickApkAndInstall(device.id).then(done => { if (done) setTimeout(() => load(true), 2500); })}>
+          <Icon.Upload/>Install APK / APKS
         </button>
       </div>
       <div className='apps-layout' style={{flex: 1, minHeight: 0}}>
@@ -208,9 +207,6 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                   const ok = await confirmDialog({title: `Clear data for ${sel.name || sel.pkg}?`, body: 'Wipes app preferences, cache, and database. The app will start fresh.', confirmLabel: 'Clear', danger: true});
                   if (ok) doAction(API.ClearApp, 'Clear data');
                 }}>Clear data</button>
-                <button className='btn' onClick={() => {
-                  API.ExportAPK(device.id, sel.pkg).then(() => showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}));
-                }}><Icon.Download/>Export APK</button>
                 {setScreen && (
                   <button className='btn' onClick={() => {
                     if (!sel) return;
@@ -235,6 +231,7 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                   <Icon.Download/>Export data{!device.root && ' (root)'}
                 </button>
               </div>
+              <ApkTransferSection device={device} pkg={sel.pkg}/>
               <FridaAppSection device={device} pkg={sel.pkg} running={!!running?.running} setScreen={setScreen}/>
               <button className='btn danger' style={{marginTop: 6, width: '100%'}}
                       onClick={async () => {
@@ -305,7 +302,8 @@ function FridaAppSection({device, pkg, running, setScreen}: {device: adb.Device;
       <div className='card-body'>
         {!device.root && (
           <div style={{fontSize: 11, color: 'var(--warn)', marginBottom: 8}}>
-            Frida needs a rooted device running frida-server. On an unrooted device, use frida-gadget instead.
+            Frida needs a rooted device running frida-server. {rootUnavailableReason(device)}
+            {' '}On an unrooted device, use frida-gadget instead.
           </div>
         )}
         <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6}}>
@@ -384,6 +382,69 @@ function ManageFridaScriptsModal({pkg, onClose}: {pkg: string; onClose: () => vo
         </div>
       )}
     </Modal>
+  );
+}
+
+// ─── APK export ───────────────────────────────────────────────
+//
+// App Bundle installs are several APKs (base + config splits). Exporting only
+// the base produces a file that fails to install later with
+// INSTALL_FAILED_MISSING_SPLIT, so those are exported as one .apks archive —
+// and only those. A plain single-APK app stays a plain .apk.
+//
+// Installing lives in the screen header, not here: it targets the device, not
+// the app you happen to have selected.
+function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
+  const [set, setSet] = useState<adb.ApkSet | null>(null);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    setSet(null); setErr('');
+    API.ApkSetOf(device.id, pkg)
+      .then(s => { if (live) setSet(s); })
+      .catch(e => { if (live) setErr(String(e)); });
+    return () => { live = false; };
+  }, [device.id, pkg]);
+
+  // Go marshals a nil slice as JSON null, so never read .length off these directly.
+  const splits = set?.splits ?? [];
+  const split = !!set?.split;
+  const count = set ? splits.length + 1 : 0;
+
+  return (
+    <div className='app-detail-section'>
+      <div className='app-detail-section-title'>APK export</div>
+      {err && <div className='muted' style={{fontSize: 12, color: 'var(--danger)'}}>Could not read the APK layout: {err}</div>}
+      {set && (
+        <>
+          <div className='app-detail-row'>
+            <span className='app-detail-k'>Layout</span>
+            <span className='app-detail-v'>
+              {split
+                ? <>App Bundle · base + {splits.length} split APK(s)</>
+                : <>Single APK</>}
+            </span>
+          </div>
+          <button className='btn' style={{width: '100%', marginTop: 8}} onClick={() => {
+            API.ExportApks(device.id, pkg)
+              .then(id => id && showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
+              .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}));
+          }}>
+            <Icon.Download/>Export {split ? '.apks' : '.apk'}
+          </button>
+          {split && (
+            <div className='muted' style={{fontSize: 11, marginTop: 6}}>
+              All {count} APKs go into one .apks archive. Installing only the base would fail with INSTALL_FAILED_MISSING_SPLIT.
+            </div>
+          )}
+          <div style={{marginTop: 10, fontSize: 11}}>
+            <span className='muted'>Underlying command (click to copy):</span>{' '}
+            <CodeBlock multiline>{(set.commands ?? []).join('\n')}</CodeBlock>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

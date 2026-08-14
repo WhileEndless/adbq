@@ -1,5 +1,47 @@
 export namespace adb {
 	
+	export class ApkInstallPlan {
+	    file: string;
+	    install: string[] | null;
+	    skipped: string[] | null;
+	    split: boolean;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApkInstallPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file = source["file"];
+	        this.install = source["install"];
+	        this.skipped = source["skipped"];
+	        this.split = source["split"];
+	        this.commands = source["commands"];
+	    }
+	}
+	export class ApkSet {
+	    pkg: string;
+	    base: string;
+	    splits: string[] | null;
+	    split: boolean;
+	    suggested: string;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApkSet(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkg = source["pkg"];
+	        this.base = source["base"];
+	        this.splits = source["splits"];
+	        this.split = source["split"];
+	        this.suggested = source["suggested"];
+	        this.commands = source["commands"];
+	    }
+	}
 	export class App {
 	    pkg: string;
 	    path: string;
@@ -56,10 +98,10 @@ export namespace adb {
 	    installLocation: string;
 	    primaryAbi: string;
 	    secondaryAbi: string;
-	    splits: string[];
-	    flags: string[];
-	    privateFlags: string[];
-	    supportsScreens: string[];
+	    splits: string[] | null;
+	    flags: string[] | null;
+	    privateFlags: string[] | null;
+	    supportsScreens: string[] | null;
 	    signature: string;
 	    apkSigningVersion: string;
 	    enabled: string;
@@ -68,9 +110,9 @@ export namespace adb {
 	    notLaunched: string;
 	    suspended: string;
 	    instant: string;
-	    gids: string[];
-	    requestedPerms: string[];
-	    grantedPerms: GrantedPerm[];
+	    gids: string[] | null;
+	    requestedPerms: string[] | null;
+	    grantedPerms: GrantedPerm[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppDetail(source);
@@ -148,7 +190,7 @@ export namespace adb {
 	}
 	export class AppScripts {
 	    package: string;
-	    scriptIds: string[];
+	    scriptIds: string[] | null;
 	    mode: string;
 	    venvVer?: string;
 	
@@ -187,7 +229,7 @@ export namespace adb {
 	    profileName: string;
 	    serial: string;
 	    rooted: boolean;
-	    steps: StepResult[];
+	    steps: StepResult[] | null;
 	    needsReboot: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -406,6 +448,7 @@ export namespace adb {
 	    arch: string;
 	    root: boolean;
 	    rootMethod: string;
+	    rootPending: boolean;
 	    ip: string;
 	    wifi: string;
 	    mac: string;
@@ -434,6 +477,7 @@ export namespace adb {
 	        this.arch = source["arch"];
 	        this.root = source["root"];
 	        this.rootMethod = source["rootMethod"];
+	        this.rootPending = source["rootPending"];
 	        this.ip = source["ip"];
 	        this.wifi = source["wifi"];
 	        this.mac = source["mac"];
@@ -540,8 +584,8 @@ export namespace adb {
 	}
 	export class ForwardsStep {
 	    enabled: boolean;
-	    forwards: ForwardSpec[];
-	    reverses: ReverseSpec[];
+	    forwards: ForwardSpec[] | null;
+	    reverses: ReverseSpec[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new ForwardsStep(source);
@@ -577,7 +621,7 @@ export namespace adb {
 	    abiList: string;
 	    bits64: boolean;
 	    primary: string;
-	    supported: string[];
+	    supported: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaArchInfo(source);
@@ -596,8 +640,8 @@ export namespace adb {
 	    package: string;
 	    mode: string;
 	    runtimeVer: string;
-	    scriptIds: string[];
-	    scriptNames: string[];
+	    scriptIds: string[] | null;
+	    scriptNames: string[] | null;
 	    lastRun: number;
 	    count: number;
 	
@@ -669,6 +713,8 @@ export namespace adb {
 	    size: number;
 	    sha256: string;
 	    installed: boolean;
+	    advice: string;
+	    adviceNote?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaRelease(source);
@@ -682,6 +728,8 @@ export namespace adb {
 	        this.size = source["size"];
 	        this.sha256 = source["sha256"];
 	        this.installed = source["installed"];
+	        this.advice = source["advice"];
+	        this.adviceNote = source["adviceNote"];
 	    }
 	}
 	export class FridaRuntime {
@@ -750,6 +798,8 @@ export namespace adb {
 	    active: boolean;
 	    pid: number;
 	    port: number;
+	    ambiguous: boolean;
+	    runnable: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaServer(source);
@@ -766,6 +816,8 @@ export namespace adb {
 	        this.active = source["active"];
 	        this.pid = source["pid"];
 	        this.port = source["port"];
+	        this.ambiguous = source["ambiguous"];
+	        this.runnable = source["runnable"];
 	    }
 	}
 	export class FridaSessionInfo {
@@ -922,7 +974,7 @@ export namespace adb {
 	    policy: string;
 	    pkts: number;
 	    bytes: number;
-	    rules: IPTRule[];
+	    rules: IPTRule[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new IPTChain(source);
@@ -960,7 +1012,7 @@ export namespace adb {
 	    family: string;
 	    table: string;
 	    mode: string;
-	    chains: IPTChain[];
+	    chains: IPTChain[] | null;
 	    restore: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1078,7 +1130,7 @@ export namespace adb {
 	    name: string;
 	    bytes: number;
 	    offset: number;
-	    fields: LivePacketField[];
+	    fields: LivePacketField[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new LivePacketLayer(source);
@@ -1121,8 +1173,8 @@ export namespace adb {
 	    dstPort: number;
 	    proto: string;
 	    info: string;
-	    layers: string[];
-	    layersFull: LivePacketLayer[];
+	    layers: string[] | null;
+	    layersFull: LivePacketLayer[] | null;
 	    rawHex: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1186,12 +1238,12 @@ export namespace adb {
 	export class NetworkInfo {
 	    ip: string;
 	    gateway: string;
-	    dns: string[];
+	    dns: string[] | null;
 	    wifiSsid: string;
 	    wifiBssid: string;
 	    mac: string;
 	    proxy: string;
-	    interfaces: NetIface[];
+	    interfaces: NetIface[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new NetworkInfo(source);

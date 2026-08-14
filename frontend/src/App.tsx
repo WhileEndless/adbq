@@ -45,21 +45,38 @@ const ACCENTS = ['#a07cf7', '#7aa2ff', '#5ed29a', '#e9b454', '#ec6a73', '#c5a3ff
 
 // ErrorBoundary keeps a render crash from blanking the whole window (a black
 // screen with no recourse). It shows the error and a Reload affordance instead.
-class ErrorBoundary extends React.Component<{children: React.ReactNode}, {error: Error | null}> {
-  constructor(props: {children: React.ReactNode}) { super(props); this.state = {error: null}; }
+// The JS stack is minified in a release build and names nothing useful, so we
+// keep React's component stack too — that one survives minification and points
+// straight at the component that threw.
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, {error: Error | null; where: string}> {
+  constructor(props: {children: React.ReactNode}) { super(props); this.state = {error: null, where: ''}; }
   static getDerivedStateFromError(error: Error) { return {error}; }
-  componentDidCatch(error: Error, info: React.ErrorInfo) { console.error('UI crash:', error, info); }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('UI crash:', error, info);
+    this.setState({where: info.componentStack || ''});
+  }
   render() {
     if (this.state.error) {
+      const err = this.state.error;
+      const report = [
+        String(err?.message || err),
+        '',
+        String(err?.stack || ''),
+        '',
+        'Component stack:' + (this.state.where || ' (unavailable)'),
+      ].join('\n');
+      // The first "at X" line of the component stack is the failing component.
+      const culprit = (this.state.where.match(/\s*at\s+(\w+)/) || [])[1];
       return (
         <div style={{padding: 40, maxWidth: 640, color: 'var(--text)'}}>
-          <h2 style={{marginTop: 0}}>Something went wrong</h2>
-          <pre style={{whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--err)', fontSize: 12, background: 'var(--bg-inset)', padding: 12, borderRadius: 6}}>
-            {String(this.state.error?.stack || this.state.error?.message || this.state.error)}
+          <h2 style={{marginTop: 0}}>Something went wrong{culprit ? ` in ${culprit}` : ''}</h2>
+          <pre style={{whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--err)', fontSize: 12, background: 'var(--bg-inset)', padding: 12, borderRadius: 6, maxHeight: 260, overflow: 'auto'}}>
+            {report}
           </pre>
           <div style={{display: 'flex', gap: 8, marginTop: 14}}>
             <button className='btn primary' onClick={() => window.location.reload()}>Reload</button>
-            <button className='btn' onClick={() => this.setState({error: null})}>Dismiss</button>
+            <button className='btn' onClick={() => navigator.clipboard?.writeText(report)}>Copy report</button>
+            <button className='btn' onClick={() => this.setState({error: null, where: ''})}>Dismiss</button>
           </div>
         </div>
       );

@@ -16,7 +16,8 @@ interface UseTasksApi {
 export function useTasks(): UseTasksApi {
   const [tasks, setTasks] = useState<adb.TaskState[]>([]);
   useEffect(() => {
-    API.ListTasks().then(setTasks).catch(() => {});
+    // No tasks yet marshals as null, not [].
+    API.ListTasks().then(t => setTasks(t || [])).catch(() => {});
     EventsOn('task:update', (t: adb.TaskState) => {
       setTasks(prev => {
         const idx = prev.findIndex(x => x.id === t.id);

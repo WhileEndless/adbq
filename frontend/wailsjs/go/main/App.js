@@ -22,6 +22,10 @@ export function AndroidVersionMap() {
   return window['go']['main']['App']['AndroidVersionMap']();
 }
 
+export function ApkSetOf(arg1, arg2) {
+  return window['go']['main']['App']['ApkSetOf'](arg1, arg2);
+}
+
 export function AppIcon(arg1, arg2) {
   return window['go']['main']['App']['AppIcon'](arg1, arg2);
 }
@@ -162,6 +166,10 @@ export function ExportAPK(arg1, arg2) {
   return window['go']['main']['App']['ExportAPK'](arg1, arg2);
 }
 
+export function ExportApks(arg1, arg2) {
+  return window['go']['main']['App']['ExportApks'](arg1, arg2);
+}
+
 export function ExportAppDataWithPicker(arg1, arg2) {
   return window['go']['main']['App']['ExportAppDataWithPicker'](arg1, arg2);
 }
@@ -192,6 +200,10 @@ export function FridaHost() {
 
 export function FridaManagedEnabled() {
   return window['go']['main']['App']['FridaManagedEnabled']();
+}
+
+export function FridaServerLog(arg1, arg2) {
+  return window['go']['main']['App']['FridaServerLog'](arg1, arg2);
 }
 
 export function GetAppFridaScripts(arg1) {
@@ -248,6 +260,10 @@ export function InsertIptablesRule(arg1, arg2, arg3, arg4, arg5, arg6) {
 
 export function InstallAPKFromPath(arg1, arg2) {
   return window['go']['main']['App']['InstallAPKFromPath'](arg1, arg2);
+}
+
+export function InstallApkBundleFromPath(arg1, arg2) {
+  return window['go']['main']['App']['InstallApkBundleFromPath'](arg1, arg2);
 }
 
 export function InstallFridaServer(arg1, arg2, arg3) {
@@ -390,8 +406,16 @@ export function PickAndInstallAPK(arg1) {
   return window['go']['main']['App']['PickAndInstallAPK'](arg1);
 }
 
+export function PickApkFile() {
+  return window['go']['main']['App']['PickApkFile']();
+}
+
 export function PickExternalFridaInterpreter() {
   return window['go']['main']['App']['PickExternalFridaInterpreter']();
+}
+
+export function PlanApkInstall(arg1, arg2) {
+  return window['go']['main']['App']['PlanApkInstall'](arg1, arg2);
 }
 
 export function PlanTcpdumpAutoInstall(arg1) {
@@ -562,8 +586,8 @@ export function StartFrida(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['StartFrida'](arg1, arg2, arg3, arg4);
 }
 
-export function StartFridaSession(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['StartFridaSession'](arg1, arg2, arg3, arg4, arg5);
+export function StartFridaSession(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['StartFridaSession'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function StartLiveCapture(arg1, arg2, arg3, arg4) {

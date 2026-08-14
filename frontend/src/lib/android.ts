@@ -40,3 +40,16 @@ export function sdkLabel(level: string | undefined): string {
   const name = androidVersionForSdk(level);
   return name ? `${level} — ${name}` : level;
 }
+
+// rootUnavailableReason explains why a root-only action is blocked, so the UI
+// can tell "this device cannot be rooted" apart from "you have not approved the
+// prompt yet" — two situations that used to look identical because a pending
+// Magisk grant was reported as rooted and every call failed anyway.
+// Returns '' when root is available.
+export function rootUnavailableReason(device: {root?: boolean; rootPending?: boolean}): string {
+  if (device?.root) return '';
+  if (device?.rootPending) {
+    return 'A root manager is installed but has not granted access — approve the su prompt on the device, then retry.';
+  }
+  return 'This device is not rooted.';
+}

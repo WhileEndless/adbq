@@ -6,6 +6,7 @@ import {Icon} from '../icons';
 import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
+import {rootUnavailableReason} from '../lib/android';
 import {CodeEditor} from '../components/CodeEditor';
 
 export function FridaScreen({device}: {device: adb.Device}) {
@@ -15,6 +16,11 @@ export function FridaScreen({device}: {device: adb.Device}) {
   const [iface, setIface] = useState('0.0.0.0');
   const [starting, setStarting] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  // frida-server's own stdout/stderr, captured on the device per port. Empty
+  // means the last launch on that port was clean.
+  const [srvLog, setSrvLog] = useState('');
+  const [logOpen, setLogOpen] = useState(false);
+  const [listError, setListError] = useState('');
   const [tab, setTab] = useState<'server' | 'runtime' | 'scripts' | 'appscripts' | 'sessions'>('server');
   const sessionCount = Object.keys(store.fridaSessions).length;
 
@@ -57,10 +63,19 @@ export function FridaScreen({device}: {device: adb.Device}) {
   function changeArch(a: string) { setArch(a); loadReleases(a); }
 
   async function installVersion(r: adb.FridaRelease) {
+    // A build rated incompatible fails in a way that is hard to attribute later
+    // — it installs and starts fine, and only the agent inside the target app
+    // gives up — so say so before the download, not after.
+    const body = r.advice === 'broken'
+      ? `${r.adviceNote}\n\nInstall it anyway?`
+      : `adbq will download the official ${r.arch} build (${fmtMB(r.size)}) from GitHub, verify its SHA256, decompress it locally, and push it to /data/local/tmp.`;
     const ok = await confirmDialog({
-      title: `Install frida-server ${r.version}?`,
-      body: `adbq will download the official ${r.arch} build (${fmtMB(r.size)}) from GitHub, verify its SHA256, decompress it locally, and push it to /data/local/tmp.`,
-      confirmLabel: 'Download & install',
+      title: r.advice === 'broken'
+        ? `frida-server ${r.version} is not compatible with this device`
+        : `Install frida-server ${r.version}?`,
+      body,
+      confirmLabel: r.advice === 'broken' ? 'Install anyway' : 'Download & install',
+      danger: r.advice === 'broken',
     });
     if (!ok) return;
     setInstalling(r.version);
@@ -85,15 +100,30 @@ export function FridaScreen({device}: {device: adb.Device}) {
         return (b.version || '').localeCompare(a.version || '');
       });
       setServers(arr);
+      setListError('');
       const act = arr.find(x => x.active);
       if (act && act.port) setPort(act.port);
-    }).catch(e => showToast({title: 'Listing frida-server failed', body: String(e), kind: 'err'}));
+    }).catch(e => {
+      // Surface the failure in place instead of only as a toast: an empty list
+      // and an unreadable device used to look identical here.
+      setServers([]);
+      setListError(String(e));
+      showToast({title: 'Listing frida-server failed', body: String(e), kind: 'err'});
+    });
   };
-  useEffect(() => { reload(); }, [device?.id]);
+  // Logs are per-port, since a device can run several servers at once; show the
+  // one for the server in view (the running one, else the port about to be used).
+  const loadServerLog = (p?: number) => {
+    if (!device?.id) return Promise.resolve('');
+    return API.FridaServerLog(device.id, p ?? port)
+      .then(t => { setSrvLog(t || ''); return t || ''; })
+      .catch(() => { setSrvLog(''); return ''; });
+  };
+  useEffect(() => { reload(); loadServerLog(); }, [device?.id]);
 
   function start(s: adb.FridaServer) {
     if (!device.root) {
-      showToast({title: 'Root required', body: 'frida-server needs root to bind a privileged port', kind: 'err'});
+      showToast({title: 'Root required', body: `frida-server needs root. ${rootUnavailableReason(device)}`, kind: 'err'});
       return;
     }
     setStarting(s.name);
@@ -110,7 +140,16 @@ export function FridaScreen({device}: {device: adb.Device}) {
               setStarting(null);
               reload();
             } else if (tries >= 12) {
-              showToast({title: 'No active server detected', body: 'Check logcat for crashes; binary may not match the device arch.', kind: 'err'});
+              // The server's own output says why far more reliably than logcat.
+              loadServerLog(port).then(log => {
+                const first = (log || '').split('\n').find(l => l.trim()) || '';
+                setLogOpen(!!first);
+                showToast({
+                  title: 'No active server detected',
+                  body: first || 'The server left no output — the binary may not match the device architecture.',
+                  kind: 'err', mono: !!first,
+                });
+              });
               setStarting(null);
               reload();
             } else {
@@ -120,7 +159,13 @@ export function FridaScreen({device}: {device: adb.Device}) {
         };
         setTimeout(check, 500);
       })
-      .catch(e => { setStarting(null); showToast({title: 'Start failed', body: String(e), kind: 'err'}); });
+      .catch(e => {
+        setStarting(null);
+        // The backend already folds the device-side log into this error, so the
+        // message is the real cause rather than a generic failure.
+        loadServerLog(port).then(log => setLogOpen(!!log.trim()));
+        showToast({title: 'Start failed', body: String(e), kind: 'err', mono: true});
+      });
   }
   async function stop() {
     const ok = await confirmDialog({title: 'Stop frida-server?', body: 'The running session and all attached scripts will be terminated.', confirmLabel: 'Stop', danger: true});
@@ -198,21 +243,67 @@ export function FridaScreen({device}: {device: adb.Device}) {
                 <div className='muted' style={{fontSize: 11, marginTop: 8}}>
                   Connect from host: <span className='mono'>frida-ps -H {device.ip || '127.0.0.1'}:{active.port}</span>
                 </div>
+                {active.port !== 27042 && (
+                  <div className='muted' style={{fontSize: 11, marginTop: 4}}>
+                    Frida's Android backend only dials <span className='mono'>27042</span>, so adbq reaches this
+                    server through an <span className='mono'>adb forward</span> it opens for the duration of each
+                    session. Sessions work as usual; an external <span className='mono'>frida -U</span> will not see it.
+                  </div>
+                )}
               </>
             ) : (
               <div className='muted' style={{fontSize: 12}}>
                 Pick a binary below and click <strong>Start</strong>. Interface defaults to <span className='mono'>0.0.0.0</span>, port <span className='mono'>{port}</span>.
+                {port !== 27042 && <div style={{marginTop: 4}}>
+                  Off the default port, adbq forwards the port per session so instrumentation still works.
+                </div>}
                 {!device.root && <div style={{marginTop: 6, color: 'var(--warn)'}}>
-                  This device is unrooted — frida-server cannot bind; use frida-gadget (LD_PRELOAD via repackaging) instead.
+                  {rootUnavailableReason(device)} frida-server cannot bind without root
+                  — use frida-gadget (LD_PRELOAD via repackaging) instead.
                 </div>}
               </div>
             )}
           </div>
         </div>
 
+        {/* Server log — frida-server writes here only when something went wrong,
+            so an empty log is the healthy state and the panel stays collapsed. */}
+        <div className='card' style={{marginBottom: 14}}>
+          <div className='card-header' style={{cursor: 'pointer'}} onClick={() => { setLogOpen(o => !o); if (!logOpen) loadServerLog(active?.port || port); }}>
+            <span className='title'>Server log</span>
+            {srvLog.trim()
+              ? <Badge kind='warn'>output</Badge>
+              : <span className='muted' style={{fontSize: 11}}>clean</span>}
+            <div style={{flex: 1}}/>
+            <button className='btn sm' onClick={e => { e.stopPropagation(); loadServerLog(active?.port || port); setLogOpen(true); }}>
+              <Icon.Refresh width={12} height={12}/>
+            </button>
+          </div>
+          {logOpen && (
+            <div className='card-body'>
+              {srvLog.trim() ? (
+                <pre className='mono' style={{fontSize: 11, margin: 0, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap'}}>{srvLog}</pre>
+              ) : (
+                <div className='muted' style={{fontSize: 12}}>
+                  Nothing logged — the last launch was clean. Failures (SELinux denial, busy port,
+                  architecture mismatch, an agent that cannot map this Android's ART) show up here.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Binaries list */}
         <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
-          {servers.length === 0 && (
+          {/* "we could not ask" is not the same answer as "nothing is installed",
+              and offering to push a binary in the first case is misleading. */}
+          {listError ? (
+            <div className='card' style={{padding: 16, textAlign: 'center'}}>
+              <div style={{color: 'var(--warn)', marginBottom: 6}}>Could not list frida-server binaries.</div>
+              <div className='mono subtle' style={{fontSize: 11, marginBottom: 8}}>{listError}</div>
+              <button className='btn' onClick={reload}><Icon.Refresh/>Retry</button>
+            </div>
+          ) : servers.length === 0 && (
             <div className='card' style={{padding: 16, textAlign: 'center'}}>
               <div className='muted' style={{marginBottom: 6}}>No frida-server binary in /data/local/tmp.</div>
               <button className='btn primary' onClick={pushBinary}><Icon.Upload/>Push one</button>
@@ -225,6 +316,12 @@ export function FridaScreen({device}: {device: adb.Device}) {
                   <strong>{s.version || s.name}</strong>
                   {s.arch && <Badge>{s.arch}</Badge>}
                   {s.active && <Badge kind='accent'>PID {s.pid} · :{s.port}</Badge>}
+                  {!s.active && s.ambiguous && (
+                    <span title='A frida-server is running, but without root we cannot tell which of these binaries it is'>
+                      <Badge kind='warn'>maybe running</Badge>
+                    </span>
+                  )}
+                  {!s.runnable && <Badge kind='warn'>not runnable</Badge>}
                 </div>
                 <div className='filename'>{s.path} · {(s.size / 1024 / 1024).toFixed(1)} MB · {s.perms}</div>
               </div>
@@ -233,7 +330,9 @@ export function FridaScreen({device}: {device: adb.Device}) {
               <div style={{display: 'flex', gap: 4}}>
                 {s.active
                   ? <button className='btn sm danger' onClick={stop} disabled={stopping}>{stopping ? '…stopping' : <><Icon.Stop/>Stop</>}</button>
-                  : <button className='btn sm primary' onClick={() => start(s)} disabled={!device.root || !!starting}>
+                  : <button className='btn sm primary' onClick={() => start(s)}
+                      disabled={!device.root || !!starting || !s.runnable}
+                      title={s.runnable ? undefined : 'This file is an archive or has no execute bit — it cannot be launched'}>
                       {starting === s.name ? '…starting' : <><Icon.Play/>Start</>}
                     </button>}
                 <button className='btn sm danger' title='Delete binary' onClick={() => removeBinary(s)}>
@@ -315,8 +414,18 @@ export function FridaScreen({device}: {device: adb.Device}) {
                     <strong>{r.version}</strong>
                     <Badge>{r.arch}</Badge>
                     {r.installed && <Badge kind='ok'>installed</Badge>}
+                    {/* Some published builds cannot work on this device's Android
+                        at all, and the failure is invisible from the outside —
+                        the server starts and only the agent inside the app fails. */}
+                    {r.advice === 'broken' && <Badge kind='err'>not compatible</Badge>}
+                    {r.advice === 'warn' && <Badge kind='warn'>may not work</Badge>}
                   </div>
                   <div className='filename'>frida-server-{r.version}-android-{r.arch}.xz · {fmtMB(r.size)}</div>
+                  {r.adviceNote && (
+                    <div style={{fontSize: 11, marginTop: 3, color: r.advice === 'broken' ? 'var(--err)' : 'var(--warn)'}}>
+                      {r.adviceNote}
+                    </div>
+                  )}
                 </div>
                 <div style={{flex: 1}}/>
                 {r.installed
@@ -828,7 +937,11 @@ function FridaSessionsTab({device}: {device: adb.Device}) {
     if (!device?.id) { showToast({title: 'No device', body: 'Connect a device first', kind: 'err'}); return; }
     setRepeating(h.package);
     try {
-      const info = await store.startFridaSession(device.id, h.package, h.mode, h.runtimeVer, h.scriptIds || []);
+      // Repeat a past launch against whatever server is up now, on its own port
+      // — it may not be the one (or the port) the original run used.
+      const list = await API.ListFridaServers(device.id).catch(() => [] as adb.FridaServer[]);
+      const active = (list || []).find(x => x.active);
+      const info = await store.startFridaSession(device.id, h.package, h.mode, h.runtimeVer, active?.port || 0, h.scriptIds || []);
       setSelId(info.id);
       loadHistory();
     } catch (e) {

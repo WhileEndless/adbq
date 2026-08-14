@@ -7,5 +7,7 @@ Bu klasör projenin geliştirme rehberlerini içerir.
 - [tray-and-background.md](tray-and-background.md) — System tray, macOS menü bar, "X = gizle" davranışı.
 - [frida-manager.md](frida-manager.md) — Host frida runtime'ları (venv/BYO), script kütüphanesi, CodeShare, canlı oturumlar.
 - [compatibility-roadmap.md](compatibility-roadmap.md) — Eski/minimal Android (API 21-26) uyumluluk planı.
+- [command-visibility.md](command-visibility.md) — Çalıştırılan adb komutunun UI'da gösterilmesi: kural, desen, envanter, fazlı plan.
+- [apk-export-install.md](apk-export-install.md) — Split APK (App Bundle) dışa aktarma (`.apks`) ve geri kurma.
 
 Bağlayıcı kurallar için: [`../CLAUDE.md`](../CLAUDE.md).
