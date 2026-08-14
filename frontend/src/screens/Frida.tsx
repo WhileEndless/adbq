@@ -63,10 +63,19 @@ export function FridaScreen({device}: {device: adb.Device}) {
   function changeArch(a: string) { setArch(a); loadReleases(a); }
 
   async function installVersion(r: adb.FridaRelease) {
+    // A build rated incompatible fails in a way that is hard to attribute later
+    // — it installs and starts fine, and only the agent inside the target app
+    // gives up — so say so before the download, not after.
+    const body = r.advice === 'broken'
+      ? `${r.adviceNote}\n\nInstall it anyway?`
+      : `adbq will download the official ${r.arch} build (${fmtMB(r.size)}) from GitHub, verify its SHA256, decompress it locally, and push it to /data/local/tmp.`;
     const ok = await confirmDialog({
-      title: `Install frida-server ${r.version}?`,
-      body: `adbq will download the official ${r.arch} build (${fmtMB(r.size)}) from GitHub, verify its SHA256, decompress it locally, and push it to /data/local/tmp.`,
-      confirmLabel: 'Download & install',
+      title: r.advice === 'broken'
+        ? `frida-server ${r.version} is not compatible with this device`
+        : `Install frida-server ${r.version}?`,
+      body,
+      confirmLabel: r.advice === 'broken' ? 'Install anyway' : 'Download & install',
+      danger: r.advice === 'broken',
     });
     if (!ok) return;
     setInstalling(r.version);
@@ -405,8 +414,18 @@ export function FridaScreen({device}: {device: adb.Device}) {
                     <strong>{r.version}</strong>
                     <Badge>{r.arch}</Badge>
                     {r.installed && <Badge kind='ok'>installed</Badge>}
+                    {/* Some published builds cannot work on this device's Android
+                        at all, and the failure is invisible from the outside —
+                        the server starts and only the agent inside the app fails. */}
+                    {r.advice === 'broken' && <Badge kind='err'>not compatible</Badge>}
+                    {r.advice === 'warn' && <Badge kind='warn'>may not work</Badge>}
                   </div>
                   <div className='filename'>frida-server-{r.version}-android-{r.arch}.xz · {fmtMB(r.size)}</div>
+                  {r.adviceNote && (
+                    <div style={{fontSize: 11, marginTop: 3, color: r.advice === 'broken' ? 'var(--err)' : 'var(--warn)'}}>
+                      {r.adviceNote}
+                    </div>
+                  )}
                 </div>
                 <div style={{flex: 1}}/>
                 {r.installed

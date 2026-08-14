@@ -215,13 +215,31 @@ def main():
     session = None
 
     def fail_protocol_or(err, e):
-        # A client/server version mismatch surfaces as a ProtocolError whose
-        # message mentions matching major versions; flag it distinctly so the UI
-        # can offer a one-click rebuild of a matching venv.
+        # frida's own wording for these is accurate but says nothing about what
+        # to do, and in two cases actively misleads. Translate the ones we have
+        # seen; anything else is passed through unchanged.
         msg = str(e)
-        if "major version" in msg or "unable to communicate" in msg:
+        low = msg.lower()
+        if "major version" in low or "unable to communicate" in low:
+            # A client/server version mismatch. Flagged distinctly so the UI can
+            # offer a one-click rebuild of a matching venv.
             emit({"type": "fatal", "error": "version-mismatch", "detail": msg,
                   "clientVersion": getattr(frida, "__version__", "")})
+        elif "need gadget to attach" in low:
+            # frida says this when it found the device but no server answered —
+            # which reads as "you must use Gadget" when the real cause is that
+            # frida-server is not running, or is listening somewhere frida is not
+            # looking (it only ever dials its default port on Android).
+            emit({"type": "fatal", "error": "no-server",
+                  "detail": "no frida-server answered on port %s — start one in Frida → Server, "
+                            "or check it is listening on the port this session was told to use (%s)"
+                            % (job.get("port") or "?", msg)})
+        elif "vm heap candidates" in low:
+            # Reported by frida-server builds that cannot map this device's ART
+            # (frida-core#1214, seen on emulators). The version is the variable.
+            emit({"type": "fatal", "error": "incompatible-server",
+                  "detail": "this frida-server build cannot instrument this device — "
+                            "try a different version in Frida → Server (%s)" % msg})
         else:
             emit({"type": "fatal", "error": err, "detail": msg})
 

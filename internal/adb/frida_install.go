@@ -37,6 +37,11 @@ type FridaRelease struct {
 	Size      int64  `json:"size"`
 	SHA256    string `json:"sha256"`    // from GitHub asset digest; "" when unavailable
 	Installed bool   `json:"installed"` // already present in /data/local/tmp
+	// Advice rates this version against the device's Android level:
+	// "ok" | "warn" | "broken" ("" when the device or version is unknown).
+	// AdviceNote explains anything that isn't "ok".
+	Advice     string `json:"advice"`
+	AdviceNote string `json:"adviceNote,omitempty"`
 }
 
 // fridaArchForABI maps a device ABI (ro.product.cpu.abi) to the frida-server
@@ -143,6 +148,10 @@ func (c *Client) ListFridaReleases(ctx context.Context, serial, arch string) ([]
 		return nil, err
 	}
 
+	// The device's API level decides which versions are worth offering — some
+	// published builds cannot work on older Android at all (see FridaAdvice).
+	sdk := c.Capabilities(ctx, serial).SDK
+
 	// Versions already on the device (best-effort; absence just means none flagged).
 	installed := map[string]bool{}
 	if servers, err := c.ListFridaServers(ctx, serial); err == nil {
@@ -163,13 +172,16 @@ func (c *Client) ListFridaReleases(ctx context.Context, serial, arch string) ([]
 			if !strings.HasPrefix(a.Name, "frida-server-") || !strings.HasSuffix(a.Name, wantSuffix) {
 				continue
 			}
+			advice, note := FridaAdvice(sdk, ver)
 			out = append(out, FridaRelease{
-				Version:   ver,
-				Arch:      arch,
-				AssetURL:  a.URL,
-				Size:      a.Size,
-				SHA256:    strings.TrimPrefix(a.Digest, "sha256:"),
-				Installed: installed[ver+"|"+arch],
+				Version:    ver,
+				Arch:       arch,
+				AssetURL:   a.URL,
+				Size:       a.Size,
+				SHA256:     strings.TrimPrefix(a.Digest, "sha256:"),
+				Installed:  installed[ver+"|"+arch],
+				Advice:     advice,
+				AdviceNote: note,
 			})
 			break
 		}

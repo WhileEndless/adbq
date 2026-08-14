@@ -671,6 +671,8 @@ export namespace adb {
 	    size: number;
 	    sha256: string;
 	    installed: boolean;
+	    advice: string;
+	    adviceNote?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaRelease(source);
@@ -684,6 +686,8 @@ export namespace adb {
 	        this.size = source["size"];
 	        this.sha256 = source["sha256"];
 	        this.installed = source["installed"];
+	        this.advice = source["advice"];
+	        this.adviceNote = source["adviceNote"];
 	    }
 	}
 	export class FridaRuntime {
