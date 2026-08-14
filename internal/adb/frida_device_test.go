@@ -65,21 +65,32 @@ func TestListFridaServers_Probe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListFridaServers: %v", err)
 	}
-	active := 0
+	seenPorts := map[int]string{}
 	for _, s := range servers {
-		t.Logf("  %-42s ver=%-9s arch=%-7s active=%v pid=%d port=%d perms=%s",
-			s.Name, s.Version, s.Arch, s.Active, s.PID, s.Port, s.Perms)
+		t.Logf("  %-42s ver=%-9s arch=%-7s active=%v pid=%d port=%d runnable=%v ambiguous=%v perms=%s",
+			s.Name, s.Version, s.Arch, s.Active, s.PID, s.Port, s.Runnable, s.Ambiguous, s.Perms)
+
+		// Download artifacts share the directory and match the same glob. They
+		// may be listed — the user can still delete them — but must never be
+		// offered as something to launch.
 		for _, ext := range []string{".xz", ".gz", ".zip", ".bz2"} {
-			if strings.HasSuffix(s.Name, ext) {
-				t.Errorf("archive listed as a launchable server: %s", s.Name)
+			if strings.HasSuffix(s.Name, ext) && s.Runnable {
+				t.Errorf("archive %s reported as runnable", s.Name)
 			}
 		}
-		if s.Active {
-			active++
+		if !s.Active {
+			continue
 		}
-	}
-	if active > 1 {
-		t.Errorf("%d servers reported active at once; at most one can be", active)
+		// Two servers cannot share a port, so a repeated port means one process
+		// was matched to several binaries — the bug that made the UI claim two
+		// servers were running at once.
+		if other, dup := seenPorts[s.Port]; dup {
+			t.Errorf("%s and %s both reported active on port %d", other, s.Name, s.Port)
+		}
+		seenPorts[s.Port] = s.Name
+		if s.Port == 0 {
+			t.Errorf("%s is active but reports no port", s.Name)
+		}
 	}
 
 	ver, err := c.DetectRunningFridaVersion(ctx, serial)

@@ -194,8 +194,8 @@ export function FridaManagedEnabled() {
   return window['go']['main']['App']['FridaManagedEnabled']();
 }
 
-export function FridaServerLog(arg1) {
-  return window['go']['main']['App']['FridaServerLog'](arg1);
+export function FridaServerLog(arg1, arg2) {
+  return window['go']['main']['App']['FridaServerLog'](arg1, arg2);
 }
 
 export function GetAppFridaScripts(arg1) {

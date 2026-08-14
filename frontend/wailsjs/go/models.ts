@@ -752,6 +752,8 @@ export namespace adb {
 	    active: boolean;
 	    pid: number;
 	    port: number;
+	    ambiguous: boolean;
+	    runnable: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaServer(source);
@@ -768,6 +770,8 @@ export namespace adb {
 	        this.active = source["active"];
 	        this.pid = source["pid"];
 	        this.port = source["port"];
+	        this.ambiguous = source["ambiguous"];
+	        this.runnable = source["runnable"];
 	    }
 	}
 	export class FridaSessionInfo {

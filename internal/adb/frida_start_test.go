@@ -71,7 +71,22 @@ func TestFridaStartFailureIgnoresSurvivableAgentFault(t *testing.T) {
 // on the substring "frida-server" — so a log named after it would show up as a
 // launchable binary in the UI.
 func TestFridaServerLogPathIsNotMistakenForAServer(t *testing.T) {
-	if strings.Contains(FridaServerLogPath, "frida-server") {
-		t.Errorf("%s would be picked up by the frida-server inventory glob", FridaServerLogPath)
+	for _, port := range []int{0, 27042, 27043} {
+		if p := fridaServerLogPath(port); strings.Contains(p, "frida-server") {
+			t.Errorf("%s would be picked up by the frida-server inventory glob", p)
+		}
+	}
+}
+
+// Two frida-servers can run on one device at once — on different ports, since
+// they cannot share one. A single shared log would have each launch truncate the
+// other's diagnostics and then interleave their output, so the path is keyed by
+// port, with an unset port meaning frida's default.
+func TestFridaServerLogPathIsPerPort(t *testing.T) {
+	if a, b := fridaServerLogPath(27042), fridaServerLogPath(27043); a == b {
+		t.Errorf("servers on different ports share the log path %s", a)
+	}
+	if a, b := fridaServerLogPath(0), fridaServerLogPath(FridaDefaultPort); a != b {
+		t.Errorf("unset port %s should resolve to the default port's log %s", a, b)
 	}
 }

@@ -1137,11 +1137,12 @@ func (a *App) StartFrida(serial, path, iface string, port int) (string, error) {
 	return out, err
 }
 
-// FridaServerLog returns what the device's frida-server printed on its last
-// launch. Empty output means it started cleanly — the server only writes here
-// when something went wrong.
-func (a *App) FridaServerLog(serial string) (string, error) {
-	return a.client.FridaServerLog(a.ctx, serial)
+// FridaServerLog returns what the frida-server on the given port printed on its
+// last launch. Empty output means it started cleanly — the server only writes
+// here when something went wrong. Logs are per-port because a device can run
+// several servers at once. Pass 0 for frida's default port.
+func (a *App) FridaServerLog(serial string, port int) (string, error) {
+	return a.client.FridaServerLog(a.ctx, serial, port)
 }
 func (a *App) ListPackageUIDs(serial string) (map[int]string, error) {
 	return a.client.ListPackageUIDs(a.ctx, serial)
