@@ -2,6 +2,7 @@ package adb
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,5 +242,18 @@ func TestInstallMultipleErrExplainsCommonFailures(t *testing.T) {
 	}
 	if err := installMultipleErr("Success\n", nil); err != nil {
 		t.Errorf("a successful install must not error: %v", err)
+	}
+}
+
+func TestApkSetMarshalsEmptySlicesNotNull(t *testing.T) {
+	// A nil Go slice marshals as JSON null while the generated TS type says
+	// string[], so the UI crashed reading .length off it. Non-split apps are
+	// the case that produced no splits at all.
+	b, err := json.Marshal(apkSetFromPaths("SER", "com.x", []string{"/data/app/com.x-1/base.apk"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "null") {
+		t.Errorf("ApkSet must not marshal any field as null: %s", b)
 	}
 }

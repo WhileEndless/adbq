@@ -406,8 +406,10 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
     return () => { live = false; };
   }, [device.id, pkg]);
 
+  // Go marshals a nil slice as JSON null, so never read .length off these directly.
+  const splits = set?.splits ?? [];
   const split = !!set?.split;
-  const count = set ? set.splits.length + 1 : 0;
+  const count = set ? splits.length + 1 : 0;
 
   async function pickAndInstall() {
     setBusy(true);
@@ -421,15 +423,15 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
           <div style={{fontSize: 12}}>
             <div style={{marginBottom: 6}}>
               {plan.split
-                ? `${plan.install.length} APKs will be committed in one pm session.`
+                ? `${plan.install?.length ?? 0} APKs will be committed in one pm session.`
                 : 'A single APK will be installed.'}
             </div>
-            <CodeBlock multiline>{plan.commands.join('\n')}</CodeBlock>
-            {plan.skipped?.length > 0 && (
+            <CodeBlock multiline>{(plan.commands ?? []).join('\n')}</CodeBlock>
+            {(plan.skipped?.length ?? 0) > 0 && (
               <div className='muted' style={{marginTop: 8}}>
                 Not installed on this device:
                 <ul style={{margin: '4px 0 0 16px', padding: 0}}>
-                  {plan.skipped.map(s => <li key={s}>{s}</li>)}
+                  {(plan.skipped ?? []).map(s => <li key={s}>{s}</li>)}
                 </ul>
               </div>
             )}
@@ -457,7 +459,7 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
             <span className='app-detail-k'>Layout</span>
             <span className='app-detail-v'>
               {split
-                ? <>App Bundle · base + {set.splits.length} split APK(s)</>
+                ? <>App Bundle · base + {splits.length} split APK(s)</>
                 : <>Single APK</>}
             </span>
           </div>
@@ -480,7 +482,7 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
           )}
           <div style={{marginTop: 10, fontSize: 11}}>
             <span className='muted'>Underlying command (click to copy):</span>{' '}
-            <CodeBlock multiline>{set.commands.join('\n')}</CodeBlock>
+            <CodeBlock multiline>{(set.commands ?? []).join('\n')}</CodeBlock>
           </div>
         </>
       )}

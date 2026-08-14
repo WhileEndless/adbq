@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "node scripts/nullable-bindings.mjs && vite",
+    "build": "node scripts/nullable-bindings.mjs && tsc && vite build",
+    "bindings": "node scripts/nullable-bindings.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

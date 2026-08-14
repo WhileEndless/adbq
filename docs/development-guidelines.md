@@ -88,6 +88,39 @@ govulncheck ./...
 - Go fonksiyonları `frontend/wailsjs/go/...` altına otomatik üretilir; bu dosyalar **el ile düzenlenmez** ve commit'lenir ki frontend tipleri çalışsın.
 - Frontend'de `import { FonksiyonAdi } from "../wailsjs/go/main/App"` şeklinde tüketilir.
 
+### 3.2.1. `nil` dilim tuzağı — JSON `null` (bilinen crash sınıfı)
+
+Go'da **nil bir slice `null` olarak marshal edilir**, `[]` olarak değil. Ama
+`wails generate module` bu alanı TS'te düz `string[]` olarak yazar. Sonuç:
+`set.splits.length` tip denetiminden geçer ve **çalışma anında** `TypeError`
+ile ekranı düşürür. Üretim build'inde stack minified olduğu için de teşhis
+edilmesi zordur. (Gerçek örnek: split olmayan bir uygulamaya tıklandığında
+Apps ekranının çökmesi.)
+
+İki katmanlı savunma — ikisi de zorunlu:
+
+1. **Backend**: UI'ya dönen struct'larda dilim/harita alanları **boş ama var**
+   olmalı (`[]string{}`). Saf kurucu fonksiyonlar için testte doğrula:
+   `json.Marshal` çıktısında `null` geçmemeli
+   (`TestApkSetMarshalsEmptySlicesNotNull` örnek).
+2. **Frontend**: `frontend/scripts/nullable-bindings.mjs` üretilen bindings'i
+   yeniden tipler — struct dilim alanları `T[] | null`, binding dönüşleri
+   `Promise<Array<T> | null>` olur. `strict` mod açık olduğu için korumasız
+   her okuma **derleme hatası**na dönüşür. Script `npm run dev` ve
+   `npm run build` öncesinde çalışır (Wails bindings'i kendi başına yeniden
+   ürettiği için idempotent ve her seferinde uygulanır); elle çalıştırmak
+   için `npm run bindings`.
+
+Kural: bir dizi alanını okurken `?? []` / `|| []` kullan; `.length`, `.map`,
+`.join` doğrudan çağrılmaz.
+
+### 3.2.2. Çökme raporu
+
+`App.tsx: ErrorBoundary` React'in **component stack**'ini de saklar; minify
+edilmiş JS stack'i işe yaramazken bu, hatayı fırlatan bileşenin adını verir.
+Başlıkta bileşen adı gösterilir, "Copy report" ile tam rapor kopyalanır.
+Bir kullanıcı çökme bildirdiğinde istenecek şey budur.
+
 ### 3.3. Performans
 
 - Wails native webview kullanır; ana iş parçacığını JS ile bloke etme.

@@ -2,10 +2,10 @@ export namespace adb {
 	
 	export class ApkInstallPlan {
 	    file: string;
-	    install: string[];
-	    skipped: string[];
+	    install: string[] | null;
+	    skipped: string[] | null;
 	    split: boolean;
-	    commands: string[];
+	    commands: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new ApkInstallPlan(source);
@@ -23,10 +23,10 @@ export namespace adb {
 	export class ApkSet {
 	    pkg: string;
 	    base: string;
-	    splits: string[];
+	    splits: string[] | null;
 	    split: boolean;
 	    suggested: string;
-	    commands: string[];
+	    commands: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new ApkSet(source);
@@ -98,10 +98,10 @@ export namespace adb {
 	    installLocation: string;
 	    primaryAbi: string;
 	    secondaryAbi: string;
-	    splits: string[];
-	    flags: string[];
-	    privateFlags: string[];
-	    supportsScreens: string[];
+	    splits: string[] | null;
+	    flags: string[] | null;
+	    privateFlags: string[] | null;
+	    supportsScreens: string[] | null;
 	    signature: string;
 	    apkSigningVersion: string;
 	    enabled: string;
@@ -110,9 +110,9 @@ export namespace adb {
 	    notLaunched: string;
 	    suspended: string;
 	    instant: string;
-	    gids: string[];
-	    requestedPerms: string[];
-	    grantedPerms: GrantedPerm[];
+	    gids: string[] | null;
+	    requestedPerms: string[] | null;
+	    grantedPerms: GrantedPerm[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppDetail(source);
@@ -190,7 +190,7 @@ export namespace adb {
 	}
 	export class AppScripts {
 	    package: string;
-	    scriptIds: string[];
+	    scriptIds: string[] | null;
 	    mode: string;
 	    venvVer?: string;
 	
@@ -229,7 +229,7 @@ export namespace adb {
 	    profileName: string;
 	    serial: string;
 	    rooted: boolean;
-	    steps: StepResult[];
+	    steps: StepResult[] | null;
 	    needsReboot: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -584,8 +584,8 @@ export namespace adb {
 	}
 	export class ForwardsStep {
 	    enabled: boolean;
-	    forwards: ForwardSpec[];
-	    reverses: ReverseSpec[];
+	    forwards: ForwardSpec[] | null;
+	    reverses: ReverseSpec[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new ForwardsStep(source);
@@ -621,7 +621,7 @@ export namespace adb {
 	    abiList: string;
 	    bits64: boolean;
 	    primary: string;
-	    supported: string[];
+	    supported: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaArchInfo(source);
@@ -640,8 +640,8 @@ export namespace adb {
 	    package: string;
 	    mode: string;
 	    runtimeVer: string;
-	    scriptIds: string[];
-	    scriptNames: string[];
+	    scriptIds: string[] | null;
+	    scriptNames: string[] | null;
 	    lastRun: number;
 	    count: number;
 	
@@ -974,7 +974,7 @@ export namespace adb {
 	    policy: string;
 	    pkts: number;
 	    bytes: number;
-	    rules: IPTRule[];
+	    rules: IPTRule[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new IPTChain(source);
@@ -1012,7 +1012,7 @@ export namespace adb {
 	    family: string;
 	    table: string;
 	    mode: string;
-	    chains: IPTChain[];
+	    chains: IPTChain[] | null;
 	    restore: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1130,7 +1130,7 @@ export namespace adb {
 	    name: string;
 	    bytes: number;
 	    offset: number;
-	    fields: LivePacketField[];
+	    fields: LivePacketField[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new LivePacketLayer(source);
@@ -1173,8 +1173,8 @@ export namespace adb {
 	    dstPort: number;
 	    proto: string;
 	    info: string;
-	    layers: string[];
-	    layersFull: LivePacketLayer[];
+	    layers: string[] | null;
+	    layersFull: LivePacketLayer[] | null;
 	    rawHex: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1238,12 +1238,12 @@ export namespace adb {
 	export class NetworkInfo {
 	    ip: string;
 	    gateway: string;
-	    dns: string[];
+	    dns: string[] | null;
 	    wifiSsid: string;
 	    wifiBssid: string;
 	    mac: string;
 	    proxy: string;
-	    interfaces: NetIface[];
+	    interfaces: NetIface[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new NetworkInfo(source);

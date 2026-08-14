@@ -68,6 +68,11 @@ func (c *Client) ApkSetOf(ctx context.Context, serial, pkg string) (*ApkSet, err
 // unit-tested without a device.
 func apkSetFromPaths(serial, pkg string, paths []string) *ApkSet {
 	base, splits := baseAndSplits(paths)
+	// A nil slice marshals to JSON null, and the UI reads .length off these —
+	// keep every slice field empty-but-present.
+	if splits == nil {
+		splits = []string{}
+	}
 	s := &ApkSet{Pkg: pkg, Base: base, Splits: splits, Split: len(splits) > 0}
 	s.Suggested = pkg + ".apk"
 	if s.Split {
@@ -254,6 +259,7 @@ func (c *Client) PlanApkInstall(ctx context.Context, serial, localPath string) (
 		return &ApkInstallPlan{
 			File:     localPath,
 			Install:  []string{filepath.Base(localPath)},
+			Skipped:  []string{},
 			Commands: []string{"adb -s " + serial + " install -r " + shellQuoteLocal(localPath)},
 		}, nil
 	}
