@@ -15,6 +15,10 @@ export function FridaScreen({device}: {device: adb.Device}) {
   const [iface, setIface] = useState('0.0.0.0');
   const [starting, setStarting] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  // frida-server's own stdout/stderr, captured on the device (see
+  // FridaServerLogPath). Empty means the last launch was clean.
+  const [srvLog, setSrvLog] = useState('');
+  const [logOpen, setLogOpen] = useState(false);
   const [tab, setTab] = useState<'server' | 'runtime' | 'scripts' | 'appscripts' | 'sessions'>('server');
   const sessionCount = Object.keys(store.fridaSessions).length;
 
@@ -89,7 +93,13 @@ export function FridaScreen({device}: {device: adb.Device}) {
       if (act && act.port) setPort(act.port);
     }).catch(e => showToast({title: 'Listing frida-server failed', body: String(e), kind: 'err'}));
   };
-  useEffect(() => { reload(); }, [device?.id]);
+  const loadServerLog = () => {
+    if (!device?.id) return Promise.resolve('');
+    return API.FridaServerLog(device.id)
+      .then(t => { setSrvLog(t || ''); return t || ''; })
+      .catch(() => { setSrvLog(''); return ''; });
+  };
+  useEffect(() => { reload(); loadServerLog(); }, [device?.id]);
 
   function start(s: adb.FridaServer) {
     if (!device.root) {
@@ -110,7 +120,16 @@ export function FridaScreen({device}: {device: adb.Device}) {
               setStarting(null);
               reload();
             } else if (tries >= 12) {
-              showToast({title: 'No active server detected', body: 'Check logcat for crashes; binary may not match the device arch.', kind: 'err'});
+              // The server's own output says why far more reliably than logcat.
+              loadServerLog().then(log => {
+                const first = (log || '').split('\n').find(l => l.trim()) || '';
+                setLogOpen(!!first);
+                showToast({
+                  title: 'No active server detected',
+                  body: first || 'The server left no output — the binary may not match the device architecture.',
+                  kind: 'err', mono: !!first,
+                });
+              });
               setStarting(null);
               reload();
             } else {
@@ -120,7 +139,13 @@ export function FridaScreen({device}: {device: adb.Device}) {
         };
         setTimeout(check, 500);
       })
-      .catch(e => { setStarting(null); showToast({title: 'Start failed', body: String(e), kind: 'err'}); });
+      .catch(e => {
+        setStarting(null);
+        // The backend already folds the device-side log into this error, so the
+        // message is the real cause rather than a generic failure.
+        loadServerLog().then(log => setLogOpen(!!log.trim()));
+        showToast({title: 'Start failed', body: String(e), kind: 'err', mono: true});
+      });
   }
   async function stop() {
     const ok = await confirmDialog({title: 'Stop frida-server?', body: 'The running session and all attached scripts will be terminated.', confirmLabel: 'Stop', danger: true});
@@ -208,6 +233,33 @@ export function FridaScreen({device}: {device: adb.Device}) {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Server log — frida-server writes here only when something went wrong,
+            so an empty log is the healthy state and the panel stays collapsed. */}
+        <div className='card' style={{marginBottom: 14}}>
+          <div className='card-header' style={{cursor: 'pointer'}} onClick={() => { setLogOpen(o => !o); if (!logOpen) loadServerLog(); }}>
+            <span className='title'>Server log</span>
+            {srvLog.trim()
+              ? <Badge kind='warn'>output</Badge>
+              : <span className='muted' style={{fontSize: 11}}>clean</span>}
+            <div style={{flex: 1}}/>
+            <button className='btn sm' onClick={e => { e.stopPropagation(); loadServerLog(); setLogOpen(true); }}>
+              <Icon.Refresh width={12} height={12}/>
+            </button>
+          </div>
+          {logOpen && (
+            <div className='card-body'>
+              {srvLog.trim() ? (
+                <pre className='mono' style={{fontSize: 11, margin: 0, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap'}}>{srvLog}</pre>
+              ) : (
+                <div className='muted' style={{fontSize: 12}}>
+                  Nothing logged — the last launch was clean. Failures (SELinux denial, busy port,
+                  architecture mismatch, an agent that cannot map this Android's ART) show up here.
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Binaries list */}

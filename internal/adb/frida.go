@@ -2,9 +2,11 @@ package adb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // FridaServer represents a frida-server binary in /data/local/tmp.
@@ -150,12 +152,31 @@ func extractFridaArch(name string) string {
 	return ""
 }
 
+// FridaServerLogPath is where StartFrida redirects the server's own stdout and
+// stderr. frida-server reports the failures that matter — an SELinux exec
+// denial, a busy port, an agent that cannot read the device's ART layout — on
+// those streams, and once it daemonizes there is nowhere else to read them from.
+const FridaServerLogPath = "/data/local/tmp/adbq-frida-server.log"
+
+// fridaStartTimeout bounds the launch command. The command itself returns in
+// well under a second once the daemon's fds are detached; anything longer means
+// the device is wedged, and a caller passing a background context (app.go does)
+// would otherwise wait forever.
+const fridaStartTimeout = 20 * time.Second
+
 // StartFrida launches the given frida-server bound to iface:port. Requires
 // root; if iface is "", binds 0.0.0.0.
 //
 // It uses frida-server's own -D/--daemonize rather than setsid/nohup/& — many
 // stripped ROMs lack setsid/nohup, and -D makes frida fork a proper daemon that
 // survives the shell exit on every device.
+//
+// The redirections are not cosmetic. A daemonized frida-server inherits the adb
+// shell's stdin/stdout/stderr, and adbd keeps the connection open until every
+// holder of those fds is gone — so `-D` alone makes `adb shell` (and this call)
+// hang for the daemon's entire lifetime while the server nonetheless runs.
+// Detaching all three fds is what lets the command return, and pointing the
+// output at a file is what keeps the diagnostics that used to vanish with it.
 func (c *Client) StartFrida(ctx context.Context, serial, serverPath, iface string, port int) (string, error) {
 	if port <= 0 {
 		port = 27042
@@ -164,18 +185,85 @@ func (c *Client) StartFrida(ctx context.Context, serial, serverPath, iface strin
 		iface = "0.0.0.0"
 	}
 	q := shQuote(serverPath)
-	cmd := "chmod 755 " + q + " && " + q + " -l " + iface + ":" + strconv.Itoa(port) + " -D"
-	out, _, err := c.ShellSU(ctx, serial, cmd)
+	log := shQuote(FridaServerLogPath)
+	cmd := ": > " + log + " 2>/dev/null; " +
+		"chmod 755 " + q + " && " + q + " -l " + iface + ":" + strconv.Itoa(port) +
+		" -D </dev/null >>" + log + " 2>&1"
+
+	sctx, cancel := context.WithTimeout(ctx, fridaStartTimeout)
+	defer cancel()
+	out, _, shellErr := c.ShellSU(sctx, serial, cmd)
+
+	// Whether the daemon survived its fork is only visible in its log, and a
+	// non-zero exit tells us nothing beyond "exit status 1" — so read the log
+	// either way. Give the server a moment to write it first.
+	select {
+	case <-ctx.Done():
+	case <-time.After(500 * time.Millisecond):
+	}
+	logOut, _ := c.FridaServerLog(ctx, serial)
+
+	if msg := fridaStartFailure(logOut, serverPath); msg != "" {
+		return logOut, errors.New(msg)
+	}
+	if shellErr != nil {
+		// The log is the better explanation when there is one; the shell's own
+		// stderr (e.g. a chmod failure, which is not redirected) is the fallback.
+		if detail := firstLine(strings.TrimSpace(logOut)); detail != "" {
+			return logOut, fmt.Errorf("frida-server did not start: %s", detail)
+		}
+		return out, shellErr
+	}
+	if strings.TrimSpace(logOut) != "" {
+		out = logOut
+	}
+	return out, nil
+}
+
+// fridaStartFailure inspects the server log for a failure that prevented the
+// server from coming up at all, and returns a user-facing explanation ("" when
+// there is none). A daemonized server writes nothing on a clean start, so an
+// empty log is the success case.
+//
+// Only launch-fatal causes belong here. The server also logs faults it survives
+// — most notably an agent that cannot map this Android's ART, which leaves a
+// running-but-useless server. Reporting those as a failed start would contradict
+// the UI, which is about to see the server as active; they reach the user
+// through the server-log panel and the session-level error mapping instead.
+func fridaStartFailure(logOut, serverPath string) string {
+	low := strings.ToLower(logOut)
+	first := firstLine(strings.TrimSpace(logOut))
+	switch {
+	case strings.TrimSpace(low) == "":
+		return ""
 	// SELinux frequently blocks executing binaries from /data/local/tmp on
 	// enforcing stock ROMs. Surface that distinctly so the UI stops blaming an
 	// arch mismatch for what is really a policy denial. Match the SELinux exec
 	// markers specifically — a bare "permission denied" might just be a chmod
 	// failure, which this message would mislabel.
-	if low := strings.ToLower(out); strings.Contains(low, "avc: denied") ||
-		(strings.Contains(low, "denied") && strings.Contains(low, "execute")) {
-		return out, fmt.Errorf("SELinux blocked executing frida-server from %s — push it to a Magisk-allowed path (e.g. /data/adb/…) or set the domain permissive: %s", serverPath, firstLine(strings.TrimSpace(out)))
+	case strings.Contains(low, "avc: denied"),
+		strings.Contains(low, "denied") && strings.Contains(low, "execute"):
+		return fmt.Sprintf("SELinux blocked executing frida-server from %s — push it to a Magisk-allowed path (e.g. /data/adb/…) or set the domain permissive: %s", serverPath, first)
+	case strings.Contains(low, "address already in use"),
+		strings.Contains(low, "address in use"):
+		return "that port is already taken on the device — stop the running frida-server first, or pick another port: " + first
+	case strings.Contains(low, "not executable"),
+		strings.Contains(low, "exec format error"),
+		strings.Contains(low, "no such file or directory"):
+		return "frida-server did not start — the binary is missing or does not match the device architecture: " + first
 	}
-	return out, err
+	return ""
+}
+
+// FridaServerLog returns the frida-server output captured by the last StartFrida
+// (see FridaServerLogPath). Reads as root when available and falls back to the
+// plain shell, so the log is still readable on a device where su is denied.
+func (c *Client) FridaServerLog(ctx context.Context, serial string) (string, error) {
+	cmd := "cat " + shQuote(FridaServerLogPath) + " 2>/dev/null"
+	if out, _, err := c.ShellSU(ctx, serial, cmd); err == nil && strings.TrimSpace(out) != "" {
+		return out, nil
+	}
+	return c.Shell(ctx, serial, cmd)
 }
 
 // StopFrida kills running frida-server processes. Uses a procfs scan + the kill
