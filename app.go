@@ -56,6 +56,7 @@ type App struct {
 	frida    *adb.FridaStore
 	host     *adb.HostStore
 	sdk      *adb.SDKManager
+	emu      *adb.EmulatorManager
 
 	fridaMu   sync.Mutex
 	fridaSess map[string]*adb.FridaSession
@@ -73,10 +74,13 @@ func NewApp() *App {
 	profiles, _ := adb.NewProfileStore()
 	frida, _ := adb.NewFridaStore()
 	host := adb.NewHostStore()
+	sdk := adb.NewSDKManager(host)
+	client := adb.NewClient()
 	return &App{
-		client:      adb.NewClient(),
+		client:      client,
 		host:        host,
-		sdk:         adb.NewSDKManager(host),
+		sdk:         sdk,
+		emu:         adb.NewEmulatorManager(sdk, client),
 		tasks:       adb.NewTaskManager(),
 		logcats:     map[string]*logcatFeed{},
 		shells:      map[string]*adb.ShellSession{},
@@ -243,6 +247,55 @@ func (a *App) OpenAndroidStudio() error {
 	}
 	return a.OpenPath(info.StudioPath)
 }
+
+// ─── Emulators / AVDs ───────────────────────────────────────────────────
+
+// ListAVDs returns every AVD defined on this machine with its live state.
+func (a *App) ListAVDs() ([]adb.AVD, error) { return a.emu.ListAVDs(a.ctx) }
+
+// AVDDetail returns one AVD, for the detail panel.
+func (a *App) AVDDetail(name string) (*adb.AVD, error) { return a.emu.AVDByName(a.ctx, name) }
+
+// EmulatorLaunchCommand renders the exact command StartAVD would run, so the UI
+// can show it live as the user toggles boot options (CLAUDE.md §4.1).
+func (a *App) EmulatorLaunchCommand(name string, opts adb.EmulatorOpts) string {
+	return adb.EmulatorCommand(a.sdk.Info().Emulator, name, 0, opts)
+}
+
+// StartAVD boots an AVD and waits for it to come up, reporting progress as a task.
+func (a *App) StartAVD(name string, opts adb.EmulatorOpts) (string, error) {
+	id, ctx := a.tasks.Create("emulator-start", "Start "+name, "launching")
+	serial, err := a.emu.Start(ctx, name, opts)
+	if err != nil {
+		a.tasks.Finish(id, "err", "", err.Error())
+		return "", err
+	}
+	// Booting takes minutes; let the binding return so the UI stays responsive
+	// and report the rest through the task.
+	go func() {
+		werr := a.emu.WaitForBoot(ctx, serial, func(stage string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+		})
+		if werr != nil {
+			a.tasks.Finish(id, "err", "", werr.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", "", serial+" ready")
+	}()
+	return serial, nil
+}
+
+// StopAVD shuts an emulator down gracefully via the console.
+func (a *App) StopAVD(name string) error { return a.emu.Stop(a.ctx, name) }
+
+// EmulatorLog returns emulator output newer than sinceSeq. The UI polls this
+// only while the log panel is open, so a closed panel costs nothing.
+func (a *App) EmulatorLog(name string, sinceSeq int) []adb.HostLogLine {
+	return a.emu.LogSince(name, sinceSeq)
+}
+
+// ClearEmulatorLog empties one AVD's log buffer.
+func (a *App) ClearEmulatorLog(name string) { a.emu.ClearLog(name) }
 
 // ─── scrcpy ─────────────────────────────────────────────────────────────
 
@@ -602,6 +655,9 @@ func (a *App) PullCapture(serial string) (string, error) {
 
 func (a *App) shutdown(ctx context.Context) {
 	a.scrcpy.StopAll()
+	// Only emulators adbq launched are killed; one the user started from
+	// Android Studio is theirs and must survive adbq closing.
+	a.emu.StopAll()
 	// lcMu keeps a StartLogcat that is mid-flight (blocked on a slow device)
 	// from re-registering its feed into the map we are about to clear, which
 	// would leave an adb child running past exit.
