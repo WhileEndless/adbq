@@ -6,6 +6,7 @@ import {Icon} from '../icons';
 import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
+import {rootUnavailableReason} from '../lib/android';
 import {CodeEditor} from '../components/CodeEditor';
 
 export function FridaScreen({device}: {device: adb.Device}) {
@@ -103,7 +104,7 @@ export function FridaScreen({device}: {device: adb.Device}) {
 
   function start(s: adb.FridaServer) {
     if (!device.root) {
-      showToast({title: 'Root required', body: 'frida-server needs root to bind a privileged port', kind: 'err'});
+      showToast({title: 'Root required', body: `frida-server needs root. ${rootUnavailableReason(device)}`, kind: 'err'});
       return;
     }
     setStarting(s.name);
@@ -228,7 +229,8 @@ export function FridaScreen({device}: {device: adb.Device}) {
               <div className='muted' style={{fontSize: 12}}>
                 Pick a binary below and click <strong>Start</strong>. Interface defaults to <span className='mono'>0.0.0.0</span>, port <span className='mono'>{port}</span>.
                 {!device.root && <div style={{marginTop: 6, color: 'var(--warn)'}}>
-                  This device is unrooted — frida-server cannot bind; use frida-gadget (LD_PRELOAD via repackaging) instead.
+                  {rootUnavailableReason(device)} frida-server cannot bind without root
+                  — use frida-gadget (LD_PRELOAD via repackaging) instead.
                 </div>}
               </div>
             )}

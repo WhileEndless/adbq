@@ -25,10 +25,13 @@ type Client struct {
 	// on first use; nil means no live captures have been started yet.
 	Live *LiveCapture
 
-	// suMu guards suStyles, the per-serial cache of which `su -c` form the
-	// device's su accepts (see rootWrap).
-	suMu     sync.Mutex
-	suStyles map[string]suStyle
+	// suMu guards the per-serial root bookkeeping: which `su -c` form the
+	// device's su accepts (see rootWrap), when the last probe failed (see
+	// suRetryAfter), and whether `adb root` has already been attempted.
+	suMu       sync.Mutex
+	suStyles   map[string]suStyle
+	suFailedAt map[string]time.Time
+	adbRooted  map[string]adbRootState
 
 	// capMu guards caps, the per-serial cache of device Capabilities (SDK,
 	// SELinux, ABI, binary presence) — see capabilities.go.
@@ -187,8 +190,16 @@ func (c *Client) rootWrap(ctx context.Context, serial, inner string) (string, er
 	return "", fmt.Errorf("root unavailable on %s", serial)
 }
 
-// suStyleFor probes (once, then cached) which `su -c` form works on the device.
-// A negative result is NOT cached so a later Magisk grant can still succeed.
+// suRetryAfter bounds how long a failed root probe is remembered. The probe
+// costs five round trips (`id` plus four `su` forms) and callers like the
+// frida-server listing run it on every refresh, so re-probing each time made
+// unrooted devices crawl. Keeping it short means a Magisk grant the user just
+// approved is still picked up within seconds.
+const suRetryAfter = 30 * time.Second
+
+// suStyleFor probes which `su -c` form works on the device and caches the
+// answer. A negative result is only cached for suRetryAfter, so a later Magisk
+// grant (or an `adb root` that lands afterwards) can still succeed.
 func (c *Client) suStyleFor(ctx context.Context, serial string) (suStyle, error) {
 	c.suMu.Lock()
 	if c.suStyles == nil {
@@ -198,12 +209,25 @@ func (c *Client) suStyleFor(ctx context.Context, serial string) (suStyle, error)
 		c.suMu.Unlock()
 		return st, nil
 	}
+	if at, ok := c.suFailedAt[serial]; ok && time.Since(at) < suRetryAfter {
+		c.suMu.Unlock()
+		return suUnknown, fmt.Errorf("root unavailable on %s (probed recently)", serial)
+	}
 	c.suMu.Unlock()
 
 	// (0) Already root? userdebug/eng builds and `adb root` emulators run the
 	// adb shell as uid 0 with no `su` binary. `id` exists on every Android
 	// toolbox/toybox; a uid=0 line means we can run commands unwrapped.
 	if out, _ := c.Shell(ctx, serial, "id"); hasUID0(out) {
+		c.setSuStyle(serial, suBareRoot)
+		return suBareRoot, nil
+	}
+
+	// (0b) A stock emulator ships a `su` that refuses the shell user, so every
+	// form below fails even though the device roots instantly with `adb root`.
+	// Without this, adbq reported "not rooted" on the single most common test
+	// target and every root feature was dead there.
+	if c.tryAdbRoot(ctx, serial) {
 		c.setSuStyle(serial, suBareRoot)
 		return suBareRoot, nil
 	}
@@ -236,6 +260,12 @@ func (c *Client) suStyleFor(ctx context.Context, serial string) (suStyle, error)
 			return cand.style, nil
 		}
 	}
+	c.suMu.Lock()
+	if c.suFailedAt == nil {
+		c.suFailedAt = map[string]time.Time{}
+	}
+	c.suFailedAt[serial] = time.Now()
+	c.suMu.Unlock()
 	return suUnknown, fmt.Errorf("root unavailable: `su` did not run a command on %s (device not rooted, or su denied)", serial)
 }
 
@@ -336,6 +366,7 @@ func (c *Client) Disconnect(ctx context.Context, addr string) (string, error) {
 	if addr != "" {
 		c.InvalidateCapabilities(addr)
 		c.InvalidateFacts(addr)
+		c.ForgetRootProbe(addr)
 	}
 	args := []string{"disconnect"}
 	if addr != "" {

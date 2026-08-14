@@ -156,7 +156,10 @@ func extractFridaArch(name string) string {
 // stderr. frida-server reports the failures that matter — an SELinux exec
 // denial, a busy port, an agent that cannot read the device's ART layout — on
 // those streams, and once it daemonizes there is nowhere else to read them from.
-const FridaServerLogPath = "/data/local/tmp/adbq-frida-server.log"
+//
+// The name deliberately avoids the substring "frida-server": the log lives in
+// the same directory the server inventory globs, which matches on exactly that.
+const FridaServerLogPath = "/data/local/tmp/adbq-frida.log"
 
 // fridaStartTimeout bounds the launch command. The command itself returns in
 // well under a second once the daemon's fds are detached; anything longer means

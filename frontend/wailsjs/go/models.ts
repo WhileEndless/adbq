@@ -406,6 +406,7 @@ export namespace adb {
 	    arch: string;
 	    root: boolean;
 	    rootMethod: string;
+	    rootPending: boolean;
 	    ip: string;
 	    wifi: string;
 	    mac: string;
@@ -434,6 +435,7 @@ export namespace adb {
 	        this.arch = source["arch"];
 	        this.root = source["root"];
 	        this.rootMethod = source["rootMethod"];
+	        this.rootPending = source["rootPending"];
 	        this.ip = source["ip"];
 	        this.wifi = source["wifi"];
 	        this.mac = source["mac"];

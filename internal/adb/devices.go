@@ -23,8 +23,12 @@ type Device struct {
 	Kernel         string `json:"kernel"`
 	CPU            string `json:"cpu"`
 	Arch           string `json:"arch"`
-	Root           bool   `json:"root"`
-	RootMethod     string `json:"rootMethod"`
+	Root           bool   `json:"root"`       // su (or a root adbd) actually ran a command
+	RootMethod     string `json:"rootMethod"` // how, or why not (see RootPending)
+	// RootPending marks a device that advertises a root manager but has not
+	// granted it — typically a Magisk prompt awaiting approval. Root is false:
+	// privileged calls will fail until the user grants it.
+	RootPending    bool   `json:"rootPending"`
 	IP             string `json:"ip"`
 	WiFi           string `json:"wifi"`
 	MAC            string `json:"mac"`
@@ -145,7 +149,7 @@ func (c *Client) Enrich(parent context.Context, d *Device) {
 		d.Kernel = strings.TrimSpace(k)
 	}
 	// Root detection
-	d.Root, d.RootMethod = c.detectRoot(ctx, d.ID)
+	d.Root, d.RootMethod, d.RootPending = c.detectRoot(ctx, d.ID)
 	// Network
 	var link wlanState
 	d.IP, link = c.detectIP(ctx, d.ID)
@@ -160,12 +164,12 @@ func (c *Client) Enrich(parent context.Context, d *Device) {
 	}
 }
 
-func (c *Client) detectRoot(ctx context.Context, serial string) (bool, string) {
+func (c *Client) detectRoot(ctx context.Context, serial string) (root bool, method string, pending bool) {
 	// Shortest path first: on userdebug builds and emulators with `adb root`
 	// already applied, the shell uid is 0 — invoking su would needlessly
 	// fail on devices that don't ship it.
 	if id, _ := c.Shell(ctx, serial, "id"); hasUID0(id) {
-		return true, "adb root"
+		return true, "adb root", false
 	}
 	// Magisk markers next (cheap stat) — recorded but not trusted on their own,
 	// since the dirs can linger after a hide/uninstall.
@@ -182,22 +186,28 @@ func (c *Client) detectRoot(ctx context.Context, serial string) (bool, string) {
 	// `which su` probe (which is absent on stripped ROMs) and the simple-form-only
 	// check (which mislabeled AOSP-style-su devices as unrooted).
 	if style, err := c.suStyleFor(ctx, serial); err == nil && style != suUnknown {
+		if style == suBareRoot {
+			// suStyleFor restarted adbd as root for us (emulator/userdebug).
+			return true, "adb root", false
+		}
 		if magisk {
-			return true, "Magisk"
+			return true, "Magisk", false
 		}
 		tags, _ := c.Shell(ctx, serial, "getprop ro.build.tags")
 		if strings.Contains(tags, "test-keys") {
-			return true, "su (test-keys)"
+			return true, "su (test-keys)", false
 		}
-		return true, "su"
+		return true, "su", false
 	}
-	// su did not elevate. Magisk dirs present means a grant may be pending or
-	// denied — report rooted optimistically so the UI lets the user retry after
-	// approving the prompt (the negative su probe is intentionally not cached).
+	// su did not elevate. A Magisk marker means a grant may be pending or denied,
+	// which is worth surfacing — but not as Root: reporting rooted here made the
+	// UI open root-only actions that then failed on every call, and stock
+	// emulator images ship a `magisk` binary, so the marker fired on devices with
+	// no usable root at all. It is a separate, weaker signal.
 	if magisk {
-		return true, "Magisk (grant su)"
+		return false, "Magisk (grant su)", true
 	}
-	return false, ""
+	return false, "", false
 }
 
 // detectIP returns the address to display for the device and the wlan0 link

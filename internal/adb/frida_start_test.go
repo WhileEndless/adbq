@@ -66,3 +66,12 @@ func TestFridaStartFailureIgnoresSurvivableAgentFault(t *testing.T) {
 		t.Errorf("agent fault reported as a launch failure: %q", msg)
 	}
 }
+
+// The log lives in the directory ListFridaServers globs, and that glob matches
+// on the substring "frida-server" — so a log named after it would show up as a
+// launchable binary in the UI.
+func TestFridaServerLogPathIsNotMistakenForAServer(t *testing.T) {
+	if strings.Contains(FridaServerLogPath, "frida-server") {
+		t.Errorf("%s would be picked up by the frida-server inventory glob", FridaServerLogPath)
+	}
+}

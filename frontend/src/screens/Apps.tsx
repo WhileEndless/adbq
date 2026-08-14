@@ -4,7 +4,7 @@ import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
-import {sdkLabel} from '../lib/android';
+import {sdkLabel, rootUnavailableReason} from '../lib/android';
 
 export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
   const [apps, setApps] = useState<adb.App[]>([]);
@@ -305,7 +305,8 @@ function FridaAppSection({device, pkg, running, setScreen}: {device: adb.Device;
       <div className='card-body'>
         {!device.root && (
           <div style={{fontSize: 11, color: 'var(--warn)', marginBottom: 8}}>
-            Frida needs a rooted device running frida-server. On an unrooted device, use frida-gadget instead.
+            Frida needs a rooted device running frida-server. {rootUnavailableReason(device)}
+            {' '}On an unrooted device, use frida-gadget instead.
           </div>
         )}
         <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6}}>
