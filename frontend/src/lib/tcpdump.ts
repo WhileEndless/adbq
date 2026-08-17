@@ -1,6 +1,6 @@
 import React from 'react';
 import * as API from '../../wailsjs/go/main/App';
-import {confirmDialog, showToast} from '../ui';
+import {CommandPreview, confirmDialog, showToast} from '../ui';
 
 // installTcpdumpAuto walks the user through the manifest-pinned auto-install
 // flow: plan → confirm with URL + hash on screen → fetch/verify → push. The
@@ -31,6 +31,9 @@ export async function installTcpdumpAuto(serial: string): Promise<boolean> {
   if (!plan) return false;
 
   const shortHash = plan.sha256.slice(0, 16) + '…' + plan.sha256.slice(-8);
+  // What it does to the device, beside where the bytes come from: the download
+  // is verified here, but the push and chmod are the device's business.
+  const cmds = await API.TcpdumpInstallCommands(serial).then(c => c ?? []).catch(() => [] as string[]);
   const body = React.createElement('div', {style: {display: 'grid', gap: 6, fontSize: 12}},
     React.createElement('div', null,
       `adbq will download a tcpdump binary matching this device's ABI (${plan.abi}), `,
@@ -44,6 +47,7 @@ export async function installTcpdumpAuto(serial: string): Promise<boolean> {
     plan.cached
       ? React.createElement('div', {style: {color: 'var(--ok)'}}, 'Already verified in local cache — no download needed.')
       : null,
+    React.createElement(CommandPreview, {commands: cmds, defaultOpen: true}),
   );
   const ok = await confirmDialog({
     title: 'Install tcpdump on device?',
@@ -55,6 +59,7 @@ export async function installTcpdumpAuto(serial: string): Promise<boolean> {
     const info = await API.InstallTcpdumpAuto(serial, true);
     if (info && info.available) {
       showToast({title: 'tcpdump installed', body: info.version || info.path, kind: 'ok', mono: true});
+
       return true;
     }
     showToast({title: 'Install finished but tcpdump is not usable', body: 'Check device logs', kind: 'err'});

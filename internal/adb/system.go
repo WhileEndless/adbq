@@ -301,6 +301,62 @@ type CaptureState struct {
 // whereas /data/local/tmp is reliably writable.
 const capturePath = "/data/local/tmp/adbq-capture.pcap"
 
+// captureErrPath holds tcpdump's stderr for the file-capture path: its stdout is
+// the pcap, and a diagnostic mixed into that would corrupt the file.
+const captureErrPath = "/data/local/tmp/adbq-tcpdump.err"
+
+// captureStartRemote is the backgrounded tcpdump the file-capture path runs.
+// `nohup … &` is what lets the adb shell return while the capture keeps going.
+func captureStartRemote(bin, iface, bpf string) string {
+	args := bin + " -i " + shQuote(iface) + " -U -w " + capturePath
+	if bpf != "" {
+		args += " " + shQuote(bpf)
+	}
+	return "nohup " + args + " >/dev/null 2>" + captureErrPath + " </dev/null &"
+}
+
+// captureStopRemote signals the running tcpdump so it finalises the pcap header.
+// A procfs scan rather than pkill, which stripped ROMs do not ship; `kill` is a
+// shell builtin, so it is always there.
+func captureStopRemote(signal string) string {
+	return `for p in /proc/[0-9]*; do read c < "$p/comm" 2>/dev/null || continue; ` +
+		`case "$c" in tcpdump) kill -` + signal + ` "${p##*/}" 2>/dev/null;; esac; done`
+}
+
+// CaptureCommands are the file-capture panel's actions: start, stop, and pull
+// the pcap this computer will read.
+type CaptureCommands struct {
+	Start []string `json:"start"`
+	Stop  []string `json:"stop"`
+	Pull  []string `json:"pull"`
+}
+
+// CaptureCommandsFor renders them. tcpdumpPath empty means the device has no
+// tcpdump yet, and there is no honest command to show for a capture.
+func CaptureCommandsFor(serial, tcpdumpPath, iface, bpf string, render CommandRenderer) CaptureCommands {
+	if iface == "" {
+		iface = "any"
+	}
+	cc := CaptureCommands{
+		Stop: []string{render(captureStopRemote("INT"), true)},
+		Pull: []string{DeviceCommandText(serial, "pull", capturePath, "capture.pcap")},
+	}
+	if tcpdumpPath != "" {
+		cc.Start = []string{render(captureStartRemote(tcpdumpPath, iface, strings.Trim(bpf, "'\"")), true)}
+	}
+	return cc
+}
+
+// CaptureCommandsFor is the device-aware entry point: it resolves tcpdump the
+// same way a start would.
+func (c *Client) CaptureCommandsFor(ctx context.Context, serial, iface, bpf string) CaptureCommands {
+	bin, err := c.FindTcpdump(ctx, serial)
+	if err != nil {
+		bin = ""
+	}
+	return CaptureCommandsFor(serial, bin, iface, bpf, c.Renderer(ctx, serial))
+}
+
 // StartCapture launches tcpdump in the background. Returns final state.
 func (c *Client) StartCapture(ctx context.Context, serial, iface, bpf string) (*CaptureState, error) {
 	if iface == "" {
@@ -319,14 +375,9 @@ func (c *Client) StartCapture(ctx context.Context, serial, iface, bpf string) (*
 		_, _, _ = c.ShellSU(ctx, serial, "kill -9 "+itoa(int64(pid)))
 	}
 	_, _, _ = c.ShellSU(ctx, serial, "rm -f "+capturePath)
-	args := bin + " -i " + shQuote(iface) + " -U -w " + capturePath
-	if bpf != "" {
-		// Strip outer single quotes if user wrapped it
-		bpf = strings.Trim(bpf, "'\"")
-		args += " " + shQuote(bpf)
-	}
-	cmd := "nohup " + args + " >/dev/null 2>/data/local/tmp/adbq-tcpdump.err </dev/null &"
-	if _, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
+	// Strip outer quotes if the user wrapped the filter themselves.
+	bpf = strings.Trim(bpf, "'\"")
+	if _, _, err := c.ShellSU(ctx, serial, captureStartRemote(bin, iface, bpf)); err != nil {
 		return nil, err
 	}
 	// Give tcpdump a moment then probe.
@@ -338,14 +389,10 @@ func (c *Client) StartCapture(ctx context.Context, serial, iface, bpf string) (*
 func (c *Client) StopCapture(ctx context.Context, serial string) (*CaptureState, error) {
 	// pkill is missing on stripped ROMs; scan procfs and kill by PID. `kill`
 	// is a shell builtin so it's always available.
-	for _, pid := range c.tcpdumpPIDs(ctx, serial) {
-		_, _, _ = c.ShellSU(ctx, serial, "kill -INT "+itoa(int64(pid)))
-	}
+	_, _, _ = c.ShellSU(ctx, serial, captureStopRemote("INT"))
 	time.Sleep(500 * time.Millisecond)
 	// If SIGINT didn't take, fall back to SIGKILL.
-	for _, pid := range c.tcpdumpPIDs(ctx, serial) {
-		_, _, _ = c.ShellSU(ctx, serial, "kill -9 "+itoa(int64(pid)))
-	}
+	_, _, _ = c.ShellSU(ctx, serial, captureStopRemote("9"))
 	return c.CaptureStatus(ctx, serial, "", "")
 }
 

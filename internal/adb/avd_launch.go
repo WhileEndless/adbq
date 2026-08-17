@@ -286,7 +286,7 @@ func (m *EmulatorManager) commandsFor(a *AVD) []string {
 	bin := m.sdk.Info().Emulator
 	cmds := []string{EmulatorCommand(bin, a.Name, a.Port, EmulatorOpts{})}
 	if a.Serial != "" {
-		cmds = append(cmds, "adb -s "+a.Serial+" emu kill")
+		cmds = append(cmds, DeviceCommandText(a.Serial, "emu", "kill"))
 	}
 	return cmds
 }

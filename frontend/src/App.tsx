@@ -2,7 +2,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../wailsjs/go/models';
 import * as API from '../wailsjs/go/main/App';
 import {Icon} from './icons';
-import {Badge, CodeBlock, CommandPreview, ConfirmHost, IconBtn, Modal, PromptHost, ToastHost, confirmDialog, showToast, promptDialog, useTheme, ThemeMode} from './ui';
+import {Badge, CodeBlock, CommandPreview, ConfirmHost, commandToast, IconBtn, Modal, PromptHost, ToastHost, confirmDialog, showToast, promptDialog, useTheme, ThemeMode} from './ui';
 import {invalidateJadxInfo, jadxInfo} from './lib/jadx';
 import {EventsOn} from '../wailsjs/runtime/runtime';
 import {StoreProvider} from './store';
@@ -299,7 +299,16 @@ function AppInner() {
                 }/>
       <DeviceTabs devices={devices} activeId={activeId} onSelect={setActiveId}
                   onAdd={() => setConnectOpen(true)}
-                  onClose={(id) => API.DisconnectDevice(id).then(reload)}/>
+                  onClose={(id) => API.DisconnectDevice(id).then(async () => {
+                    // Only a network device has something to disconnect; a USB
+                    // one just drops out of the list, and claiming a command ran
+                    // would be a small lie.
+                    if (id.includes(':')) {
+                      const c = await API.ConnectCommands(id).catch(() => null);
+                      showToast({title: 'Disconnected', body: id, kind: 'ok', mono: true, actions: commandToast(c?.disconnect)});
+                    }
+                    reload();
+                  })}/>
       <Sidebar device={device} screen={screen} setScreen={setScreen} counts={counts}/>
       <main className='main'>
         {device || HOST_SCREENS.includes(screen)

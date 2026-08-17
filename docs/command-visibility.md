@@ -141,7 +141,8 @@ Durum: ✅ var · ◐ kısmi (bazı eylemlerde) · ✗ yok — bu tabloda artık
 | Ekran | Eylemler | Durum |
 |---|---|---|
 | Network — proxy | `settings put global http_proxy` | ✅ |
-| Network — capture | `tcpdump` başlat/durdur/pull | ✅ |
+| Network — capture (dosyaya) | `nohup tcpdump … -w`, `kill -INT` (pcap başlığı için), `pull` | ✅ |
+| Network — tcpdump kurulumu | `push`, `chmod 755`, `--version` yoklaması | ✅ |
 | Network — CA sertifikası | push + `chmod`, dört kalıcı strateji, tmpfs overlay | ✅ |
 | Network — hosts | staging, beş strateji, md5 doğrulama, Magisk modülü, DNS flush | ✅ |
 | Network — DNS/bağlantılar | `ndc resolver …`, `getprop`, `/proc/net/*` | ✅ |
@@ -153,7 +154,7 @@ Durum: ✅ var · ◐ kısmi (bazı eylemlerde) · ✗ yok — bu tabloda artık
 | Files | `ls -lAp`, `rm [-rf]`, `mkdir -p`, `push`+`chmod`/`chown`, `pull` | ✅ |
 | Forwards | `forward`/`reverse` ekle, `--remove`, `--list` | ✅ |
 | Iptables | `-A`/`-I N`/`-D`/`-F`/`-P`/`-N`/`-X`, save, restore, undo | ✅ |
-| Emulators — başlat/durdur | `emulator -avd …`, `adb -s … emu kill` | ✅ |
+| Emulators — başlat/durdur | `emulator -avd …`, `adb -s … emu kill` (satır chip'inde) | ✅ |
 | Emulators — AVD oluştur/sil | `avdmanager create/delete avd` | ✅ |
 | Emulators — donanım düzenle | yazılacak `config.ini` anahtarları | ✅ |
 | Emulators — system image | `sdkmanager <pkg>` / `--uninstall` | ✅ |
@@ -168,6 +169,8 @@ Durum: ✅ var · ◐ kısmi (bazı eylemlerde) · ✗ yok — bu tabloda artık
 | Frida — kurulum | `push` + `chmod 755` | ✅ |
 | Frida — sunucu | başlatma satırı (`-D`, yönlendirmeler), procfs `kill`, log `cat` | ✅ |
 | Frida — oturum | çalışan sürücü + eşdeğer `frida` CLI çağrısı | ✅ |
+| Apps — "Start with Frida" | oturum öncesi gereksinimler: sunucu push/chmod + başlatma | ✅ |
+| Cihaz bağla/kes | `adb connect <adres>`, `adb disconnect <adres>` | ✅ |
 | Profiles | her adımın komutları, uygulanma sırasıyla | ✅ |
 | Shell | — (kullanıcı zaten komutu yazıyor) | yok sayılır |
 
@@ -181,8 +184,14 @@ Kapsam dışı bırakılanlar — ve nedeni:
   çalışır), ama katlanmış hâlde ilk satırları görünür.
 - **Ekran kaydının cihaz yolu** canlı çalışmada zaman damgası taşır; önizleme
   sabit adı gösterir, aksi hâlde satır kopyalanabilir olmaz.
-- **jadx / rootAVD / frida-server indirmeleri** komut değil; onay diyaloğunda
-  kaynak + SHA-256 + lisans olarak gösterilir (§1.4).
+- **jadx / rootAVD / frida-server / tcpdump indirmeleri** komut değil; onay
+  diyaloğunda kaynak + SHA-256 + lisans olarak gösterilir (§1.4). tcpdump'ın
+  *cihaz* tarafı (push + chmod + yoklama) aynı diyalogda komut olarak durur.
+- **AVD snapshot silme** ve **jadx/rootAVD kaldırma** host tarafında dosya
+  silmedir; adb komutu yoktur, onay diyaloğu yolu gösterir.
+- **Cihaz clipboard'u** (`cmd clipboard set-text`): arka uçta var, UI'da eylem
+  yok. Var olmayan bir eylemin komutunu göstermek gürültüdür — o yüzden
+  `DeviceCommands` alanı da kaldırıldı.
 
 ## 4. Fazlı yol haritası — durum
 

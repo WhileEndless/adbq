@@ -537,6 +537,22 @@ export namespace adb {
 	        this.selfSigned = source["selfSigned"];
 	    }
 	}
+	export class CaptureCommands {
+	    start: string[] | null;
+	    stop: string[] | null;
+	    pull: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new CaptureCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.start = source["start"];
+	        this.stop = source["stop"];
+	        this.pull = source["pull"];
+	    }
+	}
 	export class CaptureState {
 	    active: boolean;
 	    ourSession: boolean;
@@ -779,7 +795,6 @@ export namespace adb {
 	    powerOff: string[] | null;
 	    restartAdbd: string[] | null;
 	    rootProbe: string[] | null;
-	    clipboard: string[] | null;
 	    scrcpy: string[] | null;
 	
 	    static createFrom(source: any = {}) {
@@ -797,7 +812,6 @@ export namespace adb {
 	        this.powerOff = source["powerOff"];
 	        this.restartAdbd = source["restartAdbd"];
 	        this.rootProbe = source["rootProbe"];
-	        this.clipboard = source["clipboard"];
 	        this.scrcpy = source["scrcpy"];
 	    }
 	}

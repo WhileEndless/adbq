@@ -302,7 +302,10 @@ export function LogcatScreen({device}: {device: adb.Device}) {
         <span>{state.paused ? 'Paused' : 'Live'} · ≥{levelMin} · {state.pkgFilter ? `pkg=${state.pkgFilter}` : 'all processes'} · {state.showSystem ? 'apps + system' : 'apps only'}</span>
         {collapsed > 0 && <span title='Identical lines repeated within 10 seconds'>{collapsed} repeats hidden</span>}
         <div style={{flex: 1}}/>
-        <span className='subtle'>adb -s {device.id} logcat -v threadtime{state.pkgFilter ? ` --pid=$(pidof ${state.pkgFilter})` : ''}</span>
+        {/* The command lives in the toolbar's chip, which renders what actually
+            runs; a second, hand-written copy here disagreed with it (the feed
+            resolves a PID, it does not run pidof). */}
+        <span className='subtle'>{device.id}</span>
       </div>
     </div>
   );

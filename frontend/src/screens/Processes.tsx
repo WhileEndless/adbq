@@ -209,7 +209,8 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
         <span>{filteredSorted.length} visible</span>
         <span>{paused ? 'Paused' : 'Live'} · refresh {interval}s</span>
         <div style={{flex: 1}}/>
-        <span className='subtle'>adb -s {device.id} shell cat /proc/stat /proc/[0-9]*/stat /proc/meminfo · {interval}s</span>
+        {/* Same reasoning as Logcat: the toolbar chip holds the real command. */}
+        <span className='subtle'>procfs · {device.id}</span>
       </div>
     </div>
   );

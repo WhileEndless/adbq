@@ -74,6 +74,10 @@ export function CancelTask(arg1) {
   return window['go']['main']['App']['CancelTask'](arg1);
 }
 
+export function CaptureCommands(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CaptureCommands'](arg1, arg2, arg3);
+}
+
 export function CaptureProfileFromDevice(arg1, arg2) {
   return window['go']['main']['App']['CaptureProfileFromDevice'](arg1, arg2);
 }
@@ -908,6 +912,10 @@ export function SuggestProxyHost(arg1, arg2) {
 
 export function TakeScreenshot(arg1) {
   return window['go']['main']['App']['TakeScreenshot'](arg1);
+}
+
+export function TcpdumpInstallCommands(arg1) {
+  return window['go']['main']['App']['TcpdumpInstallCommands'](arg1);
 }
 
 export function TcpipMode(arg1, arg2) {

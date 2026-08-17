@@ -24,12 +24,8 @@ type DeviceCommands struct {
 	PowerOff         []string `json:"powerOff"`
 	RestartAdbd      []string `json:"restartAdbd"`
 	RootProbe        []string `json:"rootProbe"`
-	Clipboard        []string `json:"clipboard"`
 	Scrcpy           []string `json:"scrcpy"`
 }
-
-// clipboardPlaceholder stands in for text the user has not typed yet.
-const clipboardPlaceholder = "<text>"
 
 // DeviceCommandsFor renders them. scrcpy is a host program adbq launches, so its
 // line is passed in by the caller that knows where the binary is; an empty
@@ -60,7 +56,6 @@ func DeviceCommandsFor(serial string, tcpipPort, recordSeconds int, scrcpy strin
 		PowerOff:    []string{render(powerOffRemote(), true)},
 		RestartAdbd: []string{render(restartAdbdRemote(), true)},
 		RootProbe:   []string{render(rootProbeRemote(), false)},
-		Clipboard:   []string{render(clipboardSetRemote(clipboardPlaceholder), false)},
 	}
 	if scrcpy != "" {
 		dc.Scrcpy = []string{scrcpy}

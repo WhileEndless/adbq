@@ -649,6 +649,14 @@ func (a *App) StopCapture(serial string) (*adb.CaptureState, error) {
 	}
 	return st, err
 }
+
+// CaptureCommands renders the file-capture panel's actions for the interface and
+// filter currently selected: the backgrounded tcpdump, the signal that finalises
+// the pcap, and the pull that brings it here.
+func (a *App) CaptureCommands(serial, iface, bpf string) adb.CaptureCommands {
+	return a.client.CaptureCommandsFor(a.ctx, serial, iface, bpf)
+}
+
 func (a *App) CaptureStatus(serial string) (*adb.CaptureState, error) {
 	st, err := a.client.CaptureStatus(a.ctx, serial, "", "")
 	if err != nil || st == nil {
@@ -683,6 +691,12 @@ func (a *App) PlanTcpdumpAutoInstall(serial string) (*adb.TcpdumpAutoPlan, error
 // the manifest-pinned tcpdump matching the device ABI. confirmed must be
 // true — pass it only after the user accepted the dialog backed by
 // PlanTcpdumpAutoInstall.
+// TcpdumpInstallCommands renders what installing tcpdump does to the device, so
+// the consent dialog can show it beside the source and the checksum.
+func (a *App) TcpdumpInstallCommands(serial string) []string {
+	return adb.TcpdumpInstallCommands(serial, a.client.Renderer(a.ctx, serial))
+}
+
 func (a *App) InstallTcpdumpAuto(serial string, confirmed bool) (*adb.TcpdumpInfo, error) {
 	return a.client.InstallTcpdumpAuto(a.ctx, serial, confirmed)
 }

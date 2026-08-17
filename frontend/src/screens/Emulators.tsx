@@ -6,7 +6,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOn} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
-import {Badge, CodeBlock, CommandChip, CommandPreview, FeatureNotice, IconBtn, Modal, SearchInput, Switch, confirmDialog, showToast} from '../ui';
+import {Badge, CodeBlock, CommandChip, CommandPreview, FeatureNotice, IconBtn, Modal, SearchInput, Switch, commandToast, confirmDialog, showToast} from '../ui';
 
 type Tab = 'avds' | 'images' | 'root' | 'host';
 
@@ -198,14 +198,14 @@ function AVDRow({avd, sdk, selected, onSelect, onChanged}: {
   const start = (extra?: Partial<adb.EmulatorOpts>) => {
     setBusy(true);
     API.StartAVD(avd.name, {...opts, ...extra} as adb.EmulatorOpts)
-      .then(serial => showToast({title: `${avd.name} starting`, body: serial, kind: 'ok', mono: true}))
+      .then(serial => showToast({title: `${avd.name} starting`, body: serial, kind: 'ok', mono: true, actions: commandToast(launchCmd ? [launchCmd] : null)}))
       .catch(e => showToast({title: 'Start failed', body: String(e), kind: 'err'}))
       .finally(() => { setBusy(false); onChanged(); });
   };
   const stop = () => {
     setBusy(true);
     API.StopAVD(avd.name)
-      .then(() => showToast({title: `${avd.name} stopping`, kind: 'ok'}))
+      .then(() => showToast({title: `${avd.name} stopping`, kind: 'ok', actions: commandToast(avd.commands?.slice(1))}))
       .catch(e => showToast({title: 'Stop failed', body: String(e), kind: 'err'}))
       .finally(() => { setBusy(false); onChanged(); });
   };
@@ -250,6 +250,10 @@ function AVDRow({avd, sdk, selected, onSelect, onChanged}: {
                   <button className='btn sm' disabled={busy || !!avd.error} title='Boot without loading the saved snapshot'
                           onClick={() => start({coldBoot: true})}>Cold</button>
                 </>}
+            <CommandChip label={avd.name} groups={[
+              {label: 'Start', commands: launchCmd ? [launchCmd] : avd.commands?.slice(0, 1)},
+              {label: 'Stop', commands: avd.commands?.slice(1)},
+            ]}/>
             <IconBtn title='Boot options' active={showOpts} onClick={() => setShowOpts(o => !o)}>
               <Icon.Settings width={13} height={13}/>
             </IconBtn>
@@ -260,10 +264,6 @@ function AVDRow({avd, sdk, selected, onSelect, onChanged}: {
           <div style={{marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)'}}>
             <BootOptions opts={opts} onChange={setOpts} snapshots={avd.snapshots ?? []}/>
             <div style={{marginTop: 8, display: 'flex', gap: 6, alignItems: 'center'}}>
-              {/* No locally assembled fallback: until Go answers there is no
-                  command to show, and inventing one risks showing a line that is
-                  not what would run (CLAUDE.md §4.1). */}
-              <CommandChip label='Launch' commands={launchCmd ? [launchCmd] : []}/>
               <div style={{flex: 1}}/>
               <button className='btn sm danger' disabled={busy} onClick={wipe}><Icon.Trash/>Wipe data</button>
             </div>
@@ -835,7 +835,14 @@ function ImagesTab() {
   const install = async (img: adb.SystemImage) => {
     const ok = await confirmDialog({
       title: `Install ${img.pkg}?`,
-      body: `This downloads a system image from Google's SDK repository — typically 1–2 GB.\n\nBy installing it you accept the Android SDK licence for this package. adbq never accepts licences on your behalf; if it has not been accepted yet the install will stop and tell you.\n\n${img.commands?.[0] ?? ''}`,
+      body: <>
+        <div>This downloads a system image from Google's SDK repository — typically 1–2 GB.</div>
+        <div style={{marginTop: 6}}>
+          By installing it you accept the Android SDK licence for this package. adbq never accepts
+          licences on your behalf; if it has not been accepted yet the install will stop and tell you.
+        </div>
+        <CommandPreview commands={img.commands ?? []} defaultOpen/>
+      </>,
       confirmLabel: 'Download and install',
     });
     if (!ok) return;
@@ -846,7 +853,10 @@ function ImagesTab() {
   const uninstall = async (img: adb.SystemImage) => {
     const ok = await confirmDialog({
       title: `Remove ${img.pkg}?`,
-      body: `The system image is deleted from disk. Any AVD using it stops working until it is reinstalled.\n\n${img.commands?.[0] ?? ''}`,
+      body: <>
+        The system image is deleted from disk. Any AVD using it stops working until it is reinstalled.
+        <CommandPreview commands={img.commands ?? []} defaultOpen/>
+      </>,
       confirmLabel: 'Remove', danger: true,
     });
     if (!ok) return;

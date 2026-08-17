@@ -645,12 +645,25 @@ function NetCapture({device}: {device: adb.Device}) {
   function stop() {
     setBusy(true);
     API.StopCapture(device.id)
-      .then(s => { setState(s); showToast({title: 'Capture stopped', body: `${fmtBytes(s?.sizeBytes || 0)} captured`, kind: 'ok'}); })
+      .then(s => { setState(s); showToast({title: 'Capture stopped', body: `${fmtBytes(s?.sizeBytes || 0)} captured`, kind: 'ok', actions: commandToast(cmds?.stop)}); })
       .catch(e => showToast({title: 'Stop failed', body: String(e), kind: 'err'}))
       .finally(() => setBusy(false));
   }
 
-  const cmd = `nohup tcpdump -i ${iface} -U -w /sdcard/adbq-capture.pcap${filter ? ' ' + JSON.stringify(filter) : ''} >/dev/null 2>&1 &`;
+  // Assembled by Go: the tcpdump path, the on-device pcap target and the `su`
+  // form are all things this panel would have to guess at, and the guess it used
+  // to print named a file the capture never writes (CLAUDE.md §4.1).
+  const [cmds, setCmds] = useState<adb.CaptureCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setCmds(null); return; }
+    let live = true;
+    const t = setTimeout(() => {
+      API.CaptureCommands(device.id, iface, filter)
+        .then(c => { if (live) setCmds(c); })
+        .catch(() => { if (live) setCmds(null); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [device?.id, iface, filter, td?.available]);
 
   return (
     <>
@@ -707,7 +720,7 @@ function NetCapture({device}: {device: adb.Device}) {
                 <button className='btn sm' onClick={() => API.AdoptExternalCapture(device.id).then(poll).then(() => showToast({title: 'Adopted', kind: 'ok'}))}>
                   Adopt
                 </button>
-                <button className='btn sm danger' onClick={() => API.KillExternalCapture(device.id).then(s => { setState(s); showToast({title: 'Killed external tcpdump', kind: 'ok'}); })}>
+                <button className='btn sm danger' onClick={() => API.KillExternalCapture(device.id).then(s => { setState(s); showToast({title: 'Killed external tcpdump', kind: 'ok', actions: commandToast(cmds?.stop)}); })}>
                   Kill it
                 </button>
               </div>
@@ -746,8 +759,12 @@ function NetCapture({device}: {device: adb.Device}) {
             <Icon.Download/>Pull pcap
           </button>
           <div style={{flex: 1}}/>
-          {/* The command a running capture uses, one click away. */}
-          <CommandChip label='tcpdump' commands={cmd ? [cmd] : []}/>
+          {/* The commands behind this panel, one click away. */}
+          <CommandChip label='Capture' groups={[
+            {label: 'Start', commands: cmds?.start},
+            {label: 'Stop', commands: cmds?.stop, note: 'SIGINT is what makes tcpdump finalise the pcap header.'},
+            {label: 'Pull the pcap', commands: cmds?.pull},
+          ]}/>
           <button className='btn sm' onClick={poll}><Icon.Refresh/>Refresh</button>
         </div>
       </div>

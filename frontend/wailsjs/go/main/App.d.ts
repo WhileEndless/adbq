@@ -39,6 +39,8 @@ export function BrowseCodeshare(arg1:number):Promise<Array<adb.CodeshareProject>
 
 export function CancelTask(arg1:string):Promise<void>;
 
+export function CaptureCommands(arg1:string,arg2:string,arg3:string):Promise<adb.CaptureCommands>;
+
 export function CaptureProfileFromDevice(arg1:string,arg2:string):Promise<adb.Profile>;
 
 export function CaptureStatus(arg1:string):Promise<adb.CaptureState>;
@@ -456,6 +458,8 @@ export function StopScreenRecord(arg1:string):Promise<string>;
 export function SuggestProxyHost(arg1:string,arg2:number):Promise<main.ProxySuggestion>;
 
 export function TakeScreenshot(arg1:string):Promise<string>;
+
+export function TcpdumpInstallCommands(arg1:string):Promise<Array<string> | null>;
 
 export function TcpipMode(arg1:string,arg2:number):Promise<string>;
 

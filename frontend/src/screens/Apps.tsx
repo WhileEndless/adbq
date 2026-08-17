@@ -303,6 +303,20 @@ function FridaAppSection({device, pkg, running, setScreen}: {device: adb.Device;
 
   const count = binding?.scriptIds?.length || 0;
 
+  // One button here can push a frida-server, make it executable and daemonize it
+  // before the session even starts, so the commands behind that belong in reach
+  // (CLAUDE.md §4.1). The session's own host-side command shows up on the
+  // session, where its job file exists.
+  const [fcmds, setFcmds] = useState<adb.FridaCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setFcmds(null); return; }
+    let live = true;
+    API.FridaCommands(device.id, '', 0)
+      .then(c => { if (live) setFcmds(c); })
+      .catch(() => { if (live) setFcmds(null); });
+    return () => { live = false; };
+  }, [device?.id]);
+
   async function launch(mode: 'spawn' | 'attach', restart: boolean) {
     setBusy(mode + (restart ? '-restart' : ''));
     try {
@@ -332,6 +346,11 @@ function FridaAppSection({device, pkg, running, setScreen}: {device: adb.Device;
         <span className='title' style={{fontSize: 12, display: 'flex', alignItems: 'center', gap: 6}}><Icon.Zap width={13} height={13}/>Frida</span>
         {count > 0 && <Badge kind='accent'>{count} script{count === 1 ? '' : 's'}</Badge>}
         <div style={{flex: 1}}/>
+        <CommandChip label='Frida prerequisites' groups={[
+          {label: 'Install a server', commands: fcmds?.install, note: 'Only when the device has no matching frida-server yet.'},
+          {label: 'Start it', commands: fcmds?.start},
+          {label: 'Stop it', commands: fcmds?.stop},
+        ]}/>
         <button className='btn sm' onClick={() => setManage(true)}>Manage scripts</button>
       </div>
       <div className='card-body'>

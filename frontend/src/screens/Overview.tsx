@@ -134,7 +134,6 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
                 {label: 'Restart adbd', commands: cmds?.restartAdbd},
                 {label: 'Reboot', commands: cmds?.reboot},
                 {label: 'Power off', commands: cmds?.powerOff},
-                {label: 'Set clipboard', commands: cmds?.clipboard},
               ]}/>
             </div>
             <div className='card-body' style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6}}>
@@ -174,8 +173,10 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
                 if (!ok) return;
                 try {
                   await API.TcpipMode(device.id, 5555);
+                  // The body names the address to connect to, not a command:
+                  // the command to copy is the one that just ran.
                   showToast({
-                    title: 'Wi-Fi adb enabled', body: `adb connect ${device.ip || '<ip>'}:5555`,
+                    title: 'Wi-Fi adb enabled', body: `${device.ip || '<device ip>'}:5555`,
                     kind: 'ok', mono: true, actions: commandToast(cmds?.tcpip),
                   });
                 } catch (e) {

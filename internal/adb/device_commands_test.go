@@ -101,3 +101,43 @@ func TestCaptureCommandForShowsTheRealInvocation(t *testing.T) {
 		t.Error("no tcpdump, no command")
 	}
 }
+
+// The file-capture panel used to print a command it made up in the frontend,
+// naming a file the capture never writes. These are the real ones.
+func TestCaptureCommandsForNameTheRealFileAndSignal(t *testing.T) {
+	got := CaptureCommandsFor("emulator-5554", "/data/local/tmp/tcpdump", "wlan0", "'tcp port 443'", PlainRenderer("emulator-5554"))
+	if !strings.Contains(got.Start[0], "nohup") || !strings.Contains(got.Start[0], capturePath) {
+		t.Errorf("start: %s", got.Start[0])
+	}
+	// A filter the user wrapped in quotes themselves must not be quoted twice —
+	// tcpdump would then read the quotes as part of the expression. Checked on
+	// the remote command, before the su/shell layers add their own escaping.
+	inner := captureStartRemote("/data/local/tmp/tcpdump", "wlan0", strings.Trim("'tcp port 443'", "'\""))
+	if !strings.Contains(inner, `'tcp port 443'`) || strings.Contains(inner, `''tcp port 443''`) {
+		t.Errorf("filter quoting: %s", inner)
+	}
+	// SIGINT, not SIGKILL: the pcap header is only written on a clean stop.
+	if !strings.Contains(got.Stop[0], "kill -INT") {
+		t.Errorf("stop: %s", got.Stop[0])
+	}
+	if !strings.Contains(got.Pull[0], "pull "+capturePath) {
+		t.Errorf("pull: %s", got.Pull[0])
+	}
+	// No tcpdump on the device means there is no start command to promise.
+	none := CaptureCommandsFor("emulator-5554", "", "any", "", PlainRenderer("emulator-5554"))
+	if len(none.Start) != 0 {
+		t.Errorf("start without tcpdump: %#v", none.Start)
+	}
+}
+
+func TestTcpdumpInstallCommandsCoverPushChmodAndProbe(t *testing.T) {
+	got := TcpdumpInstallCommands("emulator-5554", PlainRenderer("emulator-5554"))
+	if len(got) != 3 {
+		t.Fatalf("got %#v", got)
+	}
+	for i, want := range []string{tcpdumpInstallPath, "chmod 755", "--version"} {
+		if !strings.Contains(got[i], want) {
+			t.Errorf("step %d (%s) does not mention %q", i, got[i], want)
+		}
+	}
+}
