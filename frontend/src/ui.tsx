@@ -407,6 +407,56 @@ export function CodeBlock({children, multiline}: {children: string; multiline?: 
   );
 }
 
+// ─── CommandPreview: the command, without taking over the panel ─────────
+//
+// Every device action has to be able to show the command it runs
+// (CLAUDE.md §4.1), but a multi-line block per action crowds out everything
+// else on a panel that has several of them. Collapsed this is one line: what
+// runs, and how many steps there are. Expanding shows all of it, and copying
+// takes the whole thing either way — the rule is that the command is always
+// reachable, not that it is always in the way.
+export function CommandPreview({commands, label = 'Command'}: {commands: string[]; label?: string}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const lines = (commands ?? []).filter(c => c.trim() !== '');
+  if (lines.length === 0) return null;
+  const all = lines.join('\n');
+
+  const copy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(all).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1100);
+    });
+  };
+
+  return (
+    <div style={{marginTop: 8}}>
+      <div onClick={() => setOpen(o => !o)}
+           title={open ? 'Hide the command' : 'Show the command'}
+           style={{
+             display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+             fontSize: 11, color: 'var(--text-dim)', userSelect: 'none',
+           }}>
+        <span style={{
+          display: 'inline-block', transition: 'transform .12s',
+          transform: open ? 'rotate(90deg)' : 'none', opacity: .7,
+        }}>›</span>
+        <span>{label}{lines.length > 1 ? ` · ${lines.length} steps` : ''}</span>
+        <span className='mono' style={{
+          flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap', opacity: open ? 0 : .55,
+        }}>{open ? '' : lines[0]}</span>
+        <button className='btn sm' onClick={copy} title='Copy every line'
+                style={{padding: '0 6px', fontSize: 10}}>
+          {copied ? 'copied!' : 'copy'}
+        </button>
+      </div>
+      {open && <div style={{marginTop: 6}}><CodeBlock multiline>{all}</CodeBlock></div>}
+    </div>
+  );
+}
+
 // ─── Click-outside hook ──────────────────────────────────────────────────
 
 export function useClickOutside<T extends HTMLElement>(active: boolean, onClose: () => void) {

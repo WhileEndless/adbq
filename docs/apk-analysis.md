@@ -8,7 +8,9 @@ Bu doküman, dışa aktardıktan **sonra** gelen iki adımı kapsar:
 - **Download binaries** — aynı kopyalardan native kitaplıklar, gömülü
   çalıştırılabilirler ve yanlarındaki runtime blob'ları tek bir zip'e toplanır.
 
-İkisi de Apps ekranındaki uygulama detayında, "Analysis" bölümünde.
+İkisi de Apps ekranındaki uygulama detayının **"APK"** bölümünde — dışa
+aktarma düğmesiyle aynı yerde, çünkü üçü de aynı şey üzerinde çalışıyor:
+kurulumu oluşturan APK'lar.
 
 ## 1. Neden dışa aktarılan dosyayı doğrudan açmıyoruz
 
@@ -209,6 +211,12 @@ Her iki eylem de çalıştıracağı komutu önden gösterir; metni backend üre
 |---|---|---|
 | `JadxOpenPlan.Commands` | `jadx_open.go` | `pm path`, APK başına `pull`, `JAVA_HOME=… jadx-gui <girdiler>` |
 | `BinaryPlan.Commands` | `apk_binaries.go` | `pm path`, APK başına `pull`, `pull …/lib`, ve toplama adımını anlatan `#` satırı |
+
+Gösterim `CommandPreview` (`frontend/src/ui.tsx`) ile yapılır: kapalıyken tek
+satır (ilk komut + adım sayısı), tıklayınca açılır, `copy` düğmesi her zaman
+tamamını kopyalar. Kural komutun **ulaşılabilir** olması; sürekli ekranda
+durması değil — panelde üç eylem var ve üçünün listesi birden açıkken panel
+okunmuyordu.
 
 Saf üreticiler: `JadxCommand`, `PlanAppBinaries`. İndirme onayındaki metin
 (`JadxInfo.Disclosures`) da backend'de üretilir, böylece diyalog bir maddeyi

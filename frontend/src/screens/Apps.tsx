@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CodeBlock, Modal, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandPreview, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {pickApkAndInstall} from '../lib/apk';
 import {ensureJadx, jadxInfo, jadxLabel} from '../lib/jadx';
@@ -116,52 +116,6 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                   </div>
                 </div>
               </div>
-              {detail && <>
-                <DetailSection title='Versions'>
-                  <Detail k='Version' v={detail.v ? `${detail.v}${detail.versionCode ? `  ·  code ${detail.versionCode}` : ''}` : detail.versionCode}/>
-                  <Detail k='Target SDK' v={sdkLabel(detail.targetSdk)}/>
-                  <Detail k='Min SDK'    v={sdkLabel(detail.minSdk)}/>
-                  <Detail k='Compile SDK' v={sdkLabel(detail.compileSdk)}/>
-                </DetailSection>
-                <DetailSection title='State (user 0)'>
-                  <Detail k='Enabled'    v={detail.enabled}/>
-                  <Detail k='Installed'  v={detail.installed}/>
-                  <Detail k='Stopped'    v={detail.stopped}/>
-                  <Detail k='Suspended'  v={detail.suspended}/>
-                  <Detail k='Not launched' v={detail.notLaunched}/>
-                  <Detail k='Instant'    v={detail.instant}/>
-                </DetailSection>
-                <DetailSection title='Install'>
-                  <Detail k='Installer'     v={detail.installer || (detail.system ? '—' : 'Sideload')}/>
-                  <Detail k='First install' v={detail.firstInstall}/>
-                  <Detail k='Last update'   v={detail.lastUpdate}/>
-                  <Detail k='APK modified'  v={detail.timeStamp}/>
-                  <Detail k='Install loc'   v={installLocLabel(detail.installLocation)}/>
-                </DetailSection>
-                <DetailSection title='Code'>
-                  <Detail k='Code path'   v={detail.path} mono copy/>
-                  <Detail k='Data dir'    v={detail.dataDir} mono copy/>
-                  <Detail k='Native libs' v={detail.nativeLibraryDir} mono copy/>
-                  <Detail k='Primary ABI' v={detail.primaryAbi}/>
-                  <Detail k='Secondary ABI' v={detail.secondaryAbi}/>
-                  {detail.splits && detail.splits.length > 0 && <SplitsRow splits={detail.splits}/>}
-                  {detail.supportsScreens && detail.supportsScreens.length > 0 && <ScreensRow screens={detail.supportsScreens}/>}
-                </DetailSection>
-                {(detail.flags?.length || detail.privateFlags?.length) ? (
-                  <DetailSection title='Flags'>
-                    <FlagsRow flags={detail.flags || []} priv={detail.privateFlags || []}/>
-                  </DetailSection>
-                ) : null}
-                <DetailSection title='Signature'>
-                  <Detail k='Cert'           v={detail.signature} mono copy/>
-                  <Detail k='Signing scheme' v={detail.apkSigningVersion ? `v${detail.apkSigningVersion}` : ''}/>
-                </DetailSection>
-                {detail.gids && detail.gids.length > 0 && (
-                  <DetailSection title='Groups'>
-                    <Detail k='GIDs' v={detail.gids.join(', ')} mono/>
-                  </DetailSection>
-                )}
-              </>}
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 14}}>
                 {running?.running
                   ? <button className='btn danger' onClick={async () => {
@@ -232,9 +186,55 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                   <Icon.Download/>Export data{!device.root && ' (root)'}
                 </button>
               </div>
-              <ApkTransferSection device={device} pkg={sel.pkg}/>
-              <ApkAnalysisSection device={device} pkg={sel.pkg}/>
+              <ApkToolsSection device={device} pkg={sel.pkg}/>
               <FridaAppSection device={device} pkg={sel.pkg} running={!!running?.running} setScreen={setScreen}/>
+              {detail && <>
+                <DetailSection title='Versions' defaultOpen>
+                  <Detail k='Version' v={detail.v ? `${detail.v}${detail.versionCode ? `  ·  code ${detail.versionCode}` : ''}` : detail.versionCode}/>
+                  <Detail k='Target SDK' v={sdkLabel(detail.targetSdk)}/>
+                  <Detail k='Min SDK'    v={sdkLabel(detail.minSdk)}/>
+                  <Detail k='Compile SDK' v={sdkLabel(detail.compileSdk)}/>
+                </DetailSection>
+                <DetailSection title='State (user 0)'>
+                  <Detail k='Enabled'    v={detail.enabled}/>
+                  <Detail k='Installed'  v={detail.installed}/>
+                  <Detail k='Stopped'    v={detail.stopped}/>
+                  <Detail k='Suspended'  v={detail.suspended}/>
+                  <Detail k='Not launched' v={detail.notLaunched}/>
+                  <Detail k='Instant'    v={detail.instant}/>
+                </DetailSection>
+                <DetailSection title='Install'>
+                  <Detail k='Installer'     v={detail.installer || (detail.system ? '—' : 'Sideload')}/>
+                  <Detail k='First install' v={detail.firstInstall}/>
+                  <Detail k='Last update'   v={detail.lastUpdate}/>
+                  <Detail k='APK modified'  v={detail.timeStamp}/>
+                  <Detail k='Install loc'   v={installLocLabel(detail.installLocation)}/>
+                </DetailSection>
+                <DetailSection title='Code'>
+                  <Detail k='Code path'   v={detail.path} mono copy/>
+                  <Detail k='Data dir'    v={detail.dataDir} mono copy/>
+                  <Detail k='Native libs' v={detail.nativeLibraryDir} mono copy/>
+                  <Detail k='Primary ABI' v={detail.primaryAbi}/>
+                  <Detail k='Secondary ABI' v={detail.secondaryAbi}/>
+                  {detail.splits && detail.splits.length > 0 && <SplitsRow splits={detail.splits}/>}
+                  {detail.supportsScreens && detail.supportsScreens.length > 0 && <ScreensRow screens={detail.supportsScreens}/>}
+                </DetailSection>
+                {(detail.flags?.length || detail.privateFlags?.length) ? (
+                  <DetailSection title='Flags'>
+                    <FlagsRow flags={detail.flags || []} priv={detail.privateFlags || []}/>
+                  </DetailSection>
+                ) : null}
+                <DetailSection title='Signature'>
+                  <Detail k='Cert'           v={detail.signature} mono copy/>
+                  <Detail k='Signing scheme' v={detail.apkSigningVersion ? `v${detail.apkSigningVersion}` : ''}/>
+                </DetailSection>
+                {detail.gids && detail.gids.length > 0 && (
+                  <DetailSection title='Groups'>
+                    <Detail k='GIDs' v={detail.gids.join(', ')} mono/>
+                  </DetailSection>
+                )}
+              </>}
+              <PermissionsPanel detail={detail}/>
               <button className='btn danger' style={{marginTop: 6, width: '100%'}}
                       onClick={async () => {
                         if (!sel) return;
@@ -246,7 +246,6 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                       }}>
                 <Icon.Trash/>Uninstall
               </button>
-              <PermissionsPanel detail={detail}/>
             </>
           ) : <div className='muted' style={{padding: 20}}>Select an app</div>}
         </div>
@@ -387,97 +386,38 @@ function ManageFridaScriptsModal({pkg, onClose}: {pkg: string; onClose: () => vo
   );
 }
 
-// ─── APK export ───────────────────────────────────────────────
+// ─── APK: export, decompile, binaries ──────────────────────────────────
 //
-// App Bundle installs are several APKs (base + config splits). Exporting only
-// the base produces a file that fails to install later with
-// INSTALL_FAILED_MISSING_SPLIT, so those are exported as one .apks archive —
-// and only those. A plain single-APK app stays a plain .apk.
+// One section, because all three actions work off the same thing: the APKs that
+// make up the install. They were three separate blocks, each with its command
+// listing open, which is most of what made this panel unreadable.
+//
+// App Bundle installs are several APKs (base + config splits), and that shapes
+// every action here. Exporting only the base produces a file that fails to
+// install later with INSTALL_FAILED_MISSING_SPLIT, so those become one .apks
+// archive; the decompiler instead gets the parts, all at once, because the
+// bundle is not an input it reads and a feature split's code would otherwise be
+// missing.
 //
 // Installing lives in the screen header, not here: it targets the device, not
 // the app you happen to have selected.
-function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
+function ApkToolsSection({device, pkg}: {device: adb.Device; pkg: string}) {
   const [set, setSet] = useState<adb.ApkSet | null>(null);
-  const [err, setErr] = useState('');
-
-  useEffect(() => {
-    let live = true;
-    setSet(null); setErr('');
-    API.ApkSetOf(device.id, pkg)
-      .then(s => { if (live) setSet(s); })
-      .catch(e => { if (live) setErr(String(e)); });
-    return () => { live = false; };
-  }, [device.id, pkg]);
-
-  // Go marshals a nil slice as JSON null, so never read .length off these directly.
-  const splits = set?.splits ?? [];
-  const split = !!set?.split;
-  const count = set ? splits.length + 1 : 0;
-
-  return (
-    <div className='app-detail-section'>
-      <div className='app-detail-section-title'>APK export</div>
-      {err && <div className='muted' style={{fontSize: 12, color: 'var(--danger)'}}>Could not read the APK layout: {err}</div>}
-      {set && (
-        <>
-          <div className='app-detail-row'>
-            <span className='app-detail-k'>Layout</span>
-            <span className='app-detail-v'>
-              {split
-                ? <>App Bundle · base + {splits.length} split APK(s)</>
-                : <>Single APK</>}
-            </span>
-          </div>
-          <div className='app-detail-row'>
-            <span className='app-detail-k'>File</span>
-            <span className='app-detail-v mono'>{set.suggested}</span>
-          </div>
-          <button className='btn' style={{width: '100%', marginTop: 8}} onClick={() => {
-            API.ExportApks(device.id, pkg)
-              .then(id => id && showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
-              .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}));
-          }}>
-            <Icon.Download/>Export {split ? '.apks' : '.apk'}
-          </button>
-          {split && (
-            <div className='muted' style={{fontSize: 11, marginTop: 6}}>
-              All {count} APKs go into one .apks archive. Installing only the base would fail with INSTALL_FAILED_MISSING_SPLIT.
-            </div>
-          )}
-          <div style={{marginTop: 10, fontSize: 11}}>
-            <span className='muted'>Underlying command (click to copy):</span>{' '}
-            <CodeBlock multiline>{(set.commands ?? []).join('\n')}</CodeBlock>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// Two things you almost always want next after exporting an APK: read the code,
-// and get at the native binaries. Both work off the same copies of the app's
-// APKs, so they live in one section.
-//
-// Splits are the reason this is not just "open the exported file": the export is
-// one .apks archive, and a decompiler wants the parts — all of them at once, or
-// the code in a feature split is simply missing.
-function ApkAnalysisSection({device, pkg}: {device: adb.Device; pkg: string}) {
   const [plan, setPlan] = useState<adb.JadxOpenPlan | null>(null);
   const [binPlan, setBinPlan] = useState<adb.BinaryPlan | null>(null);
   const [info, setInfo] = useState<adb.JadxInfo | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
 
-  const reload = () => {
-    API.PlanJadxOpen(device.id, pkg).then(setPlan).catch(e => setErr(String(e)));
-  };
-
   useEffect(() => {
     let live = true;
-    setPlan(null); setBinPlan(null); setErr('');
+    setSet(null); setPlan(null); setBinPlan(null); setErr('');
+    API.ApkSetOf(device.id, pkg)
+      .then(s => { if (live) setSet(s); })
+      .catch(e => { if (live) setErr(String(e)); });
     API.PlanJadxOpen(device.id, pkg)
       .then(p => { if (live) setPlan(p); })
-      .catch(e => { if (live) setErr(String(e)); });
+      .catch(() => {});
     API.PlanAppBinaries(device.id, pkg)
       .then(p => { if (live) setBinPlan(p); })
       .catch(() => {});
@@ -486,6 +426,19 @@ function ApkAnalysisSection({device, pkg}: {device: adb.Device; pkg: string}) {
       .catch(() => {});
     return () => { live = false; };
   }, [device.id, pkg]);
+
+  // Go marshals a nil slice as JSON null, so never read .length off these directly.
+  const splits = set?.splits ?? [];
+  const split = !!set?.split;
+  const count = set ? splits.length + 1 : 0;
+
+  const exportApks = () => {
+    setBusy('apk');
+    API.ExportApks(device.id, pkg)
+      .then(id => id && showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
+      .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}))
+      .finally(() => setBusy(''));
+  };
 
   const openJadx = async () => {
     setBusy('jadx');
@@ -507,7 +460,7 @@ function ApkAnalysisSection({device, pkg}: {device: adb.Device; pkg: string}) {
       showToast({title: 'Could not open jadx', body: String(e), kind: 'err'});
     } finally {
       setBusy('');
-      reload();
+      API.PlanJadxOpen(device.id, pkg).then(setPlan).catch(() => {});
     }
   };
 
@@ -519,70 +472,94 @@ function ApkAnalysisSection({device, pkg}: {device: adb.Device; pkg: string}) {
       .finally(() => setBusy(''));
   };
 
-  const names = plan?.names ?? [];
-
   return (
     <div className='app-detail-section'>
-      <div className='app-detail-section-title'>Analysis</div>
+      <div className='app-detail-section-title'>APK</div>
       {err && <div className='muted' style={{fontSize: 12, color: 'var(--danger)'}}>Could not read the APK layout: {err}</div>}
-      <div className='app-detail-row'>
-        <span className='app-detail-k'>Decompiler</span>
-        <span className='app-detail-v'>
-          {jadxLabel(info)}
-          {info?.installed && !info.java && <> · <span style={{color: 'var(--danger)'}}>no Java runtime</span></>}
-        </span>
-      </div>
-      {names.length > 0 && (
-        <div className='app-detail-row'>
-          <span className='app-detail-k'>Inputs</span>
-          <span className='app-detail-v'>
-            {names.length} APK(s){plan?.staged ? ' · already copied here' : ''}
-          </span>
-        </div>
-      )}
-      <button className='btn' style={{width: '100%', marginTop: 8}} disabled={busy !== ''} onClick={openJadx}>
-        <Icon.Layers/>{busy === 'jadx' ? '…opening' : 'Open in jadx'}
-      </button>
-      {names.length > 1 && (
-        <div className='muted' style={{fontSize: 11, marginTop: 6}}>
-          All {names.length} APKs open in one jadx session, so code in a feature split is not left out.
-        </div>
-      )}
-      {plan && (plan.commands ?? []).length > 0 && (
-        <div style={{marginTop: 10, fontSize: 11}}>
-          <span className='muted'>Underlying command (click to copy):</span>{' '}
-          <CodeBlock multiline>{(plan.commands ?? []).join('\n')}</CodeBlock>
-        </div>
-      )}
-      <button className='btn' style={{width: '100%', marginTop: 12}} disabled={busy !== ''} onClick={exportBinaries}>
-        <Icon.Cpu/>{busy === 'bin' ? '…collecting' : 'Download binaries'}
-      </button>
-      <div className='muted' style={{fontSize: 11, marginTop: 6}}>
-        Native libraries, shipped executables and the runtime blobs beside them, from every APK, in one zip.
-      </div>
-      {binPlan && (binPlan.commands ?? []).length > 0 && (
-        <div style={{marginTop: 10, fontSize: 11}}>
-          <span className='muted'>Underlying command (click to copy):</span>{' '}
-          <CodeBlock multiline>{(binPlan.commands ?? []).join('\n')}</CodeBlock>
-        </div>
+      {set && (
+        <>
+          <div className='app-detail-row'>
+            <span className='app-detail-k'>Layout</span>
+            <span className='app-detail-v'>
+              {split ? <>App Bundle · base + {splits.length} split APK(s)</> : <>Single APK</>}
+              {plan?.staged ? ' · copied here' : ''}
+            </span>
+          </div>
+          <div className='app-detail-row'>
+            <span className='app-detail-k'>File</span>
+            <span className='app-detail-v mono'>{set.suggested}</span>
+          </div>
+
+          <button className='btn' style={{width: '100%', marginTop: 8}} disabled={busy !== ''} onClick={exportApks}>
+            <Icon.Download/>{busy === 'apk' ? '…exporting' : `Export ${split ? '.apks' : '.apk'}`}
+          </button>
+          {split && (
+            <div className='muted' style={{fontSize: 11, marginTop: 6}}>
+              All {count} APKs go into one archive. Installing only the base would fail with INSTALL_FAILED_MISSING_SPLIT.
+            </div>
+          )}
+          <CommandPreview commands={set.commands ?? []}/>
+
+          <button className='btn' style={{width: '100%', marginTop: 12}} disabled={busy !== ''} onClick={openJadx}>
+            <Icon.Layers/>{busy === 'jadx' ? '…opening' : 'Open in jadx'}
+          </button>
+          <div className='muted' style={{fontSize: 11, marginTop: 6}}>
+            {jadxLabel(info)}
+            {info?.installed && !info.java && <> · <span style={{color: 'var(--danger)'}}>no Java runtime</span></>}
+            {split && <> · all {count} APKs open in one session</>}
+          </div>
+          <CommandPreview commands={plan?.commands ?? []}/>
+
+          <button className='btn' style={{width: '100%', marginTop: 12}} disabled={busy !== ''} onClick={exportBinaries}>
+            <Icon.Cpu/>{busy === 'bin' ? '…collecting' : 'Download binaries'}
+          </button>
+          <div className='muted' style={{fontSize: 11, marginTop: 6}}>
+            Native libraries, shipped executables and the runtime blobs beside them, in one zip.
+          </div>
+          <CommandPreview commands={binPlan?.commands ?? []}/>
+        </>
       )}
     </div>
   );
 }
 
-function DetailSection({title, children}: {title: string; children: React.ReactNode}) {
+function DetailSection({title, children, defaultOpen}: {title: string; children: React.ReactNode; defaultOpen?: boolean}) {
   // Sections only render when they contain non-empty Detail rows, so we peek
   // at children and bail when everything resolved to null. Without this the
   // headings would dangle over empty space for system apps that don't expose
   // e.g. compileSdk or signatures.
   const arr = React.Children.toArray(children).filter(c => c !== null && c !== undefined);
+  const [open, setOpen] = useSectionOpen(title, !!defaultOpen);
   if (arr.length === 0) return null;
   return (
     <div className='app-detail-section'>
-      <div className='app-detail-section-title'>{title}</div>
-      {children}
+      <div className='app-detail-section-title' onClick={() => setOpen(!open)}
+           style={{cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none'}}>
+        <span style={{display: 'inline-block', transition: 'transform .12s', transform: open ? 'rotate(90deg)' : 'none', opacity: .7}}>›</span>
+        {title}
+      </div>
+      {open && children}
     </div>
   );
+}
+
+// useSectionOpen persists a section's state per title, so the panel comes back
+// the way the user left it instead of re-collapsing on every app they click.
+function useSectionOpen(key: string, initial: boolean): [boolean, (v: boolean) => void] {
+  const storeKey = 'adbq.appdetail.' + key;
+  const [open, setOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem(storeKey);
+      return v === null ? initial : v === '1';
+    } catch {
+      return initial;
+    }
+  });
+  const set = (v: boolean) => {
+    setOpen(v);
+    try { localStorage.setItem(storeKey, v ? '1' : '0'); } catch { /* private mode: state is per-session */ }
+  };
+  return [open, set];
 }
 
 function Detail({k, v, mono, copy}: {k: string; v?: string; mono?: boolean; copy?: boolean}) {
