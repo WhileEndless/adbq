@@ -17,7 +17,9 @@ day-to-day Android-debugging workflows — logcat, shell, app management, file
 transfer, port forwards, frida-server, network/proxy control, packet capture,
 iptables, and screenshots — in a fast, keyboard-friendly, Linear/Raycast-style
 UI. Built with [Wails v2](https://wails.io) (Go backend + React/TypeScript
-frontend), it ships as a small native binary on macOS, Windows, and Linux.
+frontend), it ships as a small native binary on macOS, Windows, and Linux —
+though see [Platform status](#platform-status--what-is-actually-tried) for what
+is genuinely exercised and what merely builds.
 
 > 🇹🇷 **Türkçe:** Bu belgenin Türkçesi için [README.tr.md](README.tr.md).
 
@@ -105,6 +107,17 @@ adbq --version      # also: -v, or `version`
 >
 > **Linux runtime deps:** install the WebKit GTK runtime if it is missing —
 > e.g. `sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37`.
+
+### Platform status — what is actually tried
+
+| Platform | State |
+|---|---|
+| **macOS** | Developed and used here. Everything in this README is exercised on it. |
+| **Linux** | Builds in CI and the platform paths are wired (SDK under `~/Android/Sdk`, `/usr/lib/jvm` for Java, `xdg-open`, scrcpy, an installable desktop entry). Not routinely run by the author, so treat it as expected-to-work rather than verified. The binary links against **WebKit GTK 4.0** — distros that ship only 4.1 (Ubuntu 24.04+, Fedora 40+) need the 4.0 runtime installed, or the app will not start. |
+| **Windows** | Builds in CI and most host integrations exist (`.bat`/`.exe` tool names, `%LOCALAPPDATA%` SDK root, WebView2, Explorer reveal). **Untested by the author, and the interactive Shell screen does not work**: it needs a pseudo-terminal, which adbq has not implemented on Windows. Everything else — logcat, apps, files, forwards, network, capture — has no known Windows-specific blocker, but "no known blocker" is not the same as "tried". |
+
+If you run it on Linux or Windows, an issue saying what broke (or that nothing
+did) is genuinely useful.
 
 ## Requirements
 

@@ -18,7 +18,9 @@ paket yakalama, iptables ve ekran görüntüsü — hızlı, klavye dostu,
 Linear/Raycast tarzı bir arayüzde toplayan çapraz platform bir masaüstü ADB
 yöneticisidir. [Wails v2](https://wails.io) (Go arka uç + React/TypeScript ön
 yüz) ile geliştirilmiştir ve macOS, Windows ve Linux üzerinde küçük bir yerel
-ikili (binary) olarak çalışır.
+ikili (binary) olarak çalışır — neyin gerçekten denendiği, neyin yalnızca
+derlendiği için [Platform durumu](#platform-durumu--gerçekte-ne-deneniyor)
+bölümüne bakın.
 
 > 🇬🇧 **English:** For the English version of this document see
 > [README.md](README.md).
@@ -109,6 +111,17 @@ adbq --version      # ayrıca: -v veya `version`
 >
 > **Linux çalışma zamanı bağımlılıkları:** WebKit GTK çalışma zamanı yoksa
 > kurun — örn. `sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37`.
+
+### Platform durumu — gerçekte ne deneniyor
+
+| Platform | Durum |
+|---|---|
+| **macOS** | Burada geliştiriliyor ve kullanılıyor. Bu belgedeki her şey macOS'ta çalıştırılıyor. |
+| **Linux** | CI'da derleniyor ve platform yolları bağlı (`~/Android/Sdk`, Java için `/usr/lib/jvm`, `xdg-open`, scrcpy, kurulabilir masaüstü girdisi). Yazar tarafından rutin olarak çalıştırılmıyor; "çalışması beklenir" deyin, "doğrulandı" demeyin. İkili **WebKit GTK 4.0**'a bağlanıyor — yalnızca 4.1 gönderen dağıtımlarda (Ubuntu 24.04+, Fedora 40+) 4.0 çalışma zamanı kurulmadıkça uygulama açılmaz. |
+| **Windows** | CI'da derleniyor ve host entegrasyonlarının çoğu var (`.bat`/`.exe` araç adları, `%LOCALAPPDATA%` SDK kökü, WebView2, Explorer'da gösterme). **Yazar tarafından test edilmedi ve etkileşimli Shell ekranı çalışmıyor**: sözde terminal (PTY) gerekiyor, adbq bunu Windows'ta uygulamadı. Geri kalanı — logcat, uygulamalar, dosyalar, forward'lar, ağ, capture — için bilinen bir Windows engeli yok; ama "bilinen engel yok", "denendi" ile aynı şey değil. |
+
+Linux ya da Windows'ta çalıştırırsan, neyin bozulduğunu (ya da hiçbir şeyin
+bozulmadığını) yazan bir issue gerçekten işe yarar.
 
 ## Gereksinimler
 

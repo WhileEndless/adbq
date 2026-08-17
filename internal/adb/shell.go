@@ -2,9 +2,11 @@ package adb
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
@@ -53,6 +55,13 @@ func (c *Client) StartShell(ctx context.Context, serial, id string, root bool) (
 	// child's stdio (including stderr), and returns the master *os.File.
 	ptyFile, err := pty.Start(cmd)
 	if err != nil {
+		// creack/pty has no Windows implementation — it returns ErrUnsupported,
+		// which reaches the user as an unexplained failure. Say what is actually
+		// missing and what to do instead; the rest of adbq works there.
+		if runtime.GOOS == "windows" {
+			return nil, fmt.Errorf("the interactive shell needs a pseudo-terminal, which adbq does not implement on Windows yet — " +
+				"use `adb -s " + serial + " shell` in a terminal, or the one-shot command box on other screens")
+		}
 		return nil, err
 	}
 	s := &ShellSession{
