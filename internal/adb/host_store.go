@@ -17,6 +17,13 @@ type HostSettings struct {
 	ADBPath string `json:"adbPath,omitempty"`
 	// AVDHome overrides where .avd directories are looked for (ANDROID_AVD_HOME).
 	AVDHome string `json:"avdHome,omitempty"`
+	// JadxPath points at a jadx installation the user manages themselves —
+	// their own build, a distro package, or one they updated by hand. It wins
+	// over the copy adbq downloads.
+	JadxPath string `json:"jadxPath,omitempty"`
+	// JavaPath names the Java runtime to launch host-side Java tools with, for
+	// the case where none of the usual locations has one.
+	JavaPath string `json:"javaPath,omitempty"`
 }
 
 // HostStore persists HostSettings to ~/.adbq/host.json.
