@@ -2155,6 +2155,7 @@ export namespace adb {
 	    title: string;
 	    detail: string;
 	    needsRoot: boolean;
+	    commands: string[] | null;
 	    willSkip: boolean;
 	    skipReason?: string;
 	
@@ -2168,6 +2169,7 @@ export namespace adb {
 	        this.title = source["title"];
 	        this.detail = source["detail"];
 	        this.needsRoot = source["needsRoot"];
+	        this.commands = source["commands"];
 	        this.willSkip = source["willSkip"];
 	        this.skipReason = source["skipReason"];
 	    }

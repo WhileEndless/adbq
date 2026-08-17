@@ -2,7 +2,7 @@ import React, {useEffect, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, Dropdown, FeatureNotice, IconBtn, Modal, Switch, showToast, promptDialog, confirmDialog} from '../ui';
+import {Badge, CommandPreview, Dropdown, FeatureNotice, IconBtn, Modal, Switch, showToast, promptDialog, confirmDialog} from '../ui';
 import type {MenuItem} from '../ui';
 
 // emptyProfile returns a fully-populated blank profile (all step sub-objects
@@ -144,6 +144,7 @@ export function ApplyConfirm({serial, profileId, onClose, onApplied, reload}: {
             {s.willSkip && <Badge>will skip</Badge>}
           </div>
           <div className='muted' style={{fontSize: 12, marginTop: 2}}>{s.willSkip ? s.skipReason : s.detail}</div>
+          {!s.willSkip && <CommandPreview commands={s.commands ?? []}/>}
         </div>
       ))}
       {report && report.steps?.map((s, i) => (

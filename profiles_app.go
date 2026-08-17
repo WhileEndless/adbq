@@ -122,9 +122,13 @@ func (a *App) PreviewProfile(serial, profileID string) ([]adb.StepPreview, error
 	if err != nil {
 		return nil, err
 	}
+	// One renderer for the whole preview: each step's commands come from the same
+	// builders the apply engine runs, so the list is the work rather than a
+	// description of it.
+	render := a.client.Renderer(a.ctx, serial)
 	var out []adb.StepPreview
-	add := func(name, title, detail string, needsRoot bool) {
-		sp := adb.StepPreview{Name: name, Title: title, Detail: detail, NeedsRoot: needsRoot}
+	add := func(name, title, detail string, needsRoot bool, commands []string) {
+		sp := adb.StepPreview{Name: name, Title: title, Detail: detail, NeedsRoot: needsRoot, Commands: commands}
 		if needsRoot && !d.Root {
 			sp.WillSkip = true
 			sp.SkipReason = "device is not rooted"
@@ -132,13 +136,27 @@ func (a *App) PreviewProfile(serial, profileID string) ([]adb.StepPreview, error
 		out = append(out, sp)
 	}
 	if p.Iptables.Enabled && (p.Iptables.V4Blob != "" || p.Iptables.V6Blob != "") {
-		add("iptables", "Restore iptables ruleset", "imports saved iptables-save blob(s)", true)
+		var cmds []string
+		for _, fam := range []adb.IPFamily{adb.IPv4, adb.IPv6} {
+			blob := p.Iptables.V4Blob
+			if fam == adb.IPv6 {
+				blob = p.Iptables.V6Blob
+			}
+			if blob == "" {
+				continue
+			}
+			ic := adb.IptablesCommandsFor(serial, adb.IptablesCommandRequest{Family: string(fam)}, render)
+			cmds = append(cmds, ic.Import...)
+		}
+		add("iptables", "Restore iptables ruleset", "imports saved iptables-save blob(s)", true, cmds)
 	}
 	if p.Hosts.Enabled {
-		add("hosts", "Apply /etc/hosts override", fmt.Sprintf("%d bytes", len(p.Hosts.Content)), true)
+		hp := a.client.PlanHostsApply(a.ctx, serial, p.Hosts.Content)
+		add("hosts", "Apply /etc/hosts override", fmt.Sprintf("%d bytes", len(p.Hosts.Content)), true, hp.Commands)
 	}
 	if p.Cert.Enabled && p.Cert.PEM != "" {
-		add("cert", "Install CA certificate", p.Cert.Subject+" (system store needs root; else user store)", false)
+		cp := a.client.PlanCertInstall(a.ctx, serial)
+		add("cert", "Install CA certificate", p.Cert.Subject+" (system store needs root; else user store)", false, cp.Commands)
 	}
 	if p.Frida.Enabled {
 		ver := p.Frida.Version
@@ -149,14 +167,36 @@ func (a *App) PreviewProfile(serial, profileID string) ([]adb.StepPreview, error
 		if p.Frida.Start {
 			title += " + start"
 		}
-		add("frida", title, "arch resolved from device", p.Frida.Start)
+		fc := a.client.FridaCommandsFor(a.ctx, serial, "", p.Frida.Port)
+		cmds := fc.Install
+		if p.Frida.Start {
+			cmds = append(append([]string{}, cmds...), fc.Start...)
+		}
+		add("frida", title, "arch resolved from device", p.Frida.Start, cmds)
 	}
 	if p.Forwards.Enabled && (len(p.Forwards.Forwards) > 0 || len(p.Forwards.Reverses) > 0) {
+		var cmds []string
+		for _, f := range p.Forwards.Forwards {
+			cmds = append(cmds, adb.ForwardCommandsFor(serial, "forward", f.Local, f.Remote).Add...)
+		}
+		for _, r := range p.Forwards.Reverses {
+			cmds = append(cmds, adb.ForwardCommandsFor(serial, "reverse", r.Local, r.Remote).Add...)
+		}
 		add("forwards", "Set up forwards/reverses",
-			fmt.Sprintf("%d forward(s), %d reverse(s)", len(p.Forwards.Forwards), len(p.Forwards.Reverses)), false)
+			fmt.Sprintf("%d forward(s), %d reverse(s)", len(p.Forwards.Forwards), len(p.Forwards.Reverses)), false, cmds)
 	}
 	if p.Proxy.Enabled {
-		add("proxy", "Set global HTTP proxy", proxyDetail(p.Proxy), false)
+		var cmds []string
+		if p.Proxy.HostPort == "auto" {
+			// The host address is resolved against this machine's interfaces at
+			// apply time, so the exact value is not knowable here — say so rather
+			// than print a guess.
+			cmds = []string{"# host:port resolved from this computer's addresses when applied, then:",
+				adb.ProxyCommand(serial, "<host>:"+fmt.Sprint(p.Proxy.Port))}
+		} else {
+			cmds = []string{adb.ProxyCommand(serial, p.Proxy.HostPort)}
+		}
+		add("proxy", "Set global HTTP proxy", proxyDetail(p.Proxy), false, cmds)
 	}
 	return out, nil
 }
