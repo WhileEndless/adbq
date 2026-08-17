@@ -126,7 +126,7 @@ func sdkErr(i AndroidSDKInfo) error {
 	if i.Error != "" {
 		return errors.New(i.Error)
 	}
-	return errors.New("Android emulator not found — install Android Studio or the SDK's emulator package, then set the SDK path in Settings")
+	return errors.New("Android emulator not found — install Android Studio or the SDK's emulator package, then point adbq at the SDK from Emulators → Host")
 }
 
 func errCmdlineTools(i AndroidSDKInfo) error {
@@ -145,7 +145,7 @@ func (m *SDKManager) probe() AndroidSDKInfo {
 	info.AVDHome = m.resolveAVDHome()
 
 	if info.SDKRoot == "" {
-		info.Error = "Android SDK not found — set ANDROID_HOME, install Android Studio, or choose the SDK folder in Settings"
+		info.Error = "Android SDK not found — set ANDROID_HOME, install Android Studio, or choose the SDK folder from Emulators → Host"
 	} else {
 		info.Emulator = firstExisting(
 			filepath.Join(info.SDKRoot, "emulator", exeName("emulator")),

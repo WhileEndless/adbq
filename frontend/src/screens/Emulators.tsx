@@ -1027,10 +1027,17 @@ function RootTab() {
           <ul className='muted' style={{fontSize: 11, lineHeight: 1.6, margin: '10px 0 0', paddingLeft: 16}}>
             {(info?.disclosures ?? []).map((d, i) => <li key={i}>{d}</li>)}
           </ul>
+          {/* rootAVD is a bash script. Saying so before the download beats
+              failing with "exec: bash: not found" after it. */}
+          {!!info && !info.runner && (
+            <div className='warn-text' style={{fontSize: 11, marginTop: 10, lineHeight: 1.5}}>{info.runnerNote}</div>
+          )}
           <div style={{display: 'flex', gap: 6, marginTop: 10}}>
             {info?.installed
               ? <button className='btn sm ghost' onClick={removeTool}><Icon.Trash width={11} height={11}/>Remove</button>
-              : <button className='btn sm primary' disabled={busy} onClick={download}><Icon.Download width={11} height={11}/>Download &amp; verify</button>}
+              : <button className='btn sm primary' disabled={busy || (!!info && !info.runner)} onClick={download}>
+                  <Icon.Download width={11} height={11}/>Download &amp; verify
+                </button>}
           </div>
         </div>
       </div>
@@ -1058,10 +1065,10 @@ function RootTab() {
           )}
 
           <div style={{display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap'}}>
-            <button className='btn sm primary' disabled={!avd || !offered || !info?.installed} onClick={root}>
+            <button className='btn sm primary' disabled={!avd || !offered || !info?.installed || !info?.runner} onClick={root}>
               <Icon.Shield width={11} height={11}/>Root this AVD
             </button>
-            <button className='btn sm' disabled={!avd?.patched} onClick={restore}>Restore original image</button>
+            <button className='btn sm' disabled={!avd?.patched || !info?.runner} onClick={restore}>Restore original image</button>
           </div>
           {!info?.installed && <div className='muted' style={{fontSize: 11, marginTop: 6}}>Download rootAVD first.</div>}
         </div>

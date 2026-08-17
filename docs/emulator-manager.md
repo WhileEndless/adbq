@@ -82,6 +82,12 @@ disk kullanımı dizin ağacı toplanarak hesaplanır.
 Soğuk boot'un ilk dakikasında "stopped" göstermek kullanıcıyı ikinci kez
 başlatmaya davet ederdi; `booting` bu yüzden ayrı bir durumdur.
 
+Bir transport'un hangi AVD'yi çalıştırdığı yalnızca `emu avd name` ile
+öğrenilebilir ve **offline bir transport bu soruyu yanıtlayamaz**. Bu yüzden
+serial → AVD eşlemesi transport konuşurken hatırlanır; takıldığında geri
+çağrılır. Aksi hâlde `offline` durumu, adbq'nun kendi başlattığı emülatörler
+dışında hiç görünmezdi — kullanıcının onu görmeye en çok ihtiyaç duyduğu an.
+
 ### 3.2. Donanım ayarlarını düzenleme
 
 `AVDHardware` + `AVDHardwareChanges` (saf, testli) RAM, çekirdek, veri bölümü,
@@ -94,6 +100,12 @@ yazdığı ayarlar korunur. `hw.keyboard` alanı `*bool`'dur: aksi hâlde "kapat
 ile "düzenlenmedi" ayırt edilemezdi. Değişiklikler bir sonraki açılışta geçerli
 olur ve UI bunu söyler.
 
+Form, panel **açıldığı anda** AVD'nin mevcut değerleriyle doldurulur ve orada
+kalır; listenin arka plandaki tazelemesi forma dokunmaz. Aksi hâlde yarım
+yazılmış bir değer birkaç saniye sonra sessizce eski hâline dönerdi.
+Reddedilen bir değerin gerekçesi (`AVDHardwareChanges`'in hatası) alanların
+yanında gösterilir ve Save düzeltilene kadar kapalı kalır.
+
 ## 4. Başlatma ve port tahsisi
 
 Konsol portu **önceden** tahsis edilir (`-port <N>`, çift, 5554–5584). Bunun
@@ -104,16 +116,26 @@ kalırdı.
 `EmulatorArgs` **saftır** ve her seçenek ↔ bayrak eşlemesi birim testlidir; UI'da
 gösterilen komut, çalışan komutun ta kendisidir (CLAUDE.md §4.1). Seçenekler
 değiştikçe komut backend'den yeniden istenir, frontend'de elle birleştirilmez.
+Önizleme **portu da içerir** (`ConsolePortFor`): çalışan bir AVD'nin kendi
+portu, aksi hâlde bir sonraki boş port. Portsuz bir satır kopyalandığında
+adbq'nun çalıştırdığından farklı bir serial üretirdi.
 
-Desteklenen seçenekler: cold boot, snapshot seçimi/devre dışı bırakma, çıkışta
-durumu atma, wipe data, headless (`-no-window`), boot animasyonu kapatma,
-`-writable-system`, `-read-only`, GPU modu, RAM, çekirdek, netspeed/netdelay,
-DNS, HTTP proxy, SELinux, serbest ek argümanlar.
+`EmulatorOpts` şunları destekler: cold boot, snapshot seçimi/devre dışı
+bırakma, çıkışta durumu atma, wipe data, headless (`-no-window`), boot
+animasyonu kapatma, `-writable-system`, `-read-only`, GPU modu, RAM, çekirdek,
+netspeed/netdelay, DNS, HTTP proxy, SELinux, serbest ek argümanlar. UI bunların
+yaygın olanlarını sunar; kalanı (RAM/çekirdek override'ı, netspeed, SELinux,
+ek argümanlar) şimdilik yalnızca API'de.
 
 Durdurma önce `adb -s emulator-N emu kill` (zarif), 8 sn sonra süreç öldürme.
 **adbq yalnızca kendi başlattığı emülatörleri öldürür**; Android Studio'dan
 açılmış bir emülatör listelenir ve konsol üzerinden durdurulabilir ama adbq
-kapanınca hayatta kalır.
+kapanınca hayatta kalır. Kapanışta da aynı zarif yol izlenir (`StopAll`,
+6 sn tolerans): snapshot yazarken SIGKILL yiyen bir emülatör bozuk bir qcow2
+bırakır.
+
+"Start …" görevinin **iptali emülatöre ulaşır**: yalnızca beklemeyi bırakmak,
+"cancelled" yazan bir görevin arkasında açılmaya devam eden bir AVD bırakırdı.
 
 ## 5. Emülatör logu
 
@@ -147,6 +169,11 @@ ve hata mesajı kullanıcıyı `sdkmanager --licenses`'a yönlendirir.
 
 Kaldırma yıkıcıdır: onay diyaloğunda komut gösterilir (CLAUDE.md §5).
 
+İndirme görev tepsisinde sürer; **bittiğinde liste kendini yeniler**
+(`task:update` olayı, `sdk-install` türü). Aksi hâlde satır kurulum bittikten
+sonra da "Install" demeye devam eder ve kullanıcı ikinci kez basardı. Aynı
+mekanizma Root sekmesini `avd-root`/`avd-restore` sonrası tazeler.
+
 ## 7. AVD oluşturma
 
 `avdmanager create avd -n … -k … [-d …] [-c …] [--force]`. Argüman üretimi saf
@@ -156,7 +183,13 @@ ve testlidir. İki tool davranışı özel olarak ele alınır:
   sonsuza kadar bekler → stdin'e `no` beslenir.
 - `avdmanager`'ın bayrağı olmayan ayarlar (RAM, çekirdek, veri bölümü, klavye,
   GPU) sonradan `config.ini` yazılarak uygulanır — Android Studio da aynısını
-  yapar.
+  yapar. `hw.keyboard` **her iki durumda da** yazılır: yalnızca "açık"ken
+  yazmak, anahtarı kapatan kullanıcıya hiçbir şey yapmazdı.
+
+Bu ikinci adım başarısız olursa AVD yine de vardır ve açılır, ama istenen
+donanımla değil. Bu yüzden hata yutulmaz: `AVD.Warning` ile döner ve UI bunu
+hem oluşturma toast'ında hem satırda gösterir. "Oluşturma başarısız" demek
+yanlış olurdu, sessiz kalmak daha da yanlış.
 
 AVD adları ve SDK paket yolları bir komut satırına ulaşmadan **beyaz listeyle
 doğrulanır**, böylece UI'dan gelen bir değer ek argümana dönüşemez. Snapshot
@@ -219,6 +252,15 @@ Onay diyaloğunda **açıkça** yazılır (`RootAVDInfo.Disclosures`):
   doğrulayamaz** — script'in kendi indirmesidir.
 - Sonunda AVD kapatılıp cold-boot edilir; çalışan emülatördeki kaydedilmemiş
   durum kaybolur.
+
+### 8.3.1. Gereksinim: bash
+
+rootAVD bir **bash** betiğidir. `RootAVDInfo.Runner` çalıştırılacak kabuğu
+çözer; bulunamazsa `RunnerNote` sebebi söyler ve UI indirme/rootlama
+düğmelerini kapatır. Windows'ta bash yoktur — kullanıcı Git for Windows
+kurmalı ya da adbq'yu WSL'den çalıştırmalıdır. Bunu indirme **öncesinde**
+söylemek, iki dakikalık bir indirmenin sonunda `exec: bash: not found` demekten
+iyidir.
 
 ### 8.4. Akış
 

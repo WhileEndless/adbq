@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -64,6 +65,11 @@ type RootAVDInfo struct {
 	License   string `json:"license"`
 	ScriptSHA string `json:"scriptSHA"`
 	MagiskSHA string `json:"magiskSHA"`
+	// Runner is the bash adbq would execute the script with, and RunnerNote says
+	// why there isn't one. rootAVD is a bash script: without a shell to run it
+	// the download is wasted effort, so the UI needs to know before it offers.
+	Runner     string `json:"runner"`
+	RunnerNote string `json:"runnerNote"`
 	// Disclosures are the facts the user must see before consenting. They are
 	// produced here so the dialog cannot quietly drop one.
 	Disclosures []string `json:"disclosures"`
@@ -108,6 +114,7 @@ func RootAVDStatus() RootAVDInfo {
 			"The AVD is shut down and cold-booted at the end; unsaved state in the running emulator is lost.",
 		},
 	}
+	info.Runner, info.RunnerNote = rootAVDRunner()
 	if d, err := rootAVDDir(); err == nil {
 		info.Dir = d
 		script := filepath.Join(d, "rootAVD.sh")
@@ -117,6 +124,19 @@ func RootAVDStatus() RootAVDInfo {
 		}
 	}
 	return info
+}
+
+// rootAVDRunner resolves the bash that will run the script, or explains its
+// absence. Every Unix has one; Windows does not, and "exec: bash: not found"
+// two minutes into a download is not an answer anybody can act on.
+func rootAVDRunner() (bin, note string) {
+	if p, ok := lookTool("bash"); ok {
+		return p, ""
+	}
+	if runtime.GOOS == "windows" {
+		return "", "rootAVD is a bash script and Windows has no bash. Install Git for Windows (which ships one) or run adbq from WSL, then restart adbq."
+	}
+	return "", "rootAVD is a bash script and no bash was found on this computer."
 }
 
 // InstallRootAVD downloads and verifies the pinned rootAVD tree. The caller is
@@ -311,6 +331,9 @@ func (m *EmulatorManager) runRootAVD(ctx context.Context, name string, restore b
 	if !status.Installed {
 		return fmt.Errorf("rootAVD is not downloaded yet — download it from the Root tab first")
 	}
+	if status.Runner == "" {
+		return fmt.Errorf("%s", status.RunnerNote)
+	}
 
 	avd, err := m.AVDByName(ctx, name)
 	if err != nil {
@@ -391,7 +414,11 @@ func (m *EmulatorManager) execRootAVD(ctx context.Context, dir, ramdiskRel strin
 	rctx, cancel := context.WithTimeout(ctx, rootAVDRunTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(rctx, "bash", args...)
+	runner, note := rootAVDRunner()
+	if runner == "" {
+		return fmt.Errorf("%s", note)
+	}
+	cmd := exec.CommandContext(rctx, runner, args...)
 	cmd.Dir = dir
 	// The script finds the SDK through ANDROID_HOME; launched from Finder we
 	// may have inherited none, so it is set explicitly.

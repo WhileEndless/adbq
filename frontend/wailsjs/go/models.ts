@@ -1633,6 +1633,8 @@ export namespace adb {
 	    license: string;
 	    scriptSHA: string;
 	    magiskSHA: string;
+	    runner: string;
+	    runnerNote: string;
 	    disclosures: string[] | null;
 	
 	    static createFrom(source: any = {}) {
@@ -1650,6 +1652,8 @@ export namespace adb {
 	        this.license = source["license"];
 	        this.scriptSHA = source["scriptSHA"];
 	        this.magiskSHA = source["magiskSHA"];
+	        this.runner = source["runner"];
+	        this.runnerNote = source["runnerNote"];
 	        this.disclosures = source["disclosures"];
 	    }
 	}
