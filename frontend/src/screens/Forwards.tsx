@@ -2,7 +2,7 @@ import React, {useEffect, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {CommandPreview, Modal, confirmDialog, showToast} from '../ui';
+import {CommandChip, CommandPreview, Modal, confirmDialog, showToast} from '../ui';
 import {useDeviceData} from '../cache';
 
 // Curated bidirectional preset catalogue. `dir` decides which adb call we
@@ -23,7 +23,6 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
   const [add, setAdd] = useState<null | 'fwd' | 'rev'>(null);
   const [aLocal, setALocal] = useState('tcp:8080');
   const [aRemote, setARemote] = useState('tcp:8080');
-  const [showCmds, setShowCmds] = useState(false);
 
   const {data, refreshing, error, refresh} = useDeviceData(
     device?.id ? `forwards:${device.id}` : null,
@@ -108,9 +107,6 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
         <h1>ADB Forwards <span className='subtitle mono'>{fwd.length} fwd · {rev.length} rev</span></h1>
         {!!error && <span style={{color: 'var(--err)', fontSize: 11}}>load failed</span>}
         <div className='spacer' style={{flex: 1}}/>
-        <button className={`btn sm${showCmds ? ' primary' : ''}`} onClick={() => setShowCmds(v => !v)} title='Toggle equivalent adb commands'>
-          <Icon.Terminal/>Show commands
-        </button>
         <button className='btn' onClick={reload}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
       </div>
 
@@ -145,7 +141,6 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
           onAdd={() => { setAdd('fwd'); setALocal('tcp:8080'); setARemote('tcp:8080'); }}
           onRemove={f => removeRow('fwd', f)}
           onRemoveAll={() => removeAll('fwd')}
-          showCmds={showCmds}
           cmds={fwdCmds}
         />
 
@@ -156,7 +151,6 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
           onAdd={() => { setAdd('rev'); setALocal('tcp:8080'); setARemote('tcp:8080'); }}
           onRemove={f => removeRow('rev', f)}
           onRemoveAll={() => removeAll('rev')}
-          showCmds={showCmds}
           cmds={revCmds}
           style={{marginTop: 12}}
         />
@@ -180,12 +174,10 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
 }
 
 function ForwardsTable({
-  title, subtitle, rows, arrow, onAdd, onRemove, onRemoveAll,
-  showCmds, cmds, style,
+  title, subtitle, rows, arrow, onAdd, onRemove, onRemoveAll, cmds, style,
 }: {
   title: string; subtitle: string; rows: adb.Forward[]; arrow: '→' | '←';
   onAdd: () => void; onRemove: (f: adb.Forward) => void; onRemoveAll: () => void;
-  showCmds: boolean;
   /** One entry per row, in row order, from the backend. */
   cmds: adb.ForwardCommands[];
   style?: React.CSSProperties;
@@ -199,13 +191,13 @@ function ForwardsTable({
           <div className='muted' style={{fontSize: 11, marginTop: 1}}>{subtitle}</div>
         </div>
         <span className='muted' style={{marginLeft: 'auto', fontSize: 11}}>{rows.length} active</span>
+        <CommandChip label={title} commands={listCmd}/>
         <button className='btn sm' onClick={onAdd}><Icon.Plus/>New</button>
         <button className='btn sm danger' onClick={onRemoveAll} disabled={rows.length === 0}>Remove all</button>
       </div>
       {rows.length === 0 ? (
         <div style={{padding: 20, textAlign: 'center'}} className='muted'>
           No active mappings.
-          {showCmds && <div style={{marginTop: 8, textAlign: 'left'}}><CommandPreview commands={listCmd} label='List' defaultOpen/></div>}
         </div>
       ) : (
         <table className='table'>
@@ -218,22 +210,15 @@ function ForwardsTable({
                   <td className='muted' style={{textAlign: 'center', width: 24}}>{arrow}</td>
                   <td className='mono'>{f.remote}</td>
                   <td className='actions'>
+                    <CommandChip label={`${f.local} ${arrow} ${f.remote}`} groups={[
+                      {label: 'Add', commands: cmds[i]?.add},
+                      {label: 'Remove', commands: cmds[i]?.remove},
+                    ]}/>
                     <button className='btn sm danger' onClick={() => onRemove(f)}><Icon.Trash/></button>
                   </td>
                 </tr>
-                {showCmds && (
-                  <tr><td colSpan={4} style={{paddingTop: 0}}>
-                    <CommandPreview commands={[...(cmds[i]?.add ?? []), ...(cmds[i]?.remove ?? [])]}
-                                    label='Add · remove' defaultOpen/>
-                  </td></tr>
-                )}
               </React.Fragment>
             ))}
-            {showCmds && (
-              <tr><td colSpan={4} style={{paddingTop: 6, borderTop: '1px solid var(--border)'}}>
-                <CommandPreview commands={listCmd} label='List' defaultOpen/>
-              </td></tr>
-            )}
           </tbody>
         </table>
       )}

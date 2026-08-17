@@ -3,7 +3,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOn, EventsOff} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
-import {Badge, CommandPreview, Modal, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, Modal, SearchInput, commandToast, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
 import {rootUnavailableReason} from '../lib/android';
@@ -136,7 +136,10 @@ export function FridaScreen({device}: {device: adb.Device}) {
           API.ListFridaServers(device.id).then(list => {
             const ok = (list || []).some(x => x.active);
             if (ok) {
-              showToast({title: 'frida-server started', body: `${s.version || s.name} on ${iface}:${port}`, kind: 'ok', mono: true});
+              showToast({
+                title: 'frida-server started', body: `${s.version || s.name} on ${iface}:${port}`,
+                kind: 'ok', mono: true, actions: commandToast(cmds?.start),
+              });
               setStarting(null);
               reload();
             } else if (tries >= 12) {
@@ -232,6 +235,14 @@ export function FridaScreen({device}: {device: adb.Device}) {
         </div>
         <div className='spacer' style={{flex: 1}}/>
         {tab === 'server' && <>
+          <CommandChip label='frida-server' groups={[
+            {label: 'Install', commands: cmds?.install, note: 'The download is verified on this computer before anything is pushed.'},
+            {label: 'List binaries', commands: cmds?.list},
+            {label: 'Start', commands: cmds?.start},
+            {label: 'Stop', commands: cmds?.stop},
+            {label: 'Server log', commands: cmds?.log},
+            {label: 'Port forward', commands: cmds?.forward},
+          ]}/>
           <button className='btn primary' onClick={openInstall}><Icon.Download/>Install server</button>
           <button className='btn' onClick={pushBinary}><Icon.Upload/>Push binary</button>
           <button className='btn' onClick={reload}><Icon.Refresh/></button>
@@ -251,8 +262,11 @@ export function FridaScreen({device}: {device: adb.Device}) {
           <div className='card-body'>
             {active ? (
               <>
-                <div style={{marginBottom: 8}}>
-                  <CommandPreview commands={cmds?.start ?? []} label='Started with' defaultOpen/>
+                <div className='mono subtle' style={{fontSize: 11, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6}}>
+                  <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                    {active.path} · {iface}:{active.port}
+                  </span>
+                  <CommandChip label='Started with' commands={cmds?.start}/>
                 </div>
                 <div style={{display: 'grid', gridTemplateColumns: 'auto 1fr auto 1fr auto', gap: 8, alignItems: 'center'}}>
                   <span className='muted' style={{fontSize: 11}}>Interface</span>
@@ -298,13 +312,13 @@ export function FridaScreen({device}: {device: adb.Device}) {
               ? <Badge kind='warn'>output</Badge>
               : <span className='muted' style={{fontSize: 11}}>clean</span>}
             <div style={{flex: 1}}/>
+            <span onClick={e => e.stopPropagation()}><CommandChip label='Read log' commands={cmds?.log}/></span>
             <button className='btn sm' onClick={e => { e.stopPropagation(); loadServerLog(active?.port || port); setLogOpen(true); }}>
               <Icon.Refresh width={12} height={12}/>
             </button>
           </div>
           {logOpen && (
             <div className='card-body'>
-              <CommandPreview commands={cmds?.log ?? []} label='Read log'/>
               {srvLog.trim() ? (
                 <pre className='mono' style={{fontSize: 11, margin: 0, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap'}}>{srvLog}</pre>
               ) : (
@@ -366,20 +380,6 @@ export function FridaScreen({device}: {device: adb.Device}) {
             </div>
           ))}
         </div>
-
-        {cmds && (
-          <div className='card' style={{marginTop: 14}}>
-            <div className='card-header'><span className='title'>Commands</span></div>
-            <div className='card-body' style={{display: 'grid', gap: 4}}>
-              <CommandPreview commands={cmds.install ?? []} label='Install server'/>
-              <CommandPreview commands={cmds.list ?? []} label='List binaries'/>
-              <CommandPreview commands={cmds.start ?? []} label='Start'/>
-              <CommandPreview commands={cmds.stop ?? []} label='Stop'/>
-              <CommandPreview commands={cmds.log ?? []} label='Server log'/>
-              <CommandPreview commands={cmds.forward ?? []} label='Port forward'/>
-            </div>
-          </div>
-        )}
 
         {/* Script library */}
         <div className='card' style={{marginTop: 14}}>
@@ -1190,15 +1190,14 @@ function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
                 disabled={rows.length === 0} onClick={() => exportFridaLog(rows, slice.info)}>
           <Icon.Download width={12} height={12}/>Export
         </button>
+        <CommandChip label={slice.info.package} groups={[
+          {label: 'Running', commands: slice.info.commands?.runner},
+          {label: 'Same attach with the frida CLI', commands: slice.info.commands?.cli},
+        ]}/>
         <button className='btn sm' onClick={() => store.clearFridaSession(id)}>Clear</button>
         {!slice.ended && slice.info.status === 'running'
           ? <button className='btn sm danger' onClick={() => store.stopFridaSession(id)}><Icon.Stop/>Stop</button>
           : <button className='btn sm' onClick={() => store.removeFridaSession(id)}><Icon.Trash width={11} height={11}/>Remove</button>}
-      </div>
-
-      <div style={{display: 'grid', gap: 4}}>
-        <CommandPreview commands={slice.info.commands?.runner ?? []} label='Running'/>
-        <CommandPreview commands={slice.info.commands?.cli ?? []} label='Same attach with the frida CLI'/>
       </div>
 
       <div className='frida-console-toolbar'>

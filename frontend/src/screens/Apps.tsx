@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandPreview, Modal, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, Modal, SearchInput, commandToast, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {pickApkAndInstall} from '../lib/apk';
 import {ensureJadx, jadxInfo, jadxLabel} from '../lib/jadx';
@@ -119,13 +119,20 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                 <div style={{minWidth: 0}}>
                   <div style={{fontWeight: 600, fontSize: 15}}>{sel.name || sel.pkg}</div>
                   <div className='pkg mono'>{sel.pkg}</div>
-                  <div style={{marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap'}}>
+                  <div style={{marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center'}}>
                     {detail?.v && <Badge>v{detail.v}</Badge>}
                     {sel.system ? <Badge>system</Badge> : <Badge kind='accent'>user</Badge>}
                     {detail?.uid && <Badge kind='info'>UID {detail.uid}</Badge>}
                     {running?.running
                       ? <Badge kind='ok'>running · pid {running.pid || '?'}</Badge>
                       : running && <Badge>stopped</Badge>}
+                    <CommandChip label={sel.pkg} groups={[
+                      {label: 'Launch', commands: cmds?.launch},
+                      {label: 'Kill', commands: cmds?.forceStop},
+                      {label: 'Clear data', commands: cmds?.clear},
+                      {label: 'Export data', commands: cmds?.exportData},
+                      {label: 'Uninstall', commands: cmds?.uninstall},
+                    ]}/>
                   </div>
                 </div>
               </div>
@@ -139,7 +146,7 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                       setRunning({running: false, pid: 0});
                       try {
                         const out = await API.ForceStopApp(device.id, sel.pkg);
-                        showToast({title: 'Killed', body: out || sel.pkg, kind: 'ok', mono: true});
+                        showToast({title: 'Killed', body: out || sel.pkg, kind: 'ok', mono: true, actions: commandToast(cmds?.forceStop)});
                       } catch (e) { showToast({title: 'Kill failed', body: String(e), kind: 'err'}); }
                       refreshRunning();
                     }}><Icon.Stop/>Kill{running.pid ? ` (pid ${running.pid})` : ''}</button>
@@ -148,7 +155,7 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                       setRunning({running: true, pid: 0});
                       try {
                         const out = await API.LaunchApp(device.id, sel.pkg);
-                        showToast({title: 'Launch', body: out || sel.pkg, kind: 'ok', mono: true});
+                        showToast({title: 'Launch', body: out || sel.pkg, kind: 'ok', mono: true, actions: commandToast(cmds?.launch)});
                       } catch (e) { showToast({title: 'Launch failed', body: String(e), kind: 'err'}); }
                       // Apps take a moment to wire up their main process; give
                       // pidof time to see the PID before reconciling.
@@ -200,19 +207,12 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                 )}
                 <button className='btn' onClick={() =>
                   API.ExportAppDataWithPicker(device.id, sel.pkg)
-                    .then(() => showToast({title: 'Data export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
+                    .then(() => showToast({title: 'Data export started', body: 'Watch the Tasks panel for progress', kind: 'info', actions: commandToast(cmds?.exportData)}))
                     .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}))
                 } disabled={!device.root}>
                   <Icon.Download/>Export data{!device.root && ' (root)'}
                 </button>
               </div>
-              {cmds && <DetailSection title='Commands'>
-                <CommandPreview commands={cmds?.launch ?? []} label='Launch'/>
-                <CommandPreview commands={cmds?.forceStop ?? []} label='Kill'/>
-                <CommandPreview commands={cmds?.clear ?? []} label='Clear data'/>
-                <CommandPreview commands={cmds?.exportData ?? []} label='Export data'/>
-                <CommandPreview commands={cmds?.uninstall ?? []} label='Uninstall'/>
-              </DetailSection>}
               <ApkToolsSection device={device} pkg={sel.pkg}/>
               <FridaAppSection device={device} pkg={sel.pkg} running={!!running?.running} setScreen={setScreen}/>
               {detail && <>
@@ -508,7 +508,15 @@ function ApkToolsSection({device, pkg}: {device: adb.Device; pkg: string}) {
 
   return (
     <div className='app-detail-section'>
-      <div className='app-detail-section-title'>APK</div>
+      <div className='app-detail-section-title' style={{display: 'flex', alignItems: 'center', gap: 8}}>
+        APK
+        <div style={{flex: 1}}/>
+        <CommandChip label='APK' groups={[
+          {label: split ? 'Export .apks' : 'Export .apk', commands: set?.commands},
+          {label: 'Open in jadx', commands: plan?.commands},
+          {label: 'Download binaries', commands: binPlan?.commands},
+        ]}/>
+      </div>
       {err && <div className='muted' style={{fontSize: 12, color: 'var(--danger)'}}>Could not read the APK layout: {err}</div>}
       {set && (
         <>
@@ -532,7 +540,6 @@ function ApkToolsSection({device, pkg}: {device: adb.Device; pkg: string}) {
               All {count} APKs go into one archive. Installing only the base would fail with INSTALL_FAILED_MISSING_SPLIT.
             </div>
           )}
-          <CommandPreview commands={set.commands ?? []}/>
 
           <button className='btn' style={{width: '100%', marginTop: 12}} disabled={busy !== ''} onClick={openJadx}>
             <Icon.Layers/>{busy === 'jadx' ? '…opening' : 'Open in jadx'}
@@ -542,7 +549,6 @@ function ApkToolsSection({device, pkg}: {device: adb.Device; pkg: string}) {
             {info?.installed && !info.java && <> · <span style={{color: 'var(--danger)'}}>no Java runtime</span></>}
             {split && <> · all {count} APKs open in one session</>}
           </div>
-          <CommandPreview commands={plan?.commands ?? []}/>
 
           <button className='btn' style={{width: '100%', marginTop: 12}} disabled={busy !== ''} onClick={exportBinaries}>
             <Icon.Cpu/>{busy === 'bin' ? '…collecting' : 'Download binaries'}
@@ -550,7 +556,6 @@ function ApkToolsSection({device, pkg}: {device: adb.Device; pkg: string}) {
           <div className='muted' style={{fontSize: 11, marginTop: 6}}>
             Native libraries, shipped executables and the runtime blobs beside them, in one zip.
           </div>
-          <CommandPreview commands={binPlan?.commands ?? []}/>
         </>
       )}
     </div>

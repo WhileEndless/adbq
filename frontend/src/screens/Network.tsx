@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {adb, main} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandPreview, SearchInput, Switch, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, SearchInput, Switch, commandToast, confirmDialog, showToast} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
 import {useDeviceData} from '../cache';
 
@@ -135,7 +135,13 @@ function NetProxy({device, info, reload}: {device: adb.Device; info: adb.Network
   const apply = (h = host, p = port) => {
     const v = h && p ? `${h}:${p}` : '';
     API.SetProxy(device.id, v)
-      .then(() => { showToast({title: 'Proxy ' + (v ? 'applied' : 'cleared'), body: v, kind: 'ok', mono: true}); reload(); })
+      .then(() => {
+        showToast({
+          title: 'Proxy ' + (v ? 'applied' : 'cleared'), body: v, kind: 'ok', mono: true,
+          actions: commandToast(proxyCmd ? [proxyCmd] : []),
+        });
+        reload();
+      })
       .catch(e => showToast({title: 'Apply failed', body: String(e), kind: 'err'}));
   };
 
@@ -175,6 +181,7 @@ function NetProxy({device, info, reload}: {device: adb.Device; info: adb.Network
             <input className='input mono' placeholder='port' value={port} onChange={e => setPort(e.target.value)}/>
             <button className='btn primary' onClick={() => apply()}>Apply</button>
           </div>
+          <div style={{marginTop: 8}}><CommandChip label='Proxy' commands={proxyCmd ? [proxyCmd] : []} text='Command'/></div>
           <div style={{marginTop: 10, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap'}}>
             <span className='muted' style={{fontSize: 11}}>Quick presets:</span>
             {PRESETS.map(p => (
@@ -184,7 +191,6 @@ function NetProxy({device, info, reload}: {device: adb.Device; info: adb.Network
               </button>
             ))}
           </div>
-          <CommandPreview commands={proxyCmd ? [proxyCmd] : []}/>
         </div>
       </div>
       <div className='muted' style={{fontSize: 11, marginTop: 6}}>
@@ -276,9 +282,12 @@ function NetCert({device}: {device: adb.Device}) {
                   : 'This device is not rooted: the cert is staged to /sdcard and you finish via Settings (user store).'}
               </div>
             </div>
-            <button className='btn primary' onClick={install} disabled={installing}>
-              {installing ? '…installing' : <><Icon.Download/>Install CA</>}
-            </button>
+            <div style={{display: 'flex', gap: 6, alignItems: 'flex-start'}}>
+              <CommandChip label={plan?.store === 'user' ? 'Stage a CA' : 'Install a CA'} commands={plan?.commands}/>
+              <button className='btn primary' onClick={install} disabled={installing}>
+                {installing ? '…installing' : <><Icon.Download/>Install CA</>}
+              </button>
+            </div>
           </div>
           {last && (
             <div className='card' style={{padding: 12, borderColor: last.persistent ? 'var(--ok)' : 'var(--warn)'}}>
@@ -293,7 +302,6 @@ function NetCert({device}: {device: adb.Device}) {
               <div className='mono subtle' style={{fontSize: 11, marginTop: 4}}>{last.path}</div>
             </div>
           )}
-          <CommandPreview commands={plan?.commands ?? []}/>
           <div className='muted' style={{fontSize: 11, marginTop: 10}}>
             Burp: <span className='mono'>Proxy → Proxy settings → Import / export CA certificate → Certificate in DER format</span>, then install the saved file here.
           </div>
@@ -461,6 +469,10 @@ function NetHosts({device}: {device: adb.Device}) {
         <div className='card-header'>
           <span className='title mono' style={{fontSize: 11}}>/system/etc/hosts</span>
           <div style={{flex: 1}}/>
+          <CommandChip label='Hosts' groups={[
+            {label: 'Save & Apply', commands: plan?.commands, note: 'Tried in order until one write reads back intact.'},
+            {label: 'Flush DNS cache', commands: flushCmd},
+          ]}/>
           <button className='btn sm' onClick={load} disabled={loading}><Icon.Refresh/>Reload</button>
         </div>
         <textarea
@@ -479,10 +491,6 @@ function NetHosts({device}: {device: adb.Device}) {
           <span className='muted' style={{fontSize: 11, alignSelf: 'center'}}>
             Tries direct write → magisk remount → /system remount → bind-mount → Magisk module scaffold (auto). Verifies via md5 and flushes netd cache.
           </span>
-          <div style={{flexBasis: '100%', display: 'grid', gap: 4}}>
-            <CommandPreview commands={plan?.commands ?? []} label='Save & Apply'/>
-            <CommandPreview commands={flushCmd} label='Flush DNS cache'/>
-          </div>
         </div>
       </div>
 
@@ -554,12 +562,10 @@ function NetDns({device, info}: {device: adb.Device; info: adb.NetworkInfo | nul
             value={host}
             onChange={e => setHost(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && lookup()}/>
+          <CommandChip label='Lookup' commands={cmds}/>
           <button className='btn primary' onClick={lookup} disabled={busy || !host.trim()}>
             {busy ? '…' : 'Resolve'}
           </button>
-        </div>
-        <div style={{padding: '0 14px 12px'}}>
-          <CommandPreview commands={cmds} label='Lookup'/>
         </div>
       </div>
 
@@ -740,11 +746,9 @@ function NetCapture({device}: {device: adb.Device}) {
             <Icon.Download/>Pull pcap
           </button>
           <div style={{flex: 1}}/>
+          {/* The command a running capture uses, one click away. */}
+          <CommandChip label='tcpdump' commands={cmd ? [cmd] : []}/>
           <button className='btn sm' onClick={poll}><Icon.Refresh/>Refresh</button>
-        </div>
-        <div style={{padding: '0 14px 14px'}}>
-          {/* A running capture keeps its command in view (CLAUDE.md §4.1). */}
-          <CommandPreview commands={cmd ? [cmd] : []} defaultOpen/>
         </div>
       </div>
     </>
@@ -833,6 +837,7 @@ function NetConnections({device}: {device: adb.Device}) {
         <button className={`btn sm${paused ? ' primary' : ''}`} onClick={() => setPaused(p => !p)} title={paused ? 'Resume' : 'Pause'}>
           {paused ? <Icon.Play/> : <Icon.Pause/>}
         </button>
+        <CommandChip label='Read sockets' commands={cmds}/>
         <button className='btn sm' onClick={reload} disabled={busy}><Icon.Refresh/></button>
       </div>
       <div style={{flex: 1, minHeight: 0, overflow: 'auto'}}>
@@ -857,9 +862,6 @@ function NetConnections({device}: {device: adb.Device}) {
       <div style={{padding: '6px 14px', borderTop: '1px solid var(--border)', fontSize: 11}} className='muted spread'>
         <span>{paused ? 'Paused' : 'Live · refreshes every 3s'}</span>
         <span className='subtle mono'>{lastTs ? `last update ${new Date(lastTs).toLocaleTimeString()}` : 'never refreshed'}</span>
-      </div>
-      <div style={{padding: '0 14px 8px'}}>
-        <CommandPreview commands={cmds} label='Read sockets'/>
       </div>
     </div>
   );

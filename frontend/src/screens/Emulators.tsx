@@ -6,7 +6,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOn} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
-import {Badge, CodeBlock, CommandPreview, FeatureNotice, IconBtn, Modal, SearchInput, Switch, confirmDialog, showToast} from '../ui';
+import {Badge, CodeBlock, CommandChip, CommandPreview, FeatureNotice, IconBtn, Modal, SearchInput, Switch, confirmDialog, showToast} from '../ui';
 
 type Tab = 'avds' | 'images' | 'root' | 'host';
 
@@ -259,11 +259,12 @@ function AVDRow({avd, sdk, selected, onSelect, onChanged}: {
         {showOpts && (
           <div style={{marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)'}}>
             <BootOptions opts={opts} onChange={setOpts} snapshots={avd.snapshots ?? []}/>
-            {/* No locally assembled fallback: until Go answers there is no
-                command to show, and inventing one risks showing a line that is
-                not what would run (CLAUDE.md §4.1). */}
-            <CommandPreview commands={launchCmd ? [launchCmd] : []} defaultOpen/>
-            <div style={{marginTop: 8, display: 'flex', gap: 6}}>
+            <div style={{marginTop: 8, display: 'flex', gap: 6, alignItems: 'center'}}>
+              {/* No locally assembled fallback: until Go answers there is no
+                  command to show, and inventing one risks showing a line that is
+                  not what would run (CLAUDE.md §4.1). */}
+              <CommandChip label='Launch' commands={launchCmd ? [launchCmd] : []}/>
+              <div style={{flex: 1}}/>
               <button className='btn sm danger' disabled={busy} onClick={wipe}><Icon.Trash/>Wipe data</button>
             </div>
           </div>

@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandPreview, FeatureNotice, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, FeatureNotice, SearchInput, confirmDialog, showToast} from '../ui';
 import {useDeviceData, mutateData, getCached} from '../cache';
 
 type Family = 'ipv4' | 'ipv6';
@@ -236,16 +236,17 @@ export function IptablesScreen({device}: {device: adb.Device}) {
         <button className='btn sm' onClick={undo} title='Revert to previous snapshot'><Icon.Refresh/>Undo</button>
         <button className='btn sm' onClick={exportRules}><Icon.Download/>Export</button>
         <button className='btn sm' onClick={() => setShowRaw(true)}><Icon.Upload/>Raw / Import</button>
+        <CommandChip label={`${family} · ${table}${chain ? ' · ' + chain : ''}`} groups={[
+          {label: 'List', commands: cmds?.list},
+          {label: 'Export (iptables-save)', commands: cmds?.save},
+          {label: 'Flush this chain', commands: cmds?.flushChain},
+          {label: 'Flush the table', commands: cmds?.flushTable},
+          {label: 'Drop this chain', commands: cmds?.dropChain},
+          {label: 'Import', commands: cmds?.import},
+          {label: 'Undo', commands: cmds?.undo, note: 'Restores the snapshot taken before the last change.'},
+        ]}/>
         <button className='btn sm' onClick={() => refresh()}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
       </div>
-
-      {cmds && (
-        <div style={{margin: '0 18px 10px', display: 'grid', gap: 4}}>
-          <CommandPreview commands={cmds.list ?? []} label='List'/>
-          <CommandPreview commands={cmds.save ?? []} label='Export'/>
-          <CommandPreview commands={cmds.undo ?? []} label='Undo'/>
-        </div>
-      )}
 
       {info && !info.available && (
         <div className='card' style={{margin: '0 18px 12px', padding: 10, borderColor: 'var(--err)'}}>

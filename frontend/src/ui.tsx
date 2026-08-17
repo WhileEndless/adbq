@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState, useCallback} from 'react';
 import {Icon} from './icons';
-import {ToastMsg} from './types';
+import {ToastAction, ToastMsg} from './types';
 
 // ─── Theme tokens (light/dark/system) ──────────────────────────────────────
 
@@ -462,6 +462,109 @@ export function CommandPreview({commands, label = 'Command', defaultOpen}: {comm
       </div>
       {open && <div style={{marginTop: 6}}><CodeBlock multiline>{all}</CodeBlock></div>}
     </div>
+  );
+}
+
+// ─── Where a command belongs ─────────────────────────────────────────────
+//
+// Every device action must be able to show its command (CLAUDE.md §4.1), but
+// "able to" is not "always on screen". A command block under every button turns
+// a panel into a wall of shell, which is how people learn to ignore them.
+//
+// So there are three placements, and only three:
+//
+//   1. Inside a dialog — a confirm the user is already reading, or a sheet they
+//      opened on purpose. That is where CommandPreview goes.
+//   2. A CommandChip next to the thing it belongs to: one small terminal glyph,
+//      clicked when someone wants it. Used in toolbars and panel headers.
+//   3. A toast action after a fire-and-forget action, so the command for the
+//      thing that just happened is one click away and then gone.
+//
+// Panels themselves stay clean.
+
+/** copyCommands puts every line on the clipboard as one block. */
+export function copyCommands(commands?: string[] | null): void {
+  const lines = (commands ?? []).filter(c => c.trim() !== '');
+  if (lines.length === 0) return;
+  void navigator.clipboard?.writeText(lines.join('\n'));
+}
+
+/**
+ * commandToast turns "here is what happened" into "here is what ran, if you
+ * want it". Spread it into a toast's actions; it contributes nothing when there
+ * is no command, so callers need no conditionals.
+ */
+export function commandToast(commands?: string[] | null): ToastAction[] {
+  const lines = (commands ?? []).filter(c => c.trim() !== '');
+  if (lines.length === 0) return [];
+  return [{
+    label: lines.length > 1 ? `Copy ${lines.length} commands` : 'Copy command',
+    onClick: () => { copyCommands(lines); showToast({title: 'Copied', body: lines[0], kind: 'ok', mono: true}); },
+  }];
+}
+
+export interface CommandGroup {
+  label: string;
+  commands?: string[] | null;
+  /** Optional one-liner explaining when this command runs. */
+  note?: string;
+}
+
+/**
+ * CommandSheet is the reference view: every action of one panel, with the
+ * command behind it. Opened deliberately, so it can afford to be complete.
+ */
+export function CommandSheet({open, onClose, title, groups}: {
+  open: boolean; onClose: () => void; title: string; groups: CommandGroup[];
+}) {
+  const shown = groups.filter(g => (g.commands ?? []).filter(c => c.trim() !== '').length > 0);
+  return (
+    <Modal open={open} onClose={onClose} width={760} title={`Commands · ${title}`}
+           footer={<button className='btn' onClick={onClose}>Close</button>}>
+      <div className='muted' style={{fontSize: 11.5, marginBottom: 12}}>
+        What adbq runs for each action here. Every line is complete — paste it into a
+        terminal to do the same thing by hand.
+      </div>
+      {shown.length === 0 && (
+        <div className='muted' style={{fontSize: 12, padding: 12}}>
+          Nothing to show yet — the commands appear once the device has answered.
+        </div>
+      )}
+      {shown.map(g => (
+        <div key={g.label} style={{paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid var(--border)'}}>
+          <CommandPreview commands={g.commands ?? []} label={g.label} defaultOpen/>
+          {g.note && <div className='subtle' style={{fontSize: 11, marginTop: 4}}>{g.note}</div>}
+        </div>
+      ))}
+    </Modal>
+  );
+}
+
+/**
+ * CommandChip is the in-place affordance: one glyph, the command on hover, the
+ * full thing (and a copy button) on click. Give it either one command list or a
+ * whole panel's worth of groups.
+ */
+export function CommandChip({commands, groups, label = 'Command', text}: {
+  commands?: string[] | null;
+  groups?: CommandGroup[];
+  label?: string;
+  /** Optional visible text beside the glyph, for a panel header. */
+  text?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const list: CommandGroup[] = groups ?? [{label, commands}];
+  const lines = list.flatMap(g => (g.commands ?? []).filter(c => c.trim() !== ''));
+  if (lines.length === 0) return null;
+  return (
+    <>
+      <button className='btn sm' onClick={e => { e.stopPropagation(); setOpen(true); }}
+              title={`${label} — click to see or copy\n\n${lines.join('\n')}`}
+              style={{padding: text ? undefined : '0 6px'}}>
+        <Icon.Terminal width={12} height={12}/>{text}
+      </button>
+      <CommandSheet open={open} onClose={() => setOpen(false)} title={label} groups={list}/>
+    </>
   );
 }
 

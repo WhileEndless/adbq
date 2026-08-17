@@ -28,8 +28,9 @@ Uygulama kuralları:
 - **K2 — Yıkıcı/geri alınamaz eylemlerde komut, onay diyaloğunda görünür.**
   (kurulum, kaldırma, flush, remount, reboot, kural silme, dosya silme…)
   Kullanıcı "Evet" demeden önce ne çalışacağını okur.
-- **K3 — Sürekli/akan işlemlerde komut panelde görünür.** (capture, logcat,
-  frida-server, scrcpy) Metin, o an geçerli parametrelerle **canlı** güncellenir.
+- **K3 — Sürekli/akan işlemlerde komut panelden **bir tık** ötede durur.**
+  (capture, logcat, processes, frida-server) Araç çubuğundaki `CommandChip`
+  o an geçerli parametrelerle **canlı** günceller; ekranı kaplamaz.
 - **K4 — Çok adımlı işlemlerde tüm adımlar listelenir**, tek satır değil.
   Örnek: `.apks` dışa aktarımı `pm path` + N adet `pull` + paketleme.
 - **K5 — Salt-okunur listeleme çağrıları için zorunlu değildir**, ama tercih
@@ -37,7 +38,8 @@ Uygulama kuralları:
 - **K6 — Gizli veri sızdırma.** Komut metni cihaz seri numarası içerir; token,
   parola, sertifika özel anahtarı **içermez** — bunlar `<redacted>` ile
   gösterilir.
-- **K7 — Kopyalanabilir olmalı.** `CommandPreview` her hâlde tamamını kopyalar;
+- **K7 — Kopyalanabilir olmalı.** `CommandPreview`/`CommandChip`/toast eylemi
+  her hâlde tamamını kopyalar;
   gösterilen metin terminale yapıştırıldığında **çalışır** olmalıdır (host
   yolları tırnaklanır, cihaz tarafı komutlar `adb -s <serial> shell '…'`
   biçiminde tam yazılır).
@@ -104,22 +106,31 @@ Referans uygulamalar:
 | `screens/Files.tsx` (sil) | onay diyaloğunda `rm -rf`, Root anahtarı açıksa `su` sarmalayıcısıyla |
 | `screens/Frida.tsx` (oturum) | çalışan sürücü satırı **ve** eşdeğer `frida` CLI çağrısı (etiketli) |
 
-### 2.1. Gösterim: tek bir kontrol
+### 2.1. Gösterim: üç yer, üçü de tanımlı
 
-Komut nerede görünüyorsa `CommandPreview` (`frontend/src/ui.tsx`) ile görünür:
+Kural komutun **ulaşılabilir** olması; her zaman ekranda durması değil. Her
+düğmenin altına bir komut bloğu koymak paneli kabuk duvarına çevirir — ve
+insanların o blokları görmezden gelmeyi öğrenmesinin yolu tam olarak budur.
 
-- **kapalıyken tek satır** — ilk komut ve adım sayısı; tıklayınca açılır,
-- `copy` düğmesi her hâlde **tamamını** kopyalar,
-- `defaultOpen`, komutun gözde durmasını gerektiren yerler için: akan işlemler
-  (K3) ve yıkıcı eylemlerin onay diyalogları (K2).
+Bu yüzden komut yalnızca şu üç yerde görünür (`frontend/src/ui.tsx`):
 
-Kural komutun **ulaşılabilir** olması; her zaman ekranı kaplaması değil. Bir
-panelde üç eylem varsa üçünün listesi birden açıkken panel okunmuyor — bu da
-kullanıcının komut panellerini görmezden gelmesiyle sonuçlanıyor.
+| Yer | Bileşen | Ne zaman |
+|---|---|---|
+| Diyaloğun içinde | `CommandPreview` (`defaultOpen`) | onay diyalogları (K2), `CommandSheet`, prompt ipucu, kurulum/oluşturma modalleri |
+| Ait olduğu şeyin yanında | `CommandChip` | araç çubukları, kart başlıkları, tablo satırları — tek terminal simgesi; hover'da komut, tıklayınca `CommandSheet` |
+| Olan biten bildirildiğinde | `commandToast(cmds)` | "screenshot kaydedildi", "scrcpy başlıyor", "proxy uygulandı" — komutu kopyalama eylemi toast'ta durur, sonra kaybolur |
+
+`CommandSheet`, bir panelin **bütün** eylemlerini komutlarıyla listeler; bilerek
+açıldığı için eksiksiz olmayı göze alabilir. Panelin kendisi panel olarak kalır.
 
 Aynı sebeple frontend'de **elle komut kurulmaz**: backend cevap verene kadar
-gösterilecek komut yoktur (`CommandPreview` boş listede hiç render etmez).
-Yaklaşık bir satır göstermek, yanlış komut göstermenin yoludur.
+gösterilecek komut yoktur (`CommandPreview` ve `CommandChip` boş listede hiç
+render etmez). Yaklaşık bir satır göstermek, yanlış komut göstermenin yoludur.
+
+**Yapılmaması gereken** (bir kez yapıldı, geri alındı): akan panellere ve
+düğme altlarına `defaultOpen` blok serpmek. Processes tablosunun üstündeki
+komut bloğu, Overview'un "Quick actions" kartına eklenen ek satırlar ve Frida'nın
+"Commands" kartı bu hatanın örnekleriydi; hepsi chip'e dönüştü.
 
 ---
 

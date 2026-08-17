@@ -3,7 +3,7 @@ import {adb, main} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOff, EventsOn} from '../../wailsjs/runtime';
 import {Icon} from '../icons';
-import {Badge, CommandPreview, IconBtn, SearchInput, showToast} from '../ui';
+import {Badge, CommandChip, IconBtn, SearchInput, showToast} from '../ui';
 
 interface ProcRow {
   pid: number;
@@ -145,6 +145,7 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
         <IconBtn title={paused ? 'Resume (p)' : 'Pause (p)'} active={paused} onClick={() => setPaused(p => !p)}>
           {paused ? <Icon.Play width={14} height={14}/> : <Icon.Pause width={14} height={14}/>}
         </IconBtn>
+        <CommandChip label='Sampling' commands={cmds}/>
       </div>
 
       <div className='logcat-toolbar proc-search'>
@@ -156,10 +157,6 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
             {labelFor(k)}{sortKey === k ? (sortDesc ? ' ▼' : ' ▲') : ''}
           </button>
         ))}
-      </div>
-
-      <div style={{padding: '0 14px 8px'}}>
-        <CommandPreview commands={cmds} label='Sampling'/>
       </div>
 
       <div style={{flex: 1, minHeight: 0, overflow: 'auto'}}>

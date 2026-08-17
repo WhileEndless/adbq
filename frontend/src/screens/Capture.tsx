@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandPreview, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, SearchInput, confirmDialog, showToast} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
 import {parseFilter} from '../lib/captureFilter';
 import {CapturePacket, useStore} from '../store';
@@ -246,14 +246,12 @@ export function CaptureScreen({device}: {device: adb.Device}) {
         {active
           ? <button className='btn danger' onClick={stop}><Icon.Stop/>Stop</button>
           : <button className='btn primary' onClick={start} disabled={!device.root || tdAvailable === false}><Icon.Play/>Start</button>}
+        <CommandChip label='Live capture' commands={cmd}/>
         <button className='btn' onClick={save} disabled={!packets.length}><Icon.Download/>Save .pcap</button>
         <button className='btn sm' onClick={clearList} disabled={!packets.length}>Clear</button>
         <label style={{display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-subtle)'}}>
           <input type='checkbox' checked={tail} onChange={e => setTail(e.target.checked)}/>tail
         </label>
-      </div>
-      <div className='capture-toolbar' style={{paddingTop: 0, paddingBottom: 4}}>
-        <CommandPreview commands={cmd} defaultOpen/>
       </div>
       <div className='capture-toolbar' style={{paddingTop: 0, paddingBottom: 8}}>
         <span className='muted' style={{fontSize: 11}}>{PRESETS[preset]?.hint || ''}</span>

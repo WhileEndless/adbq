@@ -2,7 +2,7 @@ import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Combobox, CommandPreview, IconBtn, SearchInput, showToast} from '../ui';
+import {Combobox, CommandChip, IconBtn, SearchInput, showToast} from '../ui';
 import {useStore} from '../store';
 import {logcatStore, useLogcat} from '../logcatStore';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
@@ -218,6 +218,10 @@ export function LogcatScreen({device}: {device: adb.Device}) {
         <IconBtn title='Clear' onClick={() => { logcatStore.clear(device.id); setExpanded(null); }}>
           <Icon.Trash width={14} height={14}/>
         </IconBtn>
+        <CommandChip label='Logcat' groups={[
+          {label: 'Streaming', commands: cmds?.stream, note: 'The PID filter is whichever process the feed attached to.'},
+          {label: 'Clear on device', commands: cmds?.clear},
+        ]}/>
         <button className='btn sm' onClick={() => exportLines(filtered, device.id)}><Icon.Download width={12} height={12}/>Export</button>
       </div>
 
@@ -237,11 +241,6 @@ export function LogcatScreen({device}: {device: adb.Device}) {
           <Icon.Layers width={12} height={12}/>Collapse repeats
         </button>
         <LevelMenu value={levelMin} onChange={setLevelMin}/>
-      </div>
-
-      <div style={{padding: '0 14px 8px', display: 'grid', gap: 4}}>
-        <CommandPreview commands={cmds?.stream ?? []} label='Streaming'/>
-        <CommandPreview commands={cmds?.clear ?? []} label='Clear on device'/>
       </div>
 
       <div className='logcat-viewport'>

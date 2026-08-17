@@ -2,7 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandPreview, Dropdown, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, Dropdown, commandToast, confirmDialog, showToast} from '../ui';
 import {getCached, mutateData} from '../cache';
 import {pickApkAndInstall} from '../lib/apk';
 
@@ -79,7 +79,7 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
         </h1>
         <span className='subtitle mono'>{device.id} · {device.via}</span>
         <div className='spacer' style={{flex: 1}}/>
-        <button className='btn' onClick={() => takeShot(device.id)}>
+        <button className='btn' onClick={() => takeShot(device.id, cmds?.screenshot)}>
           <Icon.Camera/> Screenshot
         </button>
         <Dropdown trigger={<button className='btn'><Icon.Refresh/>Reboot</button>} items={[
@@ -121,9 +121,24 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
 
         <div className='grid-2' style={{gap: 14, marginBottom: 14}}>
           <div className='card'>
-            <div className='card-header'><div className='title'>Quick actions</div></div>
+            <div className='card-header'>
+              <div className='title'>Quick actions</div>
+              <div style={{flex: 1}}/>
+              {/* One reference view for the panel instead of a command under
+                  every button — the panel stays a panel. */}
+              <CommandChip label='Quick actions' groups={[
+                {label: 'Screenshot', commands: cmds?.screenshot},
+                {label: 'Screen record', commands: cmds?.screenRecord, note: 'Stopping early is what finalises the MP4.'},
+                {label: 'Mirror (scrcpy)', commands: cmds?.scrcpy},
+                {label: 'Wi-Fi adb', commands: cmds?.tcpip},
+                {label: 'Restart adbd', commands: cmds?.restartAdbd},
+                {label: 'Reboot', commands: cmds?.reboot},
+                {label: 'Power off', commands: cmds?.powerOff},
+                {label: 'Set clipboard', commands: cmds?.clipboard},
+              ]}/>
+            </div>
             <div className='card-body' style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6}}>
-              <QA icon={<Icon.Camera/>} label='Screenshot' onClick={() => takeShot(device.id)}/>
+              <QA icon={<Icon.Camera/>} label='Screenshot' onClick={() => takeShot(device.id, cmds?.screenshot)}/>
               <QA icon={<Icon.Download/>} label='Save as…' onClick={() =>
                 API.SaveScreenshotAs(device.id).then(p => p && showToast({
                   title: 'Saved', body: p, kind: 'ok', mono: true,
@@ -139,11 +154,12 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
                   actions: [
                     {label: 'Open', onClick: () => API.OpenPath(p)},
                     {label: 'Reveal', onClick: () => API.RevealPath(p)},
+                    ...commandToast(cmds?.screenRecord),
                   ],
                 })).catch(e => showToast({title: 'Recording failed', body: String(e), kind: 'err'}));
               }}/>
               <QA icon={<Icon.Terminal/>} label='Open shell' onClick={() => setScreen?.('shell')}/>
-              <ScrcpyAction device={device}/>
+              <ScrcpyAction device={device} cmd={cmds?.scrcpy}/>
               <QA icon={<Icon.Upload/>} label='Install APK / APKS' onClick={() =>
                 pickApkAndInstall(device.id)}/>
               <QA icon={<Icon.Wifi/>} label='Wi-Fi adb' onClick={async () => {
@@ -158,7 +174,10 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
                 if (!ok) return;
                 try {
                   await API.TcpipMode(device.id, 5555);
-                  showToast({title: 'Wi-Fi adb enabled', body: `adb connect ${device.ip || '<ip>'}:5555`, kind: 'ok', mono: true});
+                  showToast({
+                    title: 'Wi-Fi adb enabled', body: `adb connect ${device.ip || '<ip>'}:5555`,
+                    kind: 'ok', mono: true, actions: commandToast(cmds?.tcpip),
+                  });
                 } catch (e) {
                   showToast({title: 'tcpip failed', body: String(e), kind: 'err'});
                 }
@@ -174,19 +193,20 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
                 }).then(ok => {
                   if (!ok) return;
                   API.RestartAdbd(device.id)
-                    .then(() => showToast({title: 'adbd restarting', body: 'reconnect in 2-3s', kind: 'info', mono: true}))
+                    .then(() => showToast({
+                      title: 'adbd restarting', body: 'reconnect in 2-3s',
+                      kind: 'info', mono: true, actions: commandToast(cmds?.restartAdbd),
+                    }))
                     .catch(e => showToast({title: 'Restart failed', body: String(e), kind: 'err'}));
                 })}/>
             </div>
-            <div className='card-body' style={{borderTop: '1px solid var(--border)', display: 'grid', gap: 4}}>
-              <CommandPreview commands={cmds?.screenshot ?? []} label='Screenshot'/>
-              <CommandPreview commands={cmds?.screenRecord ?? []} label='Screen record'/>
-              <CommandPreview commands={cmds?.scrcpy ?? []} label='Mirror (scrcpy)'/>
-              <CommandPreview commands={cmds?.tcpip ?? []} label='Wi-Fi adb'/>
-            </div>
           </div>
           <div className='card'>
-            <div className='card-header'><div className='title'>Root</div></div>
+            <div className='card-header'>
+              <div className='title'>Root</div>
+              <div style={{flex: 1}}/>
+              <CommandChip label='Re-test root' commands={cmds?.rootProbe}/>
+            </div>
             <div className='card-body'>
               <Kv k='Status' v={device.root ? 'rooted' : 'unrooted'}/>
               <Kv k='Method' v={device.rootMethod || '—'}/>
@@ -199,7 +219,6 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
                   <Icon.Refresh/>Re-test
                 </button>
               </div>
-              <CommandPreview commands={cmds?.rootProbe ?? []} label='Re-test'/>
             </div>
           </div>
         </div>
@@ -234,7 +253,7 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
   );
 }
 
-function ScrcpyAction({device}: {device: adb.Device}) {
+function ScrcpyAction({device, cmd}: {device: adb.Device; cmd?: string[] | null}) {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [active, setActive] = useState(false);
   useEffect(() => {
@@ -265,20 +284,21 @@ function ScrcpyAction({device}: {device: adb.Device}) {
         API.StopScrcpy(device.id).then(() => { setActive(false); showToast({title: 'scrcpy stopped', kind: 'ok'}); });
       } else {
         API.StartScrcpy(device.id)
-          .then(() => { setActive(true); showToast({title: 'scrcpy starting', kind: 'ok'}); })
+          .then(() => { setActive(true); showToast({title: 'scrcpy starting', kind: 'ok', actions: commandToast(cmd)}); })
           .catch(e => showToast({title: 'scrcpy failed', body: String(e), kind: 'err'}));
       }
     }}/>
   );
 }
 
-function takeShot(serial: string) {
+function takeShot(serial: string, cmd?: string[] | null) {
   API.TakeScreenshot(serial)
     .then(p => showToast({
       title: 'Screenshot saved', body: p, kind: 'ok', mono: true,
       actions: [
         {label: 'Open', onClick: () => API.OpenPath(p)},
         {label: 'Reveal', onClick: () => API.RevealPath(p)},
+        ...commandToast(cmd),
       ],
     }))
     .catch(e => showToast({title: 'Screenshot failed', body: String(e), kind: 'err'}));

@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandPreview, Modal, Switch, confirmDialog, promptDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, Modal, Switch, confirmDialog, promptDialog, showToast} from '../ui';
 import {useDeviceData} from '../cache';
 
 const ROOTS = ['/', '/sdcard', '/storage/emulated/0', '/data/local/tmp', '/data', '/system'];
@@ -121,6 +121,13 @@ export function FilesScreen({device}: {device: adb.Device}) {
           <Icon.Upload/>Push
         </button>
         <button className='btn' onClick={doMkdir}><Icon.Plus/>New folder</button>
+        <CommandChip label={sel ? sel.name : path} groups={[
+          {label: 'List this directory', commands: cmds?.list},
+          {label: 'Push into it', commands: cmds?.push},
+          {label: 'New folder', commands: cmds?.mkdir},
+          {label: 'Pull the selected file', commands: cmds?.pull},
+          {label: 'Delete the selection', commands: cmds?.delete},
+        ]}/>
         <button className='btn' onClick={() => load()}><Icon.Refresh className={refreshing ? 'spin' : ''}/></button>
       </div>
 
@@ -188,11 +195,6 @@ export function FilesScreen({device}: {device: adb.Device}) {
                 {sel.type === 'dir' && <button className='btn' onClick={() => navigate(sel)}><Icon.Folder/>Open</button>}
                 {sel.type === 'file' && <button className='btn' onClick={() => doPull(sel)}><Icon.Download/>Pull</button>}
                 <button className='btn danger' onClick={() => doDelete(sel)}><Icon.Trash/>Delete</button>
-              </div>
-              <div style={{marginTop: 10, display: 'grid', gap: 4}}>
-                <CommandPreview commands={cmds?.pull ?? []} label='Pull'/>
-                <CommandPreview commands={cmds?.delete ?? []} label='Delete'/>
-                <CommandPreview commands={cmds?.list ?? []} label='List'/>
               </div>
               {sel.name.includes('frida-server') && (
                 <div className='card' style={{marginTop: 14}}>
