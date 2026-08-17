@@ -324,8 +324,15 @@ func isJavaHome(dir string) bool {
 	}
 	// `release` is present in every JDK/JRE since 9; `lib/modules` and the older
 	// `jre/lib/rt.jar` cover the rest.
+	//
+	// Each marker must be a regular FILE. In a JDK, `lib/modules` is the runtime
+	// image — one file — but on Linux `/usr/lib/modules` is the kernel's module
+	// directory, and `/usr/bin/java` exists on any machine with Java installed.
+	// Accepting a directory there made `/usr` look like a Java home, which is the
+	// same mistake as trusting the macOS stub: JAVA_HOME=/usr launches something
+	// that is not a runtime.
 	for _, marker := range []string{"release", filepath.Join("lib", "modules"), filepath.Join("jre", "lib", "rt.jar")} {
-		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+		if fi, err := os.Stat(filepath.Join(dir, marker)); err == nil && fi.Mode().IsRegular() {
 			return true
 		}
 	}

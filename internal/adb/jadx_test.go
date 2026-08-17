@@ -244,6 +244,25 @@ func TestIsJavaHomeRejectsASystemPrefix(t *testing.T) {
 	if isJavaHome("/usr") {
 		t.Error("/usr is a system prefix, not a Java home")
 	}
+
+	// The Linux shape of that same mistake, which CI caught: `/usr/bin/java`
+	// exists on any machine with Java installed, and `/usr/lib/modules` is the
+	// kernel's module directory. A JDK's `lib/modules` is a single file, so a
+	// directory by that name must not qualify.
+	kernelish := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(kernelish, "lib", "modules", "6.1.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeJava := filepath.Join(kernelish, "bin", javaExe())
+	if err := os.MkdirAll(filepath.Dir(fakeJava), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fakeJava, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if isJavaHome(kernelish) {
+		t.Error("a directory named lib/modules is the kernel's, not a runtime image")
+	}
 	if isJavaHome("") || isJavaHome(string(filepath.Separator)) {
 		t.Error("an empty path and the filesystem root are never Java homes")
 	}
