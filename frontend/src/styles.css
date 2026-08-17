@@ -159,6 +159,12 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+/* The mark carries its own dark tile, so it needs no themed treatment — just
+   enough rounding that its corners agree with the titlebar's other controls. */
+.titlebar .brand .brand-mark {
+  border-radius: 5px;
+  display: block;
+}
 .titlebar .meta { font-family: var(--font-mono); font-size: 11px; }
 
 .devicetabs {

@@ -9,6 +9,7 @@ import {StoreProvider} from './store';
 import {logcatStore} from './logcatStore';
 import {TasksTray} from './tasks';
 import {Screen} from './types';
+import markUrl from './assets/brand-mark.png';
 import {OverviewScreen} from './screens/Overview';
 import {LogcatScreen} from './screens/Logcat';
 import {ShellScreen} from './screens/Shell';
@@ -304,6 +305,7 @@ function AppInner() {
         {device || HOST_SCREENS.includes(screen)
           ? <ScreenComp device={device as adb.Device} setScreen={setScreen as any}/>
           : <div style={{padding: 40, textAlign: 'center'}}>
+              <img src={markUrl} alt='' width={72} height={72} style={{opacity: .9, marginBottom: 12}}/>
               <div style={{fontSize: 16, marginBottom: 6}}>No devices connected</div>
               <div className='muted' style={{marginBottom: 14}}>Plug in a USB device, connect over Wi-Fi, or start an emulator.</div>
               <div style={{display: 'flex', gap: 6, justifyContent: 'center'}}>
@@ -367,7 +369,7 @@ function Titlebar({theme, setTheme, themeMode, onOpenSettings, profileSelector}:
   useEffect(() => { API.Version().then(setV).catch(() => {}); }, []);
   return (
     <div className='titlebar'>
-      <div className='brand'><span className='dot'/>adbq</div>
+      <div className='brand'><img src={markUrl} alt='' width={18} height={18} className='brand-mark'/>adbq</div>
       <span className='meta-line muted'>ADB Manager</span>
       {v && <span className='mono subtle' style={{fontSize: 10.5, marginLeft: 6}}>{v}</span>}
       <div className='titlebar-spacer'/>
