@@ -189,6 +189,8 @@ export interface PromptOpts {
   label: string;
   defaultValue?: string;
   placeholder?: string;
+  /** Shown under the field — the place for the command the answer will run. */
+  hint?: React.ReactNode;
 }
 export function promptDialog(opts: PromptOpts): Promise<string | null> {
   if (!promptFn) {
@@ -228,6 +230,7 @@ export function PromptHost() {
                onChange={e => setValue(e.target.value)}
                onKeyDown={e => e.key === 'Enter' && finish(value)}/>
       </div>
+      {opts.hint}
     </Modal>
   );
 }

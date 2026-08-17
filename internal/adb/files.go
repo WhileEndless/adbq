@@ -28,9 +28,7 @@ func (c *Client) ListDir(ctx context.Context, serial, path string, asRoot bool) 
 	if path == "" {
 		path = "/"
 	}
-	q := "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
-
-	out, err := c.runLs(ctx, serial, "ls -lAp "+q, asRoot)
+	out, err := c.runLs(ctx, serial, lsRemote(path), asRoot)
 	parsed, content := countLsRows(out)
 	// Retry with the portable `ls -la` when the preferred form didn't yield a
 	// usable listing. Two failure modes warrant a retry: (a) output arrived but
@@ -39,7 +37,7 @@ func (c *Client) ListDir(ctx context.Context, serial, path string, asRoot bool) 
 	// permission-denied error is neither and must not trigger a pointless retry.
 	flagRejected := err != nil && strings.TrimSpace(out) == "" && !isPermissionDenied(errString(err))
 	if (parsed == 0 && content > 0) || flagRejected {
-		if out2, err2 := c.runLs(ctx, serial, "ls -la "+q, asRoot); err2 == nil || out2 != "" {
+		if out2, err2 := c.runLs(ctx, serial, lsFallbackRemote(path), asRoot); err2 == nil || out2 != "" {
 			out, err = out2, err2
 		}
 	}
@@ -259,12 +257,7 @@ func (c *Client) PullFile(ctx context.Context, serial, remote, local string) (st
 
 // RemoveFile deletes a file or directory; pass recursive for directories.
 func (c *Client) RemoveFile(ctx context.Context, serial, path string, recursive, asRoot bool) (string, error) {
-	flag := "-f"
-	if recursive {
-		flag = "-rf"
-	}
-	q := "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
-	cmd := "rm " + flag + " " + q
+	cmd := rmRemote(path, recursive)
 	if asRoot {
 		out, _, err := c.ShellSU(ctx, serial, cmd)
 		return out, err
@@ -275,8 +268,7 @@ func (c *Client) RemoveFile(ctx context.Context, serial, path string, recursive,
 // Chmod changes the mode of a file/dir; mode is in `chmod`-compatible form
 // (e.g. "755", "u+x").
 func (c *Client) Chmod(ctx context.Context, serial, path, mode string, asRoot bool) (string, error) {
-	q := "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
-	cmd := "chmod " + mode + " " + q
+	cmd := chmodRemote(path, mode)
 	if asRoot {
 		out, _, err := c.ShellSU(ctx, serial, cmd)
 		return out, err
@@ -286,8 +278,7 @@ func (c *Client) Chmod(ctx context.Context, serial, path, mode string, asRoot bo
 
 // Chown changes the owner (user[:group]) of a file/dir.
 func (c *Client) Chown(ctx context.Context, serial, path, owner string, asRoot bool) (string, error) {
-	q := "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
-	cmd := "chown " + owner + " " + q
+	cmd := chownRemote(path, owner)
 	if asRoot {
 		out, _, err := c.ShellSU(ctx, serial, cmd)
 		return out, err
@@ -297,7 +288,7 @@ func (c *Client) Chown(ctx context.Context, serial, path, owner string, asRoot b
 
 // MoveFileOnDevice renames a remote path.
 func (c *Client) MoveFileOnDevice(ctx context.Context, serial, src, dst string, asRoot bool) (string, error) {
-	cmd := "mv '" + strings.ReplaceAll(src, "'", `'\''`) + "' '" + strings.ReplaceAll(dst, "'", `'\''`) + "'"
+	cmd := mvRemote(src, dst)
 	if asRoot {
 		out, _, err := c.ShellSU(ctx, serial, cmd)
 		return out, err
@@ -307,8 +298,7 @@ func (c *Client) MoveFileOnDevice(ctx context.Context, serial, src, dst string, 
 
 // Mkdir creates a directory.
 func (c *Client) Mkdir(ctx context.Context, serial, path string, asRoot bool) (string, error) {
-	q := "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
-	cmd := "mkdir -p " + q
+	cmd := mkdirRemote(path)
 	if asRoot {
 		out, _, err := c.ShellSU(ctx, serial, cmd)
 		return out, err

@@ -829,6 +829,50 @@ export namespace adb {
 	        this.extra = source["extra"];
 	    }
 	}
+	export class FileCommandRequest {
+	    dir: string;
+	    name: string;
+	    isDir: boolean;
+	    asRoot: boolean;
+	    mode: string;
+	    owner: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileCommandRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dir = source["dir"];
+	        this.name = source["name"];
+	        this.isDir = source["isDir"];
+	        this.asRoot = source["asRoot"];
+	        this.mode = source["mode"];
+	        this.owner = source["owner"];
+	    }
+	}
+	export class FileCommands {
+	    path: string;
+	    list: string[] | null;
+	    mkdir: string[] | null;
+	    push: string[] | null;
+	    pull: string[] | null;
+	    delete: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.list = source["list"];
+	        this.mkdir = source["mkdir"];
+	        this.push = source["push"];
+	        this.pull = source["pull"];
+	        this.delete = source["delete"];
+	    }
+	}
 	export class FileEntry {
 	    name: string;
 	    type: string;
@@ -869,6 +913,28 @@ export namespace adb {
 	        this.serial = source["serial"];
 	        this.local = source["local"];
 	        this.remote = source["remote"];
+	    }
+	}
+	export class ForwardCommands {
+	    kind: string;
+	    local: string;
+	    remote: string;
+	    add: string[] | null;
+	    remove: string[] | null;
+	    list: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new ForwardCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.local = source["local"];
+	        this.remote = source["remote"];
+	        this.add = source["add"];
+	        this.remove = source["remove"];
+	        this.list = source["list"];
 	    }
 	}
 	export class ForwardSpec {

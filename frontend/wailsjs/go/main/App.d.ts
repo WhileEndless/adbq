@@ -125,11 +125,15 @@ export function ExportAppDataWithPicker(arg1:string,arg2:string):Promise<string>
 
 export function ExportIptables(arg1:string,arg2:string):Promise<string>;
 
+export function FileCommands(arg1:string,arg2:adb.FileCommandRequest):Promise<adb.FileCommands>;
+
 export function FlushDeviceDNS(arg1:string):Promise<string>;
 
 export function FlushIptables(arg1:string,arg2:string,arg3:string,arg4:string):Promise<adb.IPTSnapshot>;
 
 export function ForceStopApp(arg1:string,arg2:string):Promise<string>;
+
+export function ForwardCommands(arg1:string,arg2:string,arg3:Array<adb.Forward>):Promise<Array<adb.ForwardCommands> | null>;
 
 export function FridaArchInfo(arg1:string):Promise<adb.FridaArchInfo>;
 

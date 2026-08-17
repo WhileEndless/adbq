@@ -246,6 +246,10 @@ export function ExportIptables(arg1, arg2) {
   return window['go']['main']['App']['ExportIptables'](arg1, arg2);
 }
 
+export function FileCommands(arg1, arg2) {
+  return window['go']['main']['App']['FileCommands'](arg1, arg2);
+}
+
 export function FlushDeviceDNS(arg1) {
   return window['go']['main']['App']['FlushDeviceDNS'](arg1);
 }
@@ -256,6 +260,10 @@ export function FlushIptables(arg1, arg2, arg3, arg4) {
 
 export function ForceStopApp(arg1, arg2) {
   return window['go']['main']['App']['ForceStopApp'](arg1, arg2);
+}
+
+export function ForwardCommands(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ForwardCommands'](arg1, arg2, arg3);
 }
 
 export function FridaArchInfo(arg1) {

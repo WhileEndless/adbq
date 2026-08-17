@@ -1587,6 +1587,13 @@ func (a *App) Mkdir(serial, path string, asRoot bool) (string, error) {
 	return a.client.Mkdir(a.ctx, serial, path, asRoot)
 }
 
+// FileCommands is what the Files screen's actions will run for the directory it
+// is showing and the entry selected in it (CLAUDE.md §4.1). Reads the device so
+// the root steps carry the `su` form it accepts.
+func (a *App) FileCommands(serial string, req adb.FileCommandRequest) adb.FileCommands {
+	return a.client.FileCommandsFor(a.ctx, serial, req)
+}
+
 func (a *App) PushFileWithPicker(serial, remoteDir string) (string, error) {
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select file to push"})
 	if err != nil || path == "" {
@@ -1632,6 +1639,14 @@ func (a *App) RemoveForward(serial, local string) (string, error) {
 }
 func (a *App) RemoveReverse(serial, remote string) (string, error) {
 	return a.client.RemoveReverse(a.ctx, serial, remote)
+}
+
+// ForwardCommands renders one entry per row, in row order, so the table can
+// show each mapping's add/remove line beside it. kind is "forward" or
+// "reverse"; the argument order differs between them and getting it backwards
+// is the mistake this preview prevents. Pure string work — no device access.
+func (a *App) ForwardCommands(serial, kind string, rows []adb.Forward) []adb.ForwardCommands {
+	return adb.ForwardCommandsForRows(serial, kind, rows)
 }
 
 // ─── Frida ───────────────────────────────────────────────────────────────
