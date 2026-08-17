@@ -51,6 +51,33 @@ func IsApkBundle(localPath string) bool {
 	return apkBundleExts[strings.ToLower(filepath.Ext(localPath))]
 }
 
+// EnsureExportExt makes the file name match what adbq actually writes into it.
+// A save dialog hands back whatever the user typed, and a split export stored
+// under a `.apk` name is a zip archive masquerading as a single APK: every
+// installer — adbq's own included, since IsApkBundle dispatches on the
+// extension — then hands it to `adb install` and the install fails.
+func EnsureExportExt(dst string, split bool) string {
+	ext := filepath.Ext(dst)
+	stem := strings.TrimSuffix(dst, ext)
+	low := strings.ToLower(ext)
+	if split {
+		if apkBundleExts[low] {
+			return dst
+		}
+		if low == ".apk" {
+			return stem + ".apks"
+		}
+		return dst + ".apks"
+	}
+	if low == ".apk" {
+		return dst
+	}
+	if apkBundleExts[low] {
+		return stem + ".apk"
+	}
+	return dst + ".apk"
+}
+
 // ApkSetOf inspects the package on the device and returns its APK layout with
 // the commands an export would run. It performs a single `pm path` call.
 func (c *Client) ApkSetOf(ctx context.Context, serial, pkg string) (*ApkSet, error) {

@@ -1339,17 +1339,23 @@ func (a *App) ExportApks(serial, pkg string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	title := "Save APK as…"
+	title, filter := "Save APK as…", runtime.FileFilter{DisplayName: "Android package (*.apk)", Pattern: "*.apk"}
 	if set.Split {
 		title = "Save APKS as…"
+		filter = runtime.FileFilter{DisplayName: "Android app bundle (*.apks)", Pattern: "*.apks"}
 	}
 	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           title,
 		DefaultFilename: set.Suggested,
+		Filters:         []runtime.FileFilter{filter},
 	})
 	if err != nil || dst == "" {
 		return "", err
 	}
+	// The dialog returns the typed name verbatim on every platform, so a split
+	// export can come back as `.apk` — a name no installer would read as an
+	// archive. Correct it rather than write a mislabelled file.
+	dst = adb.EnsureExportExt(dst, set.Split)
 	id, _ := a.tasks.Create("export-apk", "Exporting "+pkg, fmt.Sprintf("%d APK(s) → %s", len(set.Splits)+1, dst))
 	go func() {
 		out, err := a.client.ExportApks(a.ctx, serial, pkg, dst, func(s string) {

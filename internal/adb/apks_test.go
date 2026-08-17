@@ -227,6 +227,29 @@ func TestIsApkBundle(t *testing.T) {
 	}
 }
 
+// A split export written under a .apk name is the one failure the user cannot
+// see: the file installs nowhere, including back into adbq.
+func TestEnsureExportExtMatchesTheContent(t *testing.T) {
+	cases := []struct {
+		dst, want string
+		split     bool
+	}{
+		{"/x/com.a.b.apks", "/x/com.a.b.apks", true},
+		{"/x/com.a.b.apk", "/x/com.a.b.apks", true},
+		{"/x/com.a.b.APK", "/x/com.a.b.apks", true},
+		{"/x/com.a.b", "/x/com.a.b.apks", true},
+		{"/x/backup.zip", "/x/backup.zip", true},
+		{"/x/com.a.b.apk", "/x/com.a.b.apk", false},
+		{"/x/com.a.b", "/x/com.a.b.apk", false},
+		{"/x/com.a.b.apks", "/x/com.a.b.apk", false},
+	}
+	for _, c := range cases {
+		if got := EnsureExportExt(c.dst, c.split); got != c.want {
+			t.Errorf("EnsureExportExt(%q, split=%v) = %q, want %q", c.dst, c.split, got, c.want)
+		}
+	}
+}
+
 func TestInstallMultipleErrExplainsCommonFailures(t *testing.T) {
 	cases := []struct{ out, want string }{
 		{"Failure [INSTALL_FAILED_MISSING_SPLIT: Missing split for com.x]", "missing a split"},

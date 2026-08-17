@@ -426,6 +426,10 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
                 : <>Single APK</>}
             </span>
           </div>
+          <div className='app-detail-row'>
+            <span className='app-detail-k'>File</span>
+            <span className='app-detail-v mono'>{set.suggested}</span>
+          </div>
           <button className='btn' style={{width: '100%', marginTop: 8}} onClick={() => {
             API.ExportApks(device.id, pkg)
               .then(id => id && showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
