@@ -142,6 +142,10 @@ export function DNSLookup(arg1, arg2) {
   return window['go']['main']['App']['DNSLookup'](arg1, arg2);
 }
 
+export function DNSLookupCommands(arg1, arg2) {
+  return window['go']['main']['App']['DNSLookupCommands'](arg1, arg2);
+}
+
 export function DefaultAVDSpec(arg1) {
   return window['go']['main']['App']['DefaultAVDSpec'](arg1);
 }
@@ -506,6 +510,10 @@ export function MoveFile(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['MoveFile'](arg1, arg2, arg3, arg4);
 }
 
+export function NetCommands(arg1, arg2) {
+  return window['go']['main']['App']['NetCommands'](arg1, arg2);
+}
+
 export function OpenAndroidStudio() {
   return window['go']['main']['App']['OpenAndroidStudio']();
 }
@@ -552,6 +560,14 @@ export function PlanApkInstall(arg1, arg2) {
 
 export function PlanAppBinaries(arg1, arg2) {
   return window['go']['main']['App']['PlanAppBinaries'](arg1, arg2);
+}
+
+export function PlanCertInstall(arg1) {
+  return window['go']['main']['App']['PlanCertInstall'](arg1);
+}
+
+export function PlanHostsApply(arg1, arg2) {
+  return window['go']['main']['App']['PlanHostsApply'](arg1, arg2);
 }
 
 export function PlanJadxOpen(arg1, arg2) {

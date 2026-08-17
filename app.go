@@ -532,6 +532,14 @@ func (a *App) ApplyHostsConfig(serial string) (*adb.HostsApplyResult, error) {
 	return a.client.ApplyHostsRobust(a.ctx, serial, content)
 }
 
+// PlanHostsApply renders every write applying `content` will attempt, in order,
+// so the escalation is readable before a partition gets remounted
+// (CLAUDE.md §4.1 K2). Pass the editor's current text: the plan stages exactly
+// those bytes and names the md5 they hash to.
+func (a *App) PlanHostsApply(serial, content string) adb.HostsApplyPlan {
+	return a.client.PlanHostsApply(a.ctx, serial, content)
+}
+
 // FlushDeviceDNS clears the netd resolver cache so a fresh /etc/hosts entry
 // takes effect on running connections.
 func (a *App) FlushDeviceDNS(serial string) (string, error) {
@@ -2304,6 +2312,17 @@ func (a *App) ProxyCommand(serial, hostPort string) string {
 	return adb.ProxyCommand(serial, hostPort)
 }
 
+// DNSLookupCommands renders the three reads a device-side lookup performs.
+func (a *App) DNSLookupCommands(serial, host string) []string {
+	return adb.DNSLookupCommands(serial, host, a.client.Renderer(a.ctx, serial))
+}
+
+// NetCommands renders the Network screen's smaller actions for the proxy value
+// currently in the form.
+func (a *App) NetCommands(serial, hostPort string) adb.NetCommands {
+	return a.client.NetCommandsFor(a.ctx, serial, hostPort)
+}
+
 // ─── System ──────────────────────────────────────────────────────────────
 
 func (a *App) Reboot(serial, mode string) (string, error) {
@@ -2338,6 +2357,14 @@ func (a *App) InstallSystemCertWithPicker(serial string) (*adb.CertInstallResult
 	}
 	a.tasks.Finish(id, "ok", res.Path, res.Strategy+" · "+res.Subject)
 	return res, nil
+}
+
+// PlanCertInstall renders what installing a CA certificate will attempt on this
+// device: the system store when it is rooted, a staged manual import when it is
+// not. The trust-store file name is derived from the certificate, so the plan
+// carries a placeholder until a file is picked.
+func (a *App) PlanCertInstall(serial string) adb.CertInstallPlan {
+	return a.client.PlanCertInstall(a.ctx, serial)
 }
 
 // ListCACerts returns the certificates in the device CA trust store for the

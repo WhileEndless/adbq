@@ -28,6 +28,11 @@ type CertInstallResult struct {
 
 const systemCacertsDir = "/system/etc/security/cacerts"
 
+// cacertStage is where the PEM is put before any root command touches it: a
+// push works without root and does not depend on which shell utilities the ROM
+// ships.
+const cacertStage = "/data/local/tmp/adbq-cacert.pem"
+
 // CACert is one certificate found in the device trust store.
 type CACert struct {
 	FileName   string `json:"fileName"`   // e.g. eb1bf87a.0
@@ -150,7 +155,7 @@ func (c *Client) InstallSystemCert(ctx context.Context, serial, localCertPath st
 	// Stage the PEM on the device via `adb push` (works without root, and unlike
 	// shell `printf`/`echo` heredocs it doesn't depend on which utilities the
 	// ROM ships — some stripped images lack printf entirely).
-	const stage = "/data/local/tmp/adbq-cacert.pem"
+	const stage = cacertStage
 	tmp, err := os.CreateTemp("", "adbq-cacert-*.pem")
 	if err != nil {
 		return res, err
@@ -187,18 +192,11 @@ func (c *Client) InstallSystemCert(ctx context.Context, serial, localCertPath st
 	// Persistent strategies first — a reboot keeps the cert. Mirrors the hosts
 	// writer (hosts.go) since the underlying problem (writable /system) is the
 	// same.
-	install := cacertInstallCmd(stage, res.Path)
-	persistent := []struct{ name, cmd string }{
-		{"direct", install},
-		{"magisk-remount", "magisk --remount-system 2>&1; " + install},
-		{"remount-root", "mount -o rw,remount / 2>&1; " + install + " ; mount -o ro,remount / 2>/dev/null; true"},
-		{"remount-system", "mount -o rw,remount /system 2>&1; " + install + " ; mount -o ro,remount /system 2>/dev/null; true"},
-	}
-	for _, s := range persistent {
-		out, _, _ := c.ShellSU(ctx, serial, s.cmd)
-		diag.WriteString("\n[" + s.name + "]\n" + strings.TrimSpace(out) + "\n")
+	for _, s := range cacertStrategies(stage, res.Path) {
+		out, _, _ := c.ShellSU(ctx, serial, s.Cmd)
+		diag.WriteString("\n[" + s.Name + "]\n" + strings.TrimSpace(out) + "\n")
 		if c.cacertMatches(ctx, serial, res.Path, want) {
-			res.Strategy = s.name
+			res.Strategy = s.Name
 			res.Persistent = true
 			break
 		}
@@ -259,6 +257,26 @@ func (c *Client) installUserCertFallback(ctx context.Context, serial, stage, has
 	res.Path = dst
 	res.Note = "Device is not rooted. The cert was saved to " + dst + ". Install it via Settings → Security → Encryption & credentials → Install a certificate → CA certificate, then pick the file. Note: most Android 7+ apps ignore user-store CAs unless their network-security-config opts in — system-store (root) is needed for those."
 	return res, nil
+}
+
+// shellStrategy is one attempt in an escalation: a name for the transcript and
+// the remote command it runs. Escalations are shared with the command previews,
+// so the user reads the same list adbq will walk.
+type shellStrategy struct {
+	Name string `json:"name"`
+	Cmd  string `json:"cmd"`
+}
+
+// cacertStrategies are the persistent system-store writes, tried in order.
+// Persistent means a reboot keeps the certificate.
+func cacertStrategies(stage, destPath string) []shellStrategy {
+	install := cacertInstallCmd(stage, destPath)
+	return []shellStrategy{
+		{"direct", install},
+		{"magisk-remount", "magisk --remount-system 2>&1; " + install},
+		{"remount-root", "mount -o rw,remount / 2>&1; " + install + " ; mount -o ro,remount / 2>/dev/null; true"},
+		{"remount-system", "mount -o rw,remount /system 2>&1; " + install + " ; mount -o ro,remount /system 2>/dev/null; true"},
+	}
 }
 
 // cacertInstallCmd drops a single staged cert into the system store with the

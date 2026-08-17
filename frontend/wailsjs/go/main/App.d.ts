@@ -73,6 +73,8 @@ export function CreateIptablesChain(arg1:string,arg2:string,arg3:string,arg4:str
 
 export function DNSLookup(arg1:string,arg2:string):Promise<string>;
 
+export function DNSLookupCommands(arg1:string,arg2:string):Promise<Array<string> | null>;
+
 export function DefaultAVDSpec(arg1:string):Promise<adb.AVDSpec>;
 
 export function DeleteAVD(arg1:string):Promise<void>;
@@ -255,6 +257,8 @@ export function Mkdir(arg1:string,arg2:string,arg3:boolean):Promise<string>;
 
 export function MoveFile(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<string>;
 
+export function NetCommands(arg1:string,arg2:string):Promise<adb.NetCommands>;
+
 export function OpenAndroidStudio():Promise<void>;
 
 export function OpenInJadx(arg1:string,arg2:string):Promise<string>;
@@ -278,6 +282,10 @@ export function PickSDKRoot():Promise<string>;
 export function PlanApkInstall(arg1:string,arg2:string):Promise<adb.ApkInstallPlan>;
 
 export function PlanAppBinaries(arg1:string,arg2:string):Promise<adb.BinaryPlan>;
+
+export function PlanCertInstall(arg1:string):Promise<adb.CertInstallPlan>;
+
+export function PlanHostsApply(arg1:string,arg2:string):Promise<adb.HostsApplyPlan>;
 
 export function PlanJadxOpen(arg1:string,arg2:string):Promise<adb.JadxOpenPlan>;
 

@@ -567,6 +567,28 @@ export namespace adb {
 	        this.warning = source["warning"];
 	    }
 	}
+	export class CertInstallPlan {
+	    rooted: boolean;
+	    store: string;
+	    path: string;
+	    persistent: boolean;
+	    commands: string[] | null;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CertInstallPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rooted = source["rooted"];
+	        this.store = source["store"];
+	        this.path = source["path"];
+	        this.persistent = source["persistent"];
+	        this.commands = source["commands"];
+	        this.note = source["note"];
+	    }
+	}
 	export class CertInstallResult {
 	    subject: string;
 	    fileName: string;
@@ -1290,6 +1312,22 @@ export namespace adb {
 	        this.javaPath = source["javaPath"];
 	    }
 	}
+	export class HostsApplyPlan {
+	    path: string;
+	    commands: string[] | null;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostsApplyPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.commands = source["commands"];
+	        this.note = source["note"];
+	    }
+	}
 	export class HostsApplyResult {
 	    path: string;
 	    strategy: string;
@@ -1726,6 +1764,28 @@ export namespace adb {
 	}
 	
 	
+	export class NetCommands {
+	    proxy: string[] | null;
+	    clearProxy: string[] | null;
+	    flushDns: string[] | null;
+	    readProxy: string[] | null;
+	    readDns: string[] | null;
+	    connections: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new NetCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.proxy = source["proxy"];
+	        this.clearProxy = source["clearProxy"];
+	        this.flushDns = source["flushDns"];
+	        this.readProxy = source["readProxy"];
+	        this.readDns = source["readDns"];
+	        this.connections = source["connections"];
+	    }
+	}
 	export class NetIface {
 	    name: string;
 	    ipv4: string;

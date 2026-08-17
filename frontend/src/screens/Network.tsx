@@ -202,6 +202,17 @@ function NetCert({device}: {device: adb.Device}) {
   const [q, setQ] = useState('');
   const [installing, setInstalling] = useState(false);
   const [last, setLast] = useState<adb.CertInstallResult | null>(null);
+  // What the install will attempt on this device. Root decides whether that is
+  // the system store or a staged manual import, so it comes from the backend.
+  const [plan, setPlan] = useState<adb.CertInstallPlan | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setPlan(null); return; }
+    let live = true;
+    API.PlanCertInstall(device.id)
+      .then(p => { if (live) setPlan(p); })
+      .catch(() => { if (live) setPlan(null); });
+    return () => { live = false; };
+  }, [device?.id]);
 
   const load = () => {
     if (!device?.id) return;
@@ -213,7 +224,19 @@ function NetCert({device}: {device: adb.Device}) {
   };
   useEffect(() => { load(); }, [device?.id]);
 
-  function install() {
+  async function install() {
+    // Landing a CA in the system store remounts or overlays a read-only
+    // partition, so the escalation is read before it runs (CLAUDE.md §4.1 K2).
+    const ok = await confirmDialog({
+      title: plan?.store === 'user' ? 'Stage a CA certificate?' : 'Install a CA into the system store?',
+      body: <>
+        {plan?.note}
+        <CommandPreview commands={plan?.commands ?? []} defaultOpen/>
+      </>,
+      confirmLabel: 'Pick a certificate',
+      danger: plan?.store !== 'user',
+    });
+    if (!ok) return;
     setInstalling(true);
     API.InstallSystemCertWithPicker(device.id)
       .then(res => {
@@ -270,6 +293,7 @@ function NetCert({device}: {device: adb.Device}) {
               <div className='mono subtle' style={{fontSize: 11, marginTop: 4}}>{last.path}</div>
             </div>
           )}
+          <CommandPreview commands={plan?.commands ?? []}/>
           <div className='muted' style={{fontSize: 11, marginTop: 10}}>
             Burp: <span className='mono'>Proxy → Proxy settings → Import / export CA certificate → Certificate in DER format</span>, then install the saved file here.
           </div>
@@ -320,6 +344,8 @@ function NetHosts({device}: {device: adb.Device}) {
   const [saved, setSaved] = useState('');
   const [loading, setLoading] = useState(false);
   const [drifted, setDrifted] = useState(false);
+  const [plan, setPlan] = useState<adb.HostsApplyPlan | null>(null);
+  const [flushCmd, setFlushCmd] = useState<string[]>([]);
 
   const load = () => {
     if (!device?.id) return;
@@ -334,6 +360,8 @@ function NetHosts({device}: {device: adb.Device}) {
         setText(live);
         setSaved(persisted || '');
         setDrifted(!!persisted && persisted.trim() !== live.trim());
+        refreshPlan(live);
+        API.NetCommands(device.id, '').then(c => setFlushCmd(c.flushDns ?? [])).catch(() => setFlushCmd([]));
       })
       .catch(e => showToast({title: 'Read hosts failed', body: String(e), kind: 'err'}))
       .finally(() => setLoading(false));
@@ -355,11 +383,29 @@ function NetHosts({device}: {device: adb.Device}) {
     }).catch(() => {});
   }, [device?.id]);
 
-  function apply() {
+  // The plan is for the text in the editor, so it stages the bytes it shows.
+  // Refreshed on demand rather than per keystroke: resolving the real hosts
+  // path is a device call.
+  function refreshPlan(content: string) {
+    API.PlanHostsApply(device.id, content).then(setPlan).catch(() => setPlan(null));
+  }
+
+  async function apply() {
     if (!device.root) {
       showToast({title: 'Root required', body: 'Editing /system/etc/hosts needs root + writable /system.', kind: 'err'});
       return;
     }
+    const p = await API.PlanHostsApply(device.id, text).catch(() => null);
+    setPlan(p);
+    const ok = await confirmDialog({
+      title: `Write ${p?.path || '/system/etc/hosts'}?`,
+      body: <>
+        Tried in order until one write reads back intact; the last resort scaffolds a Magisk module and needs a reboot.
+        <CommandPreview commands={p?.commands ?? []} defaultOpen/>
+      </>,
+      confirmLabel: 'Save & Apply', danger: true,
+    });
+    if (!ok) return;
     // Persist locally first so a future reboot can restore it.
     API.SaveHostsConfig(device.id, text)
       .then(() => API.ApplyHostsConfig(device.id))
@@ -433,6 +479,10 @@ function NetHosts({device}: {device: adb.Device}) {
           <span className='muted' style={{fontSize: 11, alignSelf: 'center'}}>
             Tries direct write → magisk remount → /system remount → bind-mount → Magisk module scaffold (auto). Verifies via md5 and flushes netd cache.
           </span>
+          <div style={{flexBasis: '100%', display: 'grid', gap: 4}}>
+            <CommandPreview commands={plan?.commands ?? []} label='Save & Apply'/>
+            <CommandPreview commands={flushCmd} label='Flush DNS cache'/>
+          </div>
         </div>
       </div>
 
@@ -457,6 +507,15 @@ function NetDns({device, info}: {device: adb.Device; info: adb.NetworkInfo | nul
   const [host, setHost] = useState('');
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<DnsRecord[]>([]);
+  const [cmds, setCmds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!device?.id || !host.trim()) { setCmds([]); return; }
+    let live = true;
+    API.DNSLookupCommands(device.id, host.trim())
+      .then(c => { if (live) setCmds(c || []); })
+      .catch(() => { if (live) setCmds([]); });
+    return () => { live = false; };
+  }, [device?.id, host]);
 
   function lookup() {
     if (!host.trim()) return;
@@ -498,6 +557,9 @@ function NetDns({device, info}: {device: adb.Device; info: adb.NetworkInfo | nul
           <button className='btn primary' onClick={lookup} disabled={busy || !host.trim()}>
             {busy ? '…' : 'Resolve'}
           </button>
+        </div>
+        <div style={{padding: '0 14px 12px'}}>
+          <CommandPreview commands={cmds} label='Lookup'/>
         </div>
       </div>
 
@@ -734,6 +796,18 @@ function NetConnections({device}: {device: adb.Device}) {
     return () => clearInterval(t);
   }, [device?.id, paused]);
 
+  // Sockets are read out of procfs; `ss` is missing on stripped ROMs, and the
+  // preview should say what actually runs.
+  const [cmds, setCmds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!device?.id) return;
+    let live = true;
+    API.NetCommands(device.id, '')
+      .then(c => { if (live) setCmds(c.connections ?? []); })
+      .catch(() => { if (live) setCmds([]); });
+    return () => { live = false; };
+  }, [device?.id]);
+
   const filtered = useMemo(() => {
     return rows.filter(r => {
       if (proto !== 'all' && !r.proto.startsWith(proto)) return false;
@@ -783,6 +857,9 @@ function NetConnections({device}: {device: adb.Device}) {
       <div style={{padding: '6px 14px', borderTop: '1px solid var(--border)', fontSize: 11}} className='muted spread'>
         <span>{paused ? 'Paused' : 'Live · refreshes every 3s'}</span>
         <span className='subtle mono'>{lastTs ? `last update ${new Date(lastTs).toLocaleTimeString()}` : 'never refreshed'}</span>
+      </div>
+      <div style={{padding: '0 14px 8px'}}>
+        <CommandPreview commands={cmds} label='Read sockets'/>
       </div>
     </div>
   );

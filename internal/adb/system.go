@@ -72,10 +72,7 @@ var tcpStates = map[string]string{
 // ListConnections reads /proc/net/tcp(6) and /proc/net/udp(6) from the device.
 func (c *Client) ListConnections(ctx context.Context, serial string) ([]Connection, error) {
 	var conns []Connection
-	for _, src := range []struct{ proto, path string }{
-		{"tcp", "/proc/net/tcp"}, {"tcp6", "/proc/net/tcp6"},
-		{"udp", "/proc/net/udp"}, {"udp6", "/proc/net/udp6"},
-	} {
+	for _, src := range procNetSources {
 		out, err := c.Shell(ctx, serial, "cat "+src.path+" 2>/dev/null")
 		if err != nil {
 			continue
@@ -83,6 +80,23 @@ func (c *Client) ListConnections(ctx context.Context, serial string) ([]Connecti
 		conns = append(conns, parseProcNet(out, src.proto)...)
 	}
 	return conns, nil
+}
+
+// procNetSources are the procfs tables the connection list is built from. `ss`
+// would be shorter but is absent on stripped ROMs.
+var procNetSources = []struct{ proto, path string }{
+	{"tcp", "/proc/net/tcp"}, {"tcp6", "/proc/net/tcp6"},
+	{"udp", "/proc/net/udp"}, {"udp6", "/proc/net/udp6"},
+}
+
+// connectionsRemote renders the reads ListConnections performs as one command,
+// for the preview.
+func connectionsRemote() string {
+	parts := make([]string, 0, len(procNetSources))
+	for _, src := range procNetSources {
+		parts = append(parts, "cat "+src.path+" 2>/dev/null")
+	}
+	return strings.Join(parts, "; ")
 }
 
 func parseProcNet(out, proto string) []Connection {
