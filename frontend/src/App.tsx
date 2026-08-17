@@ -240,17 +240,23 @@ function AppInner() {
     API.ListApps(device.id, true).then(a => setCounts(c => ({...c, apps: a?.length || 0}))).catch(() => {});
   }, [device?.id, screen]);
 
-  // Global keyboard shortcuts: Cmd/Ctrl+1..9 jump to the sidebar item at
-  // that index. Numeric keys are ignored when a text input has focus so they
-  // don't hijack typing.
+  // Global keyboard shortcuts: Cmd/Ctrl+1..9 jump to the device screen at that
+  // index, and Cmd/Ctrl+0 to Emulators — the host screen sits outside the
+  // numbering, the way a browser's 0 means "the last one" rather than the
+  // tenth. Numeric keys are ignored when a text input has focus so they don't
+  // hijack typing.
   useEffect(() => {
     const order: Screen[] = [
       'overview', 'logcat', 'shell', 'processes', 'apps',
       'files', 'frida', 'forwards', 'network',
-      'capture', 'iptables', 'emulators',
     ];
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (e.key === '0') {
+        e.preventDefault();
+        setScreen('emulators');
+        return;
+      }
       const n = parseInt(e.key, 10);
       if (Number.isNaN(n) || n < 1 || n > order.length) return;
       const target = order[n - 1];
@@ -300,7 +306,7 @@ function AppInner() {
               <div className='muted' style={{marginBottom: 14}}>Plug in a USB device, connect over Wi-Fi, or start an emulator.</div>
               <div style={{display: 'flex', gap: 6, justifyContent: 'center'}}>
                 <button className='btn primary' onClick={() => setConnectOpen(true)}><Icon.Plus/>Connect</button>
-                <button className='btn' onClick={() => setScreen('emulators')}><Icon.Layers/>Emulators</button>
+                <button className='btn' onClick={() => setScreen('emulators')}><Icon.Phone/>Emulators</button>
               </div>
             </div>}
       </main>
@@ -449,7 +455,7 @@ function Sidebar({device, screen, setScreen, counts}:{device?: adb.Device; scree
       <div className='group'>
         <div className='label'>Host</div>
         <div className={`nav${screen === 'emulators' ? ' active' : ''}`} onClick={() => setScreen('emulators')}>
-          <span className='icon'><Icon.Layers/></span>
+          <span className='icon'><Icon.Phone/></span>
           <span>Emulators</span>
         </div>
       </div>

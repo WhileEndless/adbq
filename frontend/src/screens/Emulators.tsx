@@ -6,7 +6,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOn} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
-import {Badge, CodeBlock, FeatureNotice, Modal, SearchInput, Switch, confirmDialog, showToast} from '../ui';
+import {Badge, CodeBlock, FeatureNotice, IconBtn, Modal, SearchInput, Switch, confirmDialog, showToast} from '../ui';
 
 type Tab = 'avds' | 'images' | 'root' | 'host';
 
@@ -45,15 +45,11 @@ export function EmulatorsScreen() {
         </button>
       </div>
 
-      <div style={{borderBottom: '1px solid var(--border)', padding: '0 18px', display: 'flex', overflowX: 'auto'}}>
+      <div className='tabbar'>
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            padding: '10px 12px', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
-            marginBottom: -1, background: 'none',
-            color: tab === t.id ? 'var(--text)' : 'var(--text-muted)',
-            fontWeight: tab === t.id ? 600 : 500, fontSize: 12.5,
-            display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap', cursor: 'pointer',
-          }}>{t.icon}{t.label}</button>
+          <button key={t.id} className={`tabbar-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
+            {t.icon}{t.label}
+          </button>
         ))}
       </div>
 
@@ -230,7 +226,10 @@ function AVDRow({avd, sdk, selected, onSelect, onChanged}: {
             <div style={{display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap'}}>
               <strong style={{fontSize: 13}}>{avd.display || avd.name}</strong>
               <StateBadge state={avd.state}/>
-              {avd.playStore ? <Badge kind='warn'>Play Store</Badge> : <Badge>{avd.tagDisplay || avd.tag || 'AOSP'}</Badge>}
+              {/* A variant, not a fault — amber would read as "something is
+                  wrong with this AVD". What it costs you is said in words,
+                  next to the choices it actually affects. */}
+              {avd.playStore ? <Badge kind='info'>Play Store</Badge> : <Badge>{avd.tagDisplay || avd.tag || 'AOSP'}</Badge>}
               {avd.patched && <Badge kind='accent'>patched</Badge>}
               {avd.root === 'adb-root' && <Badge kind='ok'>root</Badge>}
               {avd.root === 'su' && <Badge kind='ok'>su</Badge>}
@@ -251,9 +250,9 @@ function AVDRow({avd, sdk, selected, onSelect, onChanged}: {
                   <button className='btn sm' disabled={busy || !!avd.error} title='Boot without loading the saved snapshot'
                           onClick={() => start({coldBoot: true})}>Cold</button>
                 </>}
-            <button className='btn sm ghost' onClick={() => setShowOpts(o => !o)} title='Boot options'>
-              <Icon.Settings width={12} height={12}/>
-            </button>
+            <IconBtn title='Boot options' active={showOpts} onClick={() => setShowOpts(o => !o)}>
+              <Icon.Settings width={13} height={13}/>
+            </IconBtn>
           </div>
         </div>
 
@@ -356,7 +355,7 @@ function AVDDetail({avd, onChanged, onClose}: {avd: adb.AVD; onChanged: () => vo
       <div className='card-header'>
         <span className='title'>{avd.display || avd.name}</span>
         <div style={{flex: 1}}/>
-        <button className='btn sm ghost' onClick={onClose}><Icon.X width={11} height={11}/></button>
+        <IconBtn title='Close' onClick={onClose}><Icon.X width={13} height={13}/></IconBtn>
       </div>
       <div className='card-body' style={{maxHeight: '70vh', overflow: 'auto'}}>
         <Facts avd={avd}/>
@@ -551,7 +550,7 @@ function SnapshotList({avd, onChanged}: {avd: adb.AVD; onChanged: () => void}) {
       {snaps.map(s => (
         <div key={s} style={{display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0'}}>
           <span className='mono' style={{flex: 1, fontSize: 11, wordBreak: 'break-all'}}>{s}</span>
-          <button className='btn sm ghost' onClick={() => del(s)}><Icon.Trash width={11} height={11}/></button>
+          <IconBtn title={`Delete snapshot ${s}`} onClick={() => del(s)}><Icon.Trash width={12} height={12}/></IconBtn>
         </div>
       ))}
     </div>
@@ -726,11 +725,11 @@ function CreateAVDModal({onClose, onCreated}: {onClose: () => void; onCreated: (
         )}
         {/* The rooting story hinges on this, so say it where the choice is made. */}
         {chosen?.playStore && (
-          <div style={{color: 'var(--warn)', fontSize: 11, marginTop: 4}}>
+          <div className='warn-text' style={{fontSize: 11, marginTop: 4}}>
             Play Store images refuse <span className='mono'>adb root</span>. Rooting one needs rootAVD (Root &amp; certs tab).
           </div>
         )}
-        {!!chosen?.note && <div style={{color: 'var(--warn)', fontSize: 11, marginTop: 4}}>{chosen.note}</div>}
+        {!!chosen?.note && <div className='warn-text' style={{fontSize: 11, marginTop: 4}}>{chosen.note}</div>}
       </div>
 
       <div className='field'>
@@ -878,28 +877,31 @@ function ImagesTab() {
         ? <FeatureNotice state={{kind: 'empty', hint: loading ? 'Loading the SDK catalogue…' : 'No image matches those filters.'}}/>
         : (
           <div className='card'>
-            <table style={{width: '100%', fontSize: 12}}>
+            <table className='table'>
               <thead>
-                <tr style={{textAlign: 'left'}}>
-                  {['Android', 'Tag', 'ABI', 'Rev', '', ''].map((h, i) => (
-                    <th key={i} className='muted' style={{padding: '8px 10px', fontWeight: 500, fontSize: 11}}>{h}</th>
-                  ))}
+                <tr>
+                  <th>Android</th>
+                  <th>Tag</th>
+                  <th>ABI</th>
+                  <th>Rev</th>
+                  <th/>
+                  <th className='actions'/>
                 </tr>
               </thead>
               <tbody>
                 {filtered.slice(0, 400).map(i => (
-                  <tr key={i.pkg} style={{borderTop: '1px solid var(--border)'}}>
-                    <td style={{padding: '6px 10px', whiteSpace: 'nowrap'}}>{i.androidVer}</td>
-                    <td style={{padding: '6px 10px'}}>
-                      {i.playStore ? <Badge kind='warn'>Play Store</Badge> : <span className='mono subtle'>{i.tag}</span>}
+                  <tr key={i.pkg}>
+                    <td style={{whiteSpace: 'nowrap'}}>{i.androidVer}</td>
+                    <td>
+                      {i.playStore ? <Badge kind='info'>Play Store</Badge> : <span className='mono subtle'>{i.tag}</span>}
                     </td>
-                    <td className='mono subtle' style={{padding: '6px 10px'}} title={i.note || undefined}>
+                    <td className='mono subtle' title={i.note || undefined}>
                       {i.abi}
                       {!i.compatible && <span style={{color: 'var(--err)', marginLeft: 4}}>✕</span>}
                     </td>
-                    <td className='mono subtle' style={{padding: '6px 10px'}}>{i.revision || '—'}</td>
-                    <td style={{padding: '6px 10px'}}>{i.installed && <Badge kind='ok'>installed</Badge>}</td>
-                    <td style={{padding: '6px 10px', textAlign: 'right'}}>
+                    <td className='mono subtle'>{i.revision || '—'}</td>
+                    <td>{i.installed && <Badge kind='ok'>installed</Badge>}</td>
+                    <td className='actions'>
                       {i.installed
                         ? <button className='btn sm ghost' onClick={() => uninstall(i)}><Icon.Trash width={11} height={11}/>Remove</button>
                         : <button className='btn sm' disabled={!i.compatible} title={i.note || undefined}
@@ -1099,10 +1101,10 @@ function CertCard({avd}: {avd: adb.AVD | null}) {
         </div>
         {!avd && <div className='muted' style={{fontSize: 11, marginTop: 8}}>Choose an AVD above.</div>}
         {avd && avd.state !== 'running' && (
-          <div style={{color: 'var(--warn)', fontSize: 11, marginTop: 8}}>{avd.name} is not running — start it first.</div>
+          <div className='warn-text' style={{fontSize: 11, marginTop: 8}}>{avd.name} is not running — start it first.</div>
         )}
         {avd && avd.state === 'running' && !rooted && (
-          <div style={{color: 'var(--warn)', fontSize: 11, marginTop: 8}}>{avd.name} has no root yet — root it first.</div>
+          <div className='warn-text' style={{fontSize: 11, marginTop: 8}}>{avd.name} has no root yet — root it first.</div>
         )}
         <button className='btn sm primary' style={{width: '100%', marginTop: 10}}
                 disabled={busy || !avd || avd.state !== 'running' || !rooted} onClick={install}>
@@ -1185,7 +1187,7 @@ function HostTab({sdk, onChanged, checking, recheck}: {
               ))}
             </tbody>
           </table>
-          {!!sdk?.error && <div style={{color: 'var(--warn)', fontSize: 11.5, marginTop: 8, lineHeight: 1.5}}>{sdk.error}</div>}
+          {!!sdk?.error && <div className='warn-text' style={{fontSize: 11.5, marginTop: 8, lineHeight: 1.5}}>{sdk.error}</div>}
           <div style={{display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap'}}>
             <button className='btn sm' onClick={pick}><Icon.Folder width={11} height={11}/>Choose SDK folder</button>
             {sdk?.source === 'setting' && <button className='btn sm ghost' onClick={clear}>Use auto-detection</button>}

@@ -38,15 +38,11 @@ export function NetworkScreen({device}: {device: adb.Device}) {
         <button className='btn' onClick={reload}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Refresh</button>
       </div>
 
-      <div style={{borderBottom: '1px solid var(--border)', padding: '0 18px', display: 'flex', gap: 0, overflowX: 'auto'}}>
+      <div className='tabbar'>
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            padding: '10px 12px', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
-            marginBottom: -1, background: 'none',
-            color: tab === t.id ? 'var(--text)' : 'var(--text-muted)',
-            fontWeight: tab === t.id ? 600 : 500, fontSize: 12.5,
-            display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap', cursor: 'pointer',
-          }}>{t.icon}{t.label}</button>
+          <button key={t.id} className={`tabbar-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
+            {t.icon}{t.label}
+          </button>
         ))}
       </div>
 
