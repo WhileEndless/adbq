@@ -21,6 +21,7 @@ export namespace adb {
 	    sdCard: string;
 	    dataSize: string;
 	    gpuMode: string;
+	    keyboard: boolean;
 	    diskBytes: number;
 	    sysImgDir: string;
 	    ramdiskRel: string;
@@ -61,6 +62,7 @@ export namespace adb {
 	        this.sdCard = source["sdCard"];
 	        this.dataSize = source["dataSize"];
 	        this.gpuMode = source["gpuMode"];
+	        this.keyboard = source["keyboard"];
 	        this.diskBytes = source["diskBytes"];
 	        this.sysImgDir = source["sysImgDir"];
 	        this.ramdiskRel = source["ramdiskRel"];
@@ -1131,6 +1133,8 @@ export namespace adb {
 	    sdkRoot?: string;
 	    adbPath?: string;
 	    avdHome?: string;
+	    jadxPath?: string;
+	    javaPath?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new HostSettings(source);
@@ -1141,6 +1145,8 @@ export namespace adb {
 	        this.sdkRoot = source["sdkRoot"];
 	        this.adbPath = source["adbPath"];
 	        this.avdHome = source["avdHome"];
+	        this.jadxPath = source["jadxPath"];
+	        this.javaPath = source["javaPath"];
 	    }
 	}
 	export class HostsApplyResult {

@@ -281,6 +281,16 @@ func (a *App) StartAVD(name string, opts adb.EmulatorOpts) (string, error) {
 			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
 		})
 		if werr != nil {
+			// Cancelling a "Start …" task can only mean "don't start it". Just
+			// dropping the wait would leave the emulator booting behind a task
+			// that says cancelled, so the cancel has to reach the emulator.
+			if ctx.Err() != nil {
+				sctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				_ = a.emu.Stop(sctx, name)
+				a.tasks.Finish(id, "cancelled", "", name+" stopped")
+				return
+			}
 			a.tasks.Finish(id, "err", "", werr.Error())
 			return
 		}

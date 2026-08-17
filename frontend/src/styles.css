@@ -341,6 +341,12 @@ input, select, textarea { font: inherit; color: inherit; }
 :root[data-theme="dark"] .badge.accent { color: #c5a3ff; }
 .badge .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 
+/* Inline warning copy. --warn is picked for badges and status dots, where it
+   sits on a tinted background; as 11px text on a white panel it lands near 2:1
+   contrast. Light mode gets the darker tone .badge.warn already uses. */
+.warn-text { color: #b07d20; }
+:root[data-theme="dark"] .warn-text { color: var(--warn); }
+
 /* ─── Main content ─────────────────────────────────────────────────────────── */
 .main {
   overflow: hidden;

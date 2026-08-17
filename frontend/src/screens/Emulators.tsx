@@ -4,6 +4,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
+import {EventsOn} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
 import {Badge, CodeBlock, FeatureNotice, Modal, SearchInput, Switch, confirmDialog, showToast} from '../ui';
 
@@ -93,6 +94,25 @@ function humanBytes(n: number): string {
   let v = n, i = 0;
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
   return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+/**
+ * Run onDone when a background task of one of these kinds stops running.
+ *
+ * Installing an image or rooting an AVD happens in the task tray, so without
+ * this the screen that started the work keeps showing the state from before it.
+ * The unsubscribe function EventsOn returns is what gets called on unmount —
+ * EventsOff would take the task tray's own listener down with it.
+ */
+function useTaskDone(kinds: string, onDone: () => void) {
+  const saved = useRef(onDone);
+  saved.current = onDone;
+  useEffect(() => {
+    const wanted = new Set(kinds.split(' '));
+    return EventsOn('task:update', (t: adb.TaskState) => {
+      if (wanted.has(t.kind) && t.status !== 'running') saved.current();
+    });
+  }, [kinds]);
 }
 
 /** Poll while anything is mid-transition; idle lists don't need a timer. */
@@ -220,6 +240,7 @@ function AVDRow({avd, sdk, selected, onSelect, onChanged}: {
               {avd.serial ? ` · ${avd.serial}` : ''}
             </div>
             {!!avd.error && <div style={{color: 'var(--err)', fontSize: 11, marginTop: 4}}>{avd.error}</div>}
+            {!!avd.warning && <div className='warn-text' style={{fontSize: 11, marginTop: 4}}>{avd.warning}</div>}
           </div>
 
           <div style={{display: 'flex', gap: 4, flexShrink: 0}}>
@@ -397,23 +418,33 @@ function HardwareEditor({avd, onSaved}: {avd: adb.AVD; onSaved: () => void}) {
   const [open, setOpen] = useState(false);
   const [hw, setHw] = useState<adb.AVDHardware>({} as adb.AVDHardware);
   const [changes, setChanges] = useState<Record<string, string>>({});
+  const [invalid, setInvalid] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Start from what the AVD currently has, so the fields read as an editor
-  // rather than as a blank form.
+  // The list behind this panel refreshes every few seconds, handing down a new
+  // AVD object each time. Seeding from a ref means the form is filled once, when
+  // it opens — keying the effect on `avd` would wipe half-typed values on the
+  // next poll, which is exactly what a user notices and cannot explain.
+  const latest = useRef(avd);
+  latest.current = avd;
   useEffect(() => {
     if (!open) return;
-    const [w, h] = (avd.resolution || '').split('x').map(n => parseInt(n, 10) || 0);
+    const a = latest.current;
+    const [w, h] = (a.resolution || '').split('x').map(n => parseInt(n, 10) || 0);
     setHw({
-      ramMB: avd.ramMB, cores: avd.cores, dataSize: avd.dataSize, sdCard: avd.sdCard,
-      gpuMode: avd.gpuMode, width: w, height: h, density: avd.density, keyboard: null,
+      ramMB: a.ramMB, cores: a.cores, dataSize: a.dataSize, sdCard: a.sdCard,
+      gpuMode: a.gpuMode, width: w, height: h, density: a.density, keyboard: a.keyboard,
     } as unknown as adb.AVDHardware);
-  }, [open, avd]);
+  }, [open]);
 
-  // The backend decides which config.ini keys an edit writes; show exactly those.
+  // The backend decides which config.ini keys an edit writes; show exactly
+  // those, and its rejection reason when a value is out of range — a silently
+  // empty change list would leave the user guessing why Save does nothing.
   useEffect(() => {
     if (!open) return;
-    API.AVDHardwareChanges(hw).then(c => setChanges(c ?? {})).catch(() => setChanges({}));
+    API.AVDHardwareChanges(hw)
+      .then(c => { setChanges(c ?? {}); setInvalid(''); })
+      .catch(e => { setChanges({}); setInvalid(String(e)); });
   }, [open, hw]);
 
   const set = (patch: Partial<adb.AVDHardware>) => setHw({...hw, ...patch} as adb.AVDHardware);
@@ -449,6 +480,14 @@ function HardwareEditor({avd, onSaved}: {avd: adb.AVD; onSaved: () => void}) {
             </div>
           </div>
 
+          <label style={{display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, marginTop: 8, cursor: 'pointer'}}>
+            <Switch on={!!hw.keyboard} onChange={v => set({keyboard: v})}/>
+            <span>Hardware keyboard</span>
+          </label>
+
+          {!!invalid && (
+            <div style={{color: 'var(--err)', fontSize: 11, marginTop: 8, lineHeight: 1.5}}>{invalid}</div>
+          )}
           {Object.keys(changes).length > 0 && (
             <div style={{marginTop: 8}}>
               <span className='muted' style={{fontSize: 11}}>config.ini changes:</span>{' '}
@@ -458,7 +497,7 @@ function HardwareEditor({avd, onSaved}: {avd: adb.AVD; onSaved: () => void}) {
           <div className='muted' style={{fontSize: 11, marginTop: 6}}>
             Takes effect the next time this AVD boots.
           </div>
-          <button className='btn sm primary' style={{width: '100%', marginTop: 8}} disabled={saving} onClick={save}>
+          <button className='btn sm primary' style={{width: '100%', marginTop: 8}} disabled={saving || !!invalid} onClick={save}>
             Save hardware settings
           </button>
         </div>
@@ -635,7 +674,14 @@ function CreateAVDModal({onClose, onCreated}: {onClose: () => void; onCreated: (
   const create = () => {
     setBusy(true);
     API.CreateAVD(spec)
-      .then(a => { showToast({title: `${a.name} created`, kind: 'ok'}); onCreated(); })
+      .then(a => {
+        // The AVD exists either way; a warning means the hardware settings did
+        // not land, which is worth more than the three seconds a toast lasts.
+        showToast(a.warning
+          ? {title: `${a.name} created with a problem`, body: a.warning, kind: 'err', ttl: 12000}
+          : {title: `${a.name} created`, kind: 'ok'});
+        onCreated();
+      })
       .catch(e => showToast({title: 'Create failed', body: String(e), kind: 'err'}))
       .finally(() => setBusy(false));
   };
@@ -769,6 +815,9 @@ function ImagesTab() {
       .finally(() => setLoading(false));
   }, []);
   useEffect(() => { load(false); }, [load]);
+  // A finished download changes what is on disk, and the row it came from still
+  // says "Install" until the list is re-read.
+  useTaskDone('sdk-install', () => load(false));
 
   const filtered = useMemo(() => images.filter(i => {
     if (onlyInstalled && !i.installed) return false;
@@ -885,12 +934,20 @@ function RootTab() {
     API.ListAVDs().then(l => setAvds(l ?? [])).catch(() => {});
   }, []);
   useEffect(() => { reload(); }, [reload]);
+  // Everything on this tab is a statement about live state — is it running, does
+  // it have root, is the image patched — and all three change from elsewhere:
+  // the AVDs tab, the task tray, the emulator itself.
+  usePolling(true, reload, 8000);
+  useTaskDone('avd-root avd-restore rootavd-download', reload);
+
+  const avd = avds.find(a => a.name === name) || null;
+  // Re-asked only when an input to the answer moved, not on every poll: the
+  // advice call probes the device, and the list identity changes regardless.
   useEffect(() => {
     if (!name) { setAdvice(null); return; }
     API.RootAVDAdvice(name).then(a => setAdvice(a ?? null)).catch(() => setAdvice(null));
-  }, [name, avds]);
+  }, [name, avd?.state, avd?.root, avd?.patched]);
 
-  const avd = avds.find(a => a.name === name) || null;
   const offered = advice?.offered === 'true';
 
   const download = async () => {
@@ -1078,7 +1135,18 @@ function HostTab({sdk, onChanged, checking, recheck}: {
       if (!p) return;
       return API.SetSDKRoot(p).then(i => {
         onChanged(i);
-        showToast({title: i.available ? 'SDK path set' : 'That folder is not an Android SDK', body: i.error || i.sdkRoot, kind: i.available ? 'ok' : 'err'});
+        // Whether an SDK is available is the wrong question: a folder that
+        // isn't one is dropped and adbq falls back to auto-detection, so with
+        // another SDK on the machine "available" would report success for a
+        // setting that changed nothing. Only source === 'setting' means the
+        // choice took.
+        const took = i.source === 'setting';
+        showToast({
+          title: took ? 'SDK path set' : 'That folder is not an Android SDK',
+          body: took ? i.sdkRoot : `Ignored — still using ${i.sdkRoot || 'no SDK'}${i.source ? ` (${i.source})` : ''}.`,
+          kind: took ? 'ok' : 'err',
+          mono: took,
+        });
       });
     }).catch(e => showToast({title: 'Could not set the SDK path', body: String(e), kind: 'err'}));
   };

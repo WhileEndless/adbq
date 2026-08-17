@@ -58,6 +58,7 @@ type AVD struct {
 	SDCard     string `json:"sdCard"`     // sdcard.size as written ("512M")
 	DataSize   string `json:"dataSize"`   // disk.dataPartition.size
 	GPUMode    string `json:"gpuMode"`    // hw.gpu.mode
+	Keyboard   bool   `json:"keyboard"`   // hw.keyboard — hardware keyboard input
 	DiskBytes  int64  `json:"diskBytes"`  // size of the .avd directory on disk
 
 	// SysImgDir is the absolute system-image directory this AVD boots from, and
@@ -283,6 +284,7 @@ func (a *AVD) applyConfig(cfg map[string]string, sdkRoot string) {
 	a.SDCard = cfg["sdcard.size"]
 	a.DataSize = cfg["disk.dataPartition.size"]
 	a.GPUMode = cfg["hw.gpu.mode"]
+	a.Keyboard = iniBool(cfg, "hw.keyboard")
 
 	if sysdir := cfg["image.sysdir.1"]; sysdir != "" && sdkRoot != "" {
 		a.SysImgDir = filepath.Join(sdkRoot, filepath.FromSlash(sysdir))
