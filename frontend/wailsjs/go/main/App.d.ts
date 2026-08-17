@@ -283,6 +283,8 @@ export function ProbeIptables(arg1:string,arg2:string):Promise<adb.IPTBackendInf
 
 export function ProbeTcpdump(arg1:string):Promise<adb.TcpdumpInfo>;
 
+export function ProxyCommand(arg1:string,arg2:string):Promise<string>;
+
 export function PullCapture(arg1:string):Promise<string>;
 
 export function PullFileWithPicker(arg1:string,arg2:string):Promise<string>;

@@ -72,10 +72,27 @@ Referans uygulamalar:
 
 | Yer | Ne gösteriyor |
 |---|---|
-| `screens/Network.tsx` (proxy) | `settings put global http_proxy …` |
+| `screens/Network.tsx` (proxy) | `settings put global http_proxy …` — metin `adb.ProxyCommand`'dan gelir |
 | `screens/Network.tsx` (capture) | tam `tcpdump` komut satırı, parametreler değiştikçe canlı |
-| `screens/Apps.tsx` (APK export/install) | `pm path` + `pull` listesi; onayda `install-multiple` |
-| `screens/Apps.tsx` (Analysis) | `pm path` + `pull` listesi; `JAVA_HOME=… jadx-gui <girdiler>`; binary toplama adımı |
+| `screens/Apps.tsx` (APK bölümü) | `pm path` + `pull` listesi; `JAVA_HOME=… jadx-gui <girdiler>`; binary toplama; kurulum onayında `install-multiple` |
+| `screens/Emulators.tsx` (sil / rootAVD) | onay diyaloğunun içinde, backend'den gelen komut |
+
+### 2.1. Gösterim: tek bir kontrol
+
+Komut nerede görünüyorsa `CommandPreview` (`frontend/src/ui.tsx`) ile görünür:
+
+- **kapalıyken tek satır** — ilk komut ve adım sayısı; tıklayınca açılır,
+- `copy` düğmesi her hâlde **tamamını** kopyalar,
+- `defaultOpen`, komutun gözde durmasını gerektiren yerler için: akan işlemler
+  (K5) ve yıkıcı eylemlerin onay diyalogları (K4).
+
+Kural komutun **ulaşılabilir** olması; her zaman ekranı kaplaması değil. Bir
+panelde üç eylem varsa üçünün listesi birden açıkken panel okunmuyor — bu da
+kullanıcının komut panellerini görmezden gelmesiyle sonuçlanıyor.
+
+Aynı sebeple frontend'de **elle komut kurulmaz**: backend cevap verene kadar
+gösterilecek komut yoktur (`CommandPreview` boş listede hiç render etmez).
+Yaklaşık bir satır göstermek, yanlış komut göstermenin yoludur.
 
 ---
 
@@ -85,7 +102,7 @@ Durum: ✅ var · ◐ kısmi (bazı eylemlerde) · ✗ yok
 
 | Ekran | Eylemler | Durum |
 |---|---|---|
-| Network — proxy | `settings put/delete global http_proxy` | ✅ |
+| Network — proxy | `settings put global http_proxy` | ✅ |
 | Network — capture | `tcpdump` başlat/durdur/pull | ✅ |
 | Apps — APK dışa aktar / kur | `pm path`, `pull`, `install-multiple` | ✅ |
 | Apps — jadx ile aç | `pm path`, `pull`, `jadx-gui <girdiler>` | ✅ |

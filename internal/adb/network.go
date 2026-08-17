@@ -299,13 +299,29 @@ func hexLEToIPv4(h string) string {
 		strconv.FormatInt(b[1], 10) + "." + strconv.FormatInt(b[0], 10)
 }
 
+// proxyValue is what lands in the setting. Clearing it is not a delete: the
+// framework reads `:0` as "no proxy", and an empty value leaves the old one in
+// place on some builds.
+func proxyValue(hostPort string) string {
+	if strings.TrimSpace(hostPort) == "" {
+		return ":0"
+	}
+	return hostPort
+}
+
+// ProxyCommand renders the command SetProxy will run.
+//
+// It lives here rather than in the UI because a command the user is shown must
+// be the one that runs: the two drifted apart while the text was assembled in
+// the frontend, and a wrong command is worse than no command
+// (CLAUDE.md §4.1).
+func ProxyCommand(serial, hostPort string) string {
+	return "adb -s " + serial + " shell settings put global http_proxy " + proxyValue(hostPort)
+}
+
 // SetProxy sets the global HTTP proxy. Use "" to clear.
 func (c *Client) SetProxy(ctx context.Context, serial, hostPort string) (string, error) {
-	v := hostPort
-	if v == "" {
-		v = ":0"
-	}
-	return c.Shell(ctx, serial, "settings put global http_proxy "+v)
+	return c.Shell(ctx, serial, "settings put global http_proxy "+proxyValue(hostPort))
 }
 
 // safeHost only allows hostname characters so it can be interpolated into a

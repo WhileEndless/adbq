@@ -2275,6 +2275,12 @@ func (a *App) SetProxy(serial, hostPort string) (string, error) {
 	return a.client.SetProxy(a.ctx, serial, hostPort)
 }
 
+// ProxyCommand renders the command SetProxy would run, so the panel shows the
+// real thing instead of a reconstruction (CLAUDE.md §4.1).
+func (a *App) ProxyCommand(serial, hostPort string) string {
+	return adb.ProxyCommand(serial, hostPort)
+}
+
 // ─── System ──────────────────────────────────────────────────────────────
 
 func (a *App) Reboot(serial, mode string) (string, error) {

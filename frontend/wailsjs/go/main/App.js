@@ -562,6 +562,10 @@ export function ProbeTcpdump(arg1) {
   return window['go']['main']['App']['ProbeTcpdump'](arg1);
 }
 
+export function ProxyCommand(arg1, arg2) {
+  return window['go']['main']['App']['ProxyCommand'](arg1, arg2);
+}
+
 export function PullCapture(arg1) {
   return window['go']['main']['App']['PullCapture'](arg1);
 }
