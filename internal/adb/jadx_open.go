@@ -35,11 +35,11 @@ type JadxOpenPlan struct {
 func JadxCommand(java, bin string, files []string) string {
 	var b strings.Builder
 	if home := javaHomeOf(java); home != "" {
-		b.WriteString("JAVA_HOME=" + shellQuoteLocal(home) + " ")
+		b.WriteString("JAVA_HOME=" + quoteArg(home) + " ")
 	}
-	b.WriteString(shellQuoteLocal(bin))
+	b.WriteString(quoteArg(bin))
 	for _, f := range files {
-		b.WriteString(" " + shellQuoteLocal(f))
+		b.WriteString(" " + quoteArg(f))
 	}
 	return b.String()
 }
@@ -74,7 +74,7 @@ func (c *Client) PlanJadxOpen(ctx context.Context, serial, pkg string, info Jadx
 
 	plan.Commands = append(plan.Commands, "adb -s "+serial+" shell pm path "+pkg)
 	for i, p := range remote {
-		plan.Commands = append(plan.Commands, "adb -s "+serial+" pull "+p+" "+shellQuoteLocal(hostPaths[i]))
+		plan.Commands = append(plan.Commands, "adb -s "+serial+" pull "+p+" "+quoteArg(hostPaths[i]))
 	}
 	bin := info.Bin
 	if bin == "" {

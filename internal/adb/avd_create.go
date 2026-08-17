@@ -188,9 +188,9 @@ func CreateAVDCommand(bin string, s AVDSpec) string {
 	if strings.TrimSpace(bin) == "" {
 		bin = "avdmanager"
 	}
-	parts := []string{shellQuoteLocal(bin)}
+	parts := []string{quoteArg(bin)}
 	for _, a := range CreateAVDArgs(s) {
-		parts = append(parts, shellQuoteLocal(a))
+		parts = append(parts, quoteArg(a))
 	}
 	return strings.Join(parts, " ")
 }
@@ -200,7 +200,7 @@ func DeleteAVDCommand(bin, name string) string {
 	if strings.TrimSpace(bin) == "" {
 		bin = "avdmanager"
 	}
-	return shellQuoteLocal(bin) + " delete avd -n " + shellQuoteLocal(name)
+	return quoteArg(bin) + " delete avd -n " + quoteArg(name)
 }
 
 // ListDeviceProfiles returns the hardware definitions available for creation.

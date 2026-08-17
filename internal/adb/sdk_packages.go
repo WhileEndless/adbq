@@ -311,11 +311,11 @@ func (p *PackageManager) commandsFor(img SystemImage) []string {
 	if bin == "" {
 		bin = "sdkmanager"
 	}
-	q := shellQuoteLocal(bin)
+	q := quoteArg(bin)
 	if img.Installed {
-		return []string{q + " --uninstall " + shellQuoteLocal(img.Pkg)}
+		return []string{q + " --uninstall " + quoteArg(img.Pkg)}
 	}
-	return []string{q + " " + shellQuoteLocal(img.Pkg)}
+	return []string{q + " " + quoteArg(img.Pkg)}
 }
 
 // ─── pure parsing ──────────────────────────────────────────────────────────

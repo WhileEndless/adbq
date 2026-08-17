@@ -304,7 +304,7 @@ func (c *Client) PlanApkInstall(ctx context.Context, serial, localPath string) (
 			File:     localPath,
 			Install:  []string{filepath.Base(localPath)},
 			Skipped:  []string{},
-			Commands: []string{"adb -s " + serial + " install -r " + shellQuoteLocal(localPath)},
+			Commands: []string{"adb -s " + serial + " install -r " + quoteArg(localPath)},
 		}, nil
 	}
 	zr, err := zip.OpenReader(localPath)
@@ -687,12 +687,4 @@ func (c *Client) deviceDensity(ctx context.Context, serial string) int {
 		}
 	}
 	return 0
-}
-
-// shellQuoteLocal quotes a host path for display inside a copyable command.
-func shellQuoteLocal(p string) string {
-	if p != "" && !strings.ContainsAny(p, " \t'\"$`\\") {
-		return p
-	}
-	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
 }

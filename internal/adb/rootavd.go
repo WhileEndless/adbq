@@ -303,7 +303,7 @@ func safeJoin(base, rel string) (string, bool) {
 // RootAVDCommand renders the command adbq will run, for the confirm dialog.
 func RootAVDCommand(scriptDir, ramdiskRel string, restore bool) string {
 	script := filepath.Join(scriptDir, "rootAVD.sh")
-	cmd := "bash " + shellQuoteLocal(script) + " " + shellQuoteLocal(ramdiskRel)
+	cmd := "bash " + quoteArg(script) + " " + quoteArg(ramdiskRel)
 	if restore {
 		cmd += " restore"
 	}

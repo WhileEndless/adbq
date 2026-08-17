@@ -132,9 +132,9 @@ func EmulatorCommand(bin, name string, port int, o EmulatorOpts) string {
 		bin = "emulator"
 	}
 	parts := make([]string, 0, 24)
-	parts = append(parts, shellQuoteLocal(bin))
+	parts = append(parts, quoteArg(bin))
 	for _, a := range EmulatorArgs(name, port, o) {
-		parts = append(parts, shellQuoteLocal(a))
+		parts = append(parts, quoteArg(a))
 	}
 	return strings.Join(parts, " ")
 }
