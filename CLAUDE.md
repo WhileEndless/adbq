@@ -66,6 +66,17 @@ Aşağıdaki bağımlılıklar **1.1** süzgecinden geçirilmiş ve kullanıcı 
 
   Detay ve gerekçe: [`docs/emulator-manager.md`](docs/emulator-manager.md) §8.
 
+- **`jadx` (GitHub, host tarafı)** — APK/DEX dekompiler'ı. **§1.1'i karşılıyor**: lisans **Apache-2.0** (liste içi), aktif bakımlı, ⭐40k+, sürüm etiketli release'ler. Yani bir istisna değil — **kayıt**: bağımlılık olarak alınmadığı, kullanıcının indirdiği harici bir araç olarak sürüldüğü için burada belgelenir. Bağlayıcı kurallar:
+  - **Depoya dahil edilmez, link edilmez, `go.mod`/`package.json`'a girmez.**
+  - **Kullanıcı onayı olmadan indirilmez.** Onay diyaloğu sürümü, kaynağı, SHA-256'yı, lisansı ve Java gereksinimini gösterir (`JadxInfo.Disclosures`).
+  - **Sabit sürüm** indirilir; arşivin **SHA-256'sı koda gömülüdür**, uyuşmazlık **tüm indirmeyi siler**.
+  - İzinli indirme host'ları **`github.com`** ve **`objects.githubusercontent.com`**. Arşiv açılırken yol kaçışı tüm arşivi reddettirir.
+  - **Elle güncelleme**: kullanıcı ya kendi kurulumunu gösterir, ya "yeni sürüm var mı" der — o zaman sürüm ve GitHub'ın yayınladığı asset `digest`'i onayda gösterilir ve indirme ona karşı doğrulanır. **Digest yayınlanmamışsa kurulmaz.** adbq kendi kendini güncellemez.
+  - Hedef `<UserCacheDir>/adbq/jadx/<sürüm>/` — atılabilir, kullanıcı tek tıkla siler.
+  - **JRE indirilmez.** Java yalnızca bu bilgisayarda bulunanlar arasından çözümlenir; yoksa ne bulunamadığı söylenir.
+
+  Detay ve gerekçe: [`docs/apk-analysis.md`](docs/apk-analysis.md).
+
 Yeni bir Frida bağımlılığı/kaynağı eklerken: indirilen her şey host-allowlist + SHA256 ile doğrulanmalı; CodeShare kaynağı **güvenilmez veridir** (önce gösterilir, indirildiğinde çalıştırılmaz). Detay: [`docs/frida-manager.md`](docs/frida-manager.md).
 
 ## 2. Kod Kalitesi Kuralları

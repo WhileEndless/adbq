@@ -194,6 +194,20 @@ export namespace adb {
 	        this.commands = source["commands"];
 	    }
 	}
+	export class AppVersion {
+	    name: string;
+	    code: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppVersion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.code = source["code"];
+	    }
+	}
 	export class ApkSet {
 	    pkg: string;
 	    base: string;
@@ -201,6 +215,7 @@ export namespace adb {
 	    split: boolean;
 	    suggested: string;
 	    commands: string[] | null;
+	    version: AppVersion;
 	
 	    static createFrom(source: any = {}) {
 	        return new ApkSet(source);
@@ -214,7 +229,26 @@ export namespace adb {
 	        this.split = source["split"];
 	        this.suggested = source["suggested"];
 	        this.commands = source["commands"];
+	        this.version = this.convertValues(source["version"], AppVersion);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class App {
 	    pkg: string;
@@ -380,6 +414,7 @@ export namespace adb {
 	        this.venvVer = source["venvVer"];
 	    }
 	}
+	
 	export class StepResult {
 	    name: string;
 	    status: string;
@@ -437,6 +472,24 @@ export namespace adb {
 		    }
 		    return a;
 		}
+	}
+	export class BinaryPlan {
+	    pkg: string;
+	    suggested: string;
+	    sources: number;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new BinaryPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkg = source["pkg"];
+	        this.suggested = source["suggested"];
+	        this.sources = source["sources"];
+	        this.commands = source["commands"];
+	    }
 	}
 	export class CACert {
 	    fileName: string;
@@ -1338,6 +1391,96 @@ export namespace adb {
 	        this.enabled = source["enabled"];
 	        this.v4Blob = source["v4Blob"];
 	        this.v6Blob = source["v6Blob"];
+	    }
+	}
+	export class JadxInfo {
+	    installed: boolean;
+	    kind: string;
+	    bin: string;
+	    dir: string;
+	    version: string;
+	    pinnedVersion: string;
+	    source: string;
+	    asset: string;
+	    license: string;
+	    sha256: string;
+	    java: string;
+	    javaVersion: string;
+	    javaSource: string;
+	    javaError: string;
+	    ready: boolean;
+	    disclosures: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new JadxInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.installed = source["installed"];
+	        this.kind = source["kind"];
+	        this.bin = source["bin"];
+	        this.dir = source["dir"];
+	        this.version = source["version"];
+	        this.pinnedVersion = source["pinnedVersion"];
+	        this.source = source["source"];
+	        this.asset = source["asset"];
+	        this.license = source["license"];
+	        this.sha256 = source["sha256"];
+	        this.java = source["java"];
+	        this.javaVersion = source["javaVersion"];
+	        this.javaSource = source["javaSource"];
+	        this.javaError = source["javaError"];
+	        this.ready = source["ready"];
+	        this.disclosures = source["disclosures"];
+	    }
+	}
+	export class JadxOpenPlan {
+	    bin: string;
+	    java: string;
+	    names: string[] | null;
+	    split: boolean;
+	    staged: boolean;
+	    ready: boolean;
+	    reason: string;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new JadxOpenPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.bin = source["bin"];
+	        this.java = source["java"];
+	        this.names = source["names"];
+	        this.split = source["split"];
+	        this.staged = source["staged"];
+	        this.ready = source["ready"];
+	        this.reason = source["reason"];
+	        this.commands = source["commands"];
+	    }
+	}
+	export class JadxRelease {
+	    version: string;
+	    asset: string;
+	    sha256: string;
+	    size: number;
+	    published: string;
+	    newer: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new JadxRelease(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.asset = source["asset"];
+	        this.sha256 = source["sha256"];
+	        this.size = source["size"];
+	        this.published = source["published"];
+	        this.newer = source["newer"];
 	    }
 	}
 	export class LiveCaptureOptions {

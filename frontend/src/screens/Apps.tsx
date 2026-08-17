@@ -5,6 +5,7 @@ import {Icon} from '../icons';
 import {Badge, CodeBlock, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {pickApkAndInstall} from '../lib/apk';
+import {ensureJadx, jadxInfo, jadxLabel} from '../lib/jadx';
 import {sdkLabel, rootUnavailableReason} from '../lib/android';
 
 export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
@@ -232,6 +233,7 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                 </button>
               </div>
               <ApkTransferSection device={device} pkg={sel.pkg}/>
+              <ApkAnalysisSection device={device} pkg={sel.pkg}/>
               <FridaAppSection device={device} pkg={sel.pkg} running={!!running?.running} setScreen={setScreen}/>
               <button className='btn danger' style={{marginTop: 6, width: '100%'}}
                       onClick={async () => {
@@ -447,6 +449,122 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
             <CodeBlock multiline>{(set.commands ?? []).join('\n')}</CodeBlock>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+// Two things you almost always want next after exporting an APK: read the code,
+// and get at the native binaries. Both work off the same copies of the app's
+// APKs, so they live in one section.
+//
+// Splits are the reason this is not just "open the exported file": the export is
+// one .apks archive, and a decompiler wants the parts — all of them at once, or
+// the code in a feature split is simply missing.
+function ApkAnalysisSection({device, pkg}: {device: adb.Device; pkg: string}) {
+  const [plan, setPlan] = useState<adb.JadxOpenPlan | null>(null);
+  const [binPlan, setBinPlan] = useState<adb.BinaryPlan | null>(null);
+  const [info, setInfo] = useState<adb.JadxInfo | null>(null);
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+
+  const reload = () => {
+    API.PlanJadxOpen(device.id, pkg).then(setPlan).catch(e => setErr(String(e)));
+  };
+
+  useEffect(() => {
+    let live = true;
+    setPlan(null); setBinPlan(null); setErr('');
+    API.PlanJadxOpen(device.id, pkg)
+      .then(p => { if (live) setPlan(p); })
+      .catch(e => { if (live) setErr(String(e)); });
+    API.PlanAppBinaries(device.id, pkg)
+      .then(p => { if (live) setBinPlan(p); })
+      .catch(() => {});
+    jadxInfo()
+      .then(i => { if (live) setInfo(i); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [device.id, pkg]);
+
+  const openJadx = async () => {
+    setBusy('jadx');
+    try {
+      const ready = await ensureJadx();
+      if (!ready) return;
+      setInfo(ready);
+      const id = await API.OpenInJadx(device.id, pkg);
+      if (id) {
+        showToast({
+          title: 'Opening in jadx',
+          body: plan?.staged
+            ? 'The APKs are already on this computer'
+            : 'Copying the APKs first — watch the Tasks panel',
+          kind: 'info',
+        });
+      }
+    } catch (e) {
+      showToast({title: 'Could not open jadx', body: String(e), kind: 'err'});
+    } finally {
+      setBusy('');
+      reload();
+    }
+  };
+
+  const exportBinaries = () => {
+    setBusy('bin');
+    API.ExportAppBinaries(device.id, pkg)
+      .then(id => id && showToast({title: 'Collecting binaries', body: 'Watch the Tasks panel for progress', kind: 'info'}))
+      .catch(e => showToast({title: 'Collection failed', body: String(e), kind: 'err'}))
+      .finally(() => setBusy(''));
+  };
+
+  const names = plan?.names ?? [];
+
+  return (
+    <div className='app-detail-section'>
+      <div className='app-detail-section-title'>Analysis</div>
+      {err && <div className='muted' style={{fontSize: 12, color: 'var(--danger)'}}>Could not read the APK layout: {err}</div>}
+      <div className='app-detail-row'>
+        <span className='app-detail-k'>Decompiler</span>
+        <span className='app-detail-v'>
+          {jadxLabel(info)}
+          {info?.installed && !info.java && <> · <span style={{color: 'var(--danger)'}}>no Java runtime</span></>}
+        </span>
+      </div>
+      {names.length > 0 && (
+        <div className='app-detail-row'>
+          <span className='app-detail-k'>Inputs</span>
+          <span className='app-detail-v'>
+            {names.length} APK(s){plan?.staged ? ' · already copied here' : ''}
+          </span>
+        </div>
+      )}
+      <button className='btn' style={{width: '100%', marginTop: 8}} disabled={busy !== ''} onClick={openJadx}>
+        <Icon.Layers/>{busy === 'jadx' ? '…opening' : 'Open in jadx'}
+      </button>
+      {names.length > 1 && (
+        <div className='muted' style={{fontSize: 11, marginTop: 6}}>
+          All {names.length} APKs open in one jadx session, so code in a feature split is not left out.
+        </div>
+      )}
+      {plan && (plan.commands ?? []).length > 0 && (
+        <div style={{marginTop: 10, fontSize: 11}}>
+          <span className='muted'>Underlying command (click to copy):</span>{' '}
+          <CodeBlock multiline>{(plan.commands ?? []).join('\n')}</CodeBlock>
+        </div>
+      )}
+      <button className='btn' style={{width: '100%', marginTop: 12}} disabled={busy !== ''} onClick={exportBinaries}>
+        <Icon.Cpu/>{busy === 'bin' ? '…collecting' : 'Download binaries'}
+      </button>
+      <div className='muted' style={{fontSize: 11, marginTop: 6}}>
+        Native libraries, shipped executables and the runtime blobs beside them, from every APK, in one zip.
+      </div>
+      {binPlan && (binPlan.commands ?? []).length > 0 && (
+        <div style={{marginTop: 10, fontSize: 11}}>
+          <span className='muted'>Underlying command (click to copy):</span>{' '}
+          <CodeBlock multiline>{(binPlan.commands ?? []).join('\n')}</CodeBlock>
+        </div>
       )}
     </div>
   );

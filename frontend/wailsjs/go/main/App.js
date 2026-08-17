@@ -106,6 +106,10 @@ export function ClearShellHistory(arg1, arg2) {
   return window['go']['main']['App']['ClearShellHistory'](arg1, arg2);
 }
 
+export function ClearStagedApks() {
+  return window['go']['main']['App']['ClearStagedApks']();
+}
+
 export function ClipboardSet(arg1, arg2) {
   return window['go']['main']['App']['ClipboardSet'](arg1, arg2);
 }
@@ -194,6 +198,10 @@ export function DisconnectDevice(arg1) {
   return window['go']['main']['App']['DisconnectDevice'](arg1);
 }
 
+export function DownloadJadx() {
+  return window['go']['main']['App']['DownloadJadx']();
+}
+
 export function DownloadRootAVD() {
   return window['go']['main']['App']['DownloadRootAVD']();
 }
@@ -220,6 +228,10 @@ export function ExportAPK(arg1, arg2) {
 
 export function ExportApks(arg1, arg2) {
   return window['go']['main']['App']['ExportApks'](arg1, arg2);
+}
+
+export function ExportAppBinaries(arg1, arg2) {
+  return window['go']['main']['App']['ExportAppBinaries'](arg1, arg2);
 }
 
 export function ExportAppDataWithPicker(arg1, arg2) {
@@ -350,6 +362,14 @@ export function IsAppRunning(arg1, arg2) {
   return window['go']['main']['App']['IsAppRunning'](arg1, arg2);
 }
 
+export function JadxInfo() {
+  return window['go']['main']['App']['JadxInfo']();
+}
+
+export function JadxLatest() {
+  return window['go']['main']['App']['JadxLatest']();
+}
+
 export function KillExternalCapture(arg1) {
   return window['go']['main']['App']['KillExternalCapture'](arg1);
 }
@@ -478,6 +498,10 @@ export function OpenAndroidStudio() {
   return window['go']['main']['App']['OpenAndroidStudio']();
 }
 
+export function OpenInJadx(arg1, arg2) {
+  return window['go']['main']['App']['OpenInJadx'](arg1, arg2);
+}
+
 export function OpenPath(arg1) {
   return window['go']['main']['App']['OpenPath'](arg1);
 }
@@ -498,12 +522,28 @@ export function PickExternalFridaInterpreter() {
   return window['go']['main']['App']['PickExternalFridaInterpreter']();
 }
 
+export function PickJadxPath() {
+  return window['go']['main']['App']['PickJadxPath']();
+}
+
+export function PickJavaPath() {
+  return window['go']['main']['App']['PickJavaPath']();
+}
+
 export function PickSDKRoot() {
   return window['go']['main']['App']['PickSDKRoot']();
 }
 
 export function PlanApkInstall(arg1, arg2) {
   return window['go']['main']['App']['PlanApkInstall'](arg1, arg2);
+}
+
+export function PlanAppBinaries(arg1, arg2) {
+  return window['go']['main']['App']['PlanAppBinaries'](arg1, arg2);
+}
+
+export function PlanJadxOpen(arg1, arg2) {
+  return window['go']['main']['App']['PlanJadxOpen'](arg1, arg2);
 }
 
 export function PlanTcpdumpAutoInstall(arg1) {
@@ -580,6 +620,10 @@ export function RemoveFridaRuntime(arg1) {
 
 export function RemoveFridaSession(arg1) {
   return window['go']['main']['App']['RemoveFridaSession'](arg1);
+}
+
+export function RemoveJadx() {
+  return window['go']['main']['App']['RemoveJadx']();
 }
 
 export function RemoveReverse(arg1, arg2) {
@@ -678,6 +722,14 @@ export function SetIptablesPolicy(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SetIptablesPolicy'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function SetJadxPath(arg1) {
+  return window['go']['main']['App']['SetJadxPath'](arg1);
+}
+
+export function SetJavaPath(arg1) {
+  return window['go']['main']['App']['SetJavaPath'](arg1);
+}
+
 export function SetLogcatSystem(arg1, arg2) {
   return window['go']['main']['App']['SetLogcatSystem'](arg1, arg2);
 }
@@ -688,6 +740,10 @@ export function SetProxy(arg1, arg2) {
 
 export function SetSDKRoot(arg1) {
   return window['go']['main']['App']['SetSDKRoot'](arg1);
+}
+
+export function StagedApkDir() {
+  return window['go']['main']['App']['StagedApkDir']();
 }
 
 export function StartAVD(arg1, arg2) {
@@ -796,6 +852,10 @@ export function UninstallSystemImage(arg1) {
 
 export function UpdateAVDHardware(arg1, arg2) {
   return window['go']['main']['App']['UpdateAVDHardware'](arg1, arg2);
+}
+
+export function UpdateJadx(arg1) {
+  return window['go']['main']['App']['UpdateJadx'](arg1);
 }
 
 export function Version() {

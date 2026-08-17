@@ -75,6 +75,7 @@ Referans uygulamalar:
 | `screens/Network.tsx` (proxy) | `settings put global http_proxy …` |
 | `screens/Network.tsx` (capture) | tam `tcpdump` komut satırı, parametreler değiştikçe canlı |
 | `screens/Apps.tsx` (APK export/install) | `pm path` + `pull` listesi; onayda `install-multiple` |
+| `screens/Apps.tsx` (Analysis) | `pm path` + `pull` listesi; `JAVA_HOME=… jadx-gui <girdiler>`; binary toplama adımı |
 
 ---
 
@@ -87,6 +88,8 @@ Durum: ✅ var · ◐ kısmi (bazı eylemlerde) · ✗ yok
 | Network — proxy | `settings put/delete global http_proxy` | ✅ |
 | Network — capture | `tcpdump` başlat/durdur/pull | ✅ |
 | Apps — APK dışa aktar / kur | `pm path`, `pull`, `install-multiple` | ✅ |
+| Apps — jadx ile aç | `pm path`, `pull`, `jadx-gui <girdiler>` | ✅ |
+| Apps — binary indir | `pm path`, `pull`, `pull …/lib` | ✅ |
 | Emulators — başlat/durdur | `emulator -avd …`, `adb -s … emu kill` | ✅ |
 | Emulators — AVD oluştur/sil | `avdmanager create/delete avd` | ✅ |
 | Emulators — donanım düzenle | yazılacak `config.ini` anahtarları | ✅ |

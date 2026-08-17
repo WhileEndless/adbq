@@ -1385,7 +1385,7 @@ func (a *App) ExportApks(serial, pkg string) (string, error) {
 func (a *App) ExportAPK(serial, pkg string) (string, error) {
 	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Save APK as…",
-		DefaultFilename: pkg + ".apk",
+		DefaultFilename: a.client.ExportBaseNameFor(a.ctx, serial, pkg) + ".apk",
 	})
 	if err != nil || dst == "" {
 		return "", err
@@ -1401,6 +1401,171 @@ func (a *App) ExportAPK(serial, pkg string) (string, error) {
 	}()
 	return id, nil
 }
+
+// ─── Binaries ────────────────────────────────────────────────────────────
+
+// PlanAppBinaries reports what collecting the app's binaries would pull and
+// produce, without doing any of it (CLAUDE.md §4.1).
+func (a *App) PlanAppBinaries(serial, pkg string) (*adb.BinaryPlan, error) {
+	set, err := a.client.ApkSetOf(a.ctx, serial, pkg)
+	if err != nil {
+		return nil, err
+	}
+	return adb.PlanAppBinaries(serial, set), nil
+}
+
+// ExportAppBinaries collects the app's native libraries, shipped executables
+// and known runtime blobs into one zip chosen by the user.
+func (a *App) ExportAppBinaries(serial, pkg string) (string, error) {
+	plan, err := a.PlanAppBinaries(serial, pkg)
+	if err != nil {
+		return "", err
+	}
+	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save binaries as…",
+		DefaultFilename: plan.Suggested,
+		Filters:         []runtime.FileFilter{{DisplayName: "Zip archive (*.zip)", Pattern: "*.zip"}},
+	})
+	if err != nil || dst == "" {
+		return "", err
+	}
+	if !strings.EqualFold(filepath.Ext(dst), ".zip") {
+		dst += ".zip"
+	}
+	id, _ := a.tasks.Create("export-binaries", "Collecting binaries for "+pkg, fmt.Sprintf("%d APK(s) → %s", plan.Sources, dst))
+	go func() {
+		out, err := a.client.ExportAppBinaries(a.ctx, serial, pkg, dst, func(s string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = s })
+		})
+		if err != nil {
+			a.tasks.Finish(id, "err", "", err.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", out, "")
+	}()
+	return id, nil
+}
+
+// ─── jadx (third-party, user-consented) ─────────────────────────────────
+
+// JadxInfo describes the decompiler, its provenance and the Java it would run
+// under, for the consent dialog and the settings card.
+func (a *App) JadxInfo() adb.JadxInfo {
+	return adb.JadxStatus(a.host.Get(), a.sdk.Info().StudioPath)
+}
+
+// DownloadJadx fetches and verifies the pinned release. The caller must have
+// shown JadxInfo.Disclosures and obtained consent first.
+func (a *App) DownloadJadx() (adb.JadxInfo, error) {
+	id, ctx := a.tasks.Create("jadx-download", "Download jadx", "starting")
+	err := adb.InstallJadx(ctx, func(stage string) {
+		a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+		runtime.EventsEmit(a.ctx, "jadx:progress", map[string]string{"stage": stage})
+	})
+	if err != nil {
+		a.tasks.Finish(id, "err", "", err.Error())
+		return adb.JadxInfo{}, err
+	}
+	info := a.JadxInfo()
+	a.tasks.Finish(id, "ok", info.Dir, "verified "+info.Version)
+	runtime.EventsEmit(a.ctx, "jadx:progress", map[string]string{"stage": "ready"})
+	return info, nil
+}
+
+// JadxLatest reports the newest published release and the digest that makes it
+// verifiable. Nothing is downloaded — this is what the update dialog describes.
+func (a *App) JadxLatest() (adb.JadxRelease, error) {
+	return adb.LatestJadxRelease(a.ctx)
+}
+
+// UpdateJadx installs a release the user picked from JadxLatest. The caller must
+// have shown its version and digest first.
+func (a *App) UpdateJadx(rel adb.JadxRelease) (adb.JadxInfo, error) {
+	id, ctx := a.tasks.Create("jadx-download", "Update jadx to "+rel.Version, "starting")
+	err := adb.InstallJadxRelease(ctx, rel, func(stage string) {
+		a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+		runtime.EventsEmit(a.ctx, "jadx:progress", map[string]string{"stage": stage})
+	})
+	if err != nil {
+		a.tasks.Finish(id, "err", "", err.Error())
+		return adb.JadxInfo{}, err
+	}
+	info := a.JadxInfo()
+	a.tasks.Finish(id, "ok", info.Dir, "verified "+info.Version)
+	runtime.EventsEmit(a.ctx, "jadx:progress", map[string]string{"stage": "ready"})
+	return info, nil
+}
+
+// RemoveJadx deletes the downloaded copy. A jadx the user manages themselves is
+// untouched — adbq only owns what it downloaded.
+func (a *App) RemoveJadx() (adb.JadxInfo, error) {
+	if err := adb.RemoveJadx(); err != nil {
+		return adb.JadxInfo{}, err
+	}
+	return a.JadxInfo(), nil
+}
+
+// PickJadxPath opens a file dialog for a jadx installation the user manages.
+func (a *App) PickJadxPath() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select the jadx-gui launcher"})
+}
+
+// SetJadxPath records a jadx installation of the user's own. An empty path
+// clears it and returns to auto-detection.
+func (a *App) SetJadxPath(path string) (adb.JadxInfo, error) {
+	hs := a.host.Get()
+	hs.JadxPath = strings.TrimSpace(path)
+	if err := a.host.Set(hs); err != nil {
+		return adb.JadxInfo{}, err
+	}
+	return a.JadxInfo(), nil
+}
+
+// PickJavaPath opens a file dialog for a Java runtime.
+func (a *App) PickJavaPath() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select the java executable"})
+}
+
+// SetJavaPath records the Java runtime to launch host-side Java tools with. An
+// empty path clears it and returns to auto-detection.
+func (a *App) SetJavaPath(path string) (adb.JadxInfo, error) {
+	hs := a.host.Get()
+	hs.JavaPath = strings.TrimSpace(path)
+	if err := a.host.Set(hs); err != nil {
+		return adb.JadxInfo{}, err
+	}
+	return a.JadxInfo(), nil
+}
+
+// PlanJadxOpen reports which APKs would be copied here and the exact command
+// the decompiler would be launched with (CLAUDE.md §4.1).
+func (a *App) PlanJadxOpen(serial, pkg string) (*adb.JadxOpenPlan, error) {
+	return a.client.PlanJadxOpen(a.ctx, serial, pkg, a.JadxInfo())
+}
+
+// OpenInJadx copies every APK of the app here and opens all of them in one jadx
+// session, so a split install decompiles as one program.
+func (a *App) OpenInJadx(serial, pkg string) (string, error) {
+	info := a.JadxInfo()
+	id, _ := a.tasks.Create("jadx-open", "Opening "+pkg+" in jadx", "starting")
+	go func() {
+		out, err := a.client.OpenInJadx(a.ctx, serial, pkg, info, func(s string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = s })
+		})
+		if err != nil {
+			a.tasks.Finish(id, "err", "", err.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", out, "")
+	}()
+	return id, nil
+}
+
+// StagedApkDir reports where APKs copied here for analysis are kept.
+func (a *App) StagedApkDir() string { return adb.StageRoot() }
+
+// ClearStagedApks discards them. Nothing is lost — the next open re-copies.
+func (a *App) ClearStagedApks() error { return adb.ClearApkStage() }
 
 // ─── Files ───────────────────────────────────────────────────────────────
 
@@ -2249,7 +2414,7 @@ func (a *App) RecordingActive(serial string) bool {
 func (a *App) ExportAppDataWithPicker(serial, pkg string) (string, error) {
 	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Save app data as…",
-		DefaultFilename: pkg + ".tar.gz",
+		DefaultFilename: a.client.ExportBaseNameFor(a.ctx, serial, pkg) + ".tar.gz",
 	})
 	if err != nil || dst == "" {
 		return "", err

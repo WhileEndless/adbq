@@ -2,7 +2,9 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../wailsjs/go/models';
 import * as API from '../wailsjs/go/main/App';
 import {Icon} from './icons';
-import {Badge, ConfirmHost, IconBtn, Modal, PromptHost, ToastHost, showToast, promptDialog, useTheme, ThemeMode} from './ui';
+import {Badge, CodeBlock, ConfirmHost, IconBtn, Modal, PromptHost, ToastHost, confirmDialog, showToast, promptDialog, useTheme, ThemeMode} from './ui';
+import {invalidateJadxInfo, jadxInfo} from './lib/jadx';
+import {EventsOn} from '../wailsjs/runtime/runtime';
 import {StoreProvider} from './store';
 import {logcatStore} from './logcatStore';
 import {TasksTray} from './tasks';
@@ -499,11 +501,185 @@ function Settings({open, onClose, themeMode, setTheme, accent, setAccent}:{open:
           ))}
         </div>
       </div>
-      <div className='card'>
+      <div className='card' style={{marginBottom: 16}}>
         <div className='card-body'>
           <div className='spread'><span className='muted'>adb version</span><span className='mono subtle' style={{fontSize: 11}}>{(version || '').split('\n')[0]}</span></div>
         </div>
       </div>
+      <JadxSettings open={open}/>
     </Modal>
+  );
+}
+
+// jadx is host-wide state, like the SDK path — one installation serves every
+// device — so it is managed here rather than in the Apps screen, which only ever
+// needs the button and the first-run consent dialog.
+function JadxSettings({open}: {open: boolean}) {
+  const [info, setInfo] = useState<adb.JadxInfo | null>(null);
+  const [busy, setBusy] = useState('');
+  const [stage, setStage] = useState('');
+  const [staged, setStaged] = useState('');
+
+  const refresh = useCallback(() => {
+    invalidateJadxInfo();
+    jadxInfo(true).then(setInfo).catch(() => setInfo(null));
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    jadxInfo().then(setInfo).catch(() => setInfo(null));
+    API.StagedApkDir().then(setStaged).catch(() => {});
+    const off = EventsOn('jadx:progress', (p: any) => setStage(String(p?.stage ?? '')));
+    return () => { off(); setStage(''); };
+  }, [open]);
+
+  const download = async () => {
+    if (!info) return;
+    const ok = await confirmDialog({
+      title: 'Download jadx?',
+      body: [...(info.disclosures ?? []), '', `Source: ${info.asset}`, `SHA-256: ${info.sha256}`].join('\n'),
+      confirmLabel: 'Download and verify',
+    });
+    if (!ok) return;
+    setBusy('download');
+    try {
+      setInfo(await API.DownloadJadx());
+      invalidateJadxInfo();
+    } catch (e) {
+      showToast({title: 'Download failed', body: String(e), kind: 'err'});
+    } finally {
+      setBusy(''); setStage(''); refresh();
+    }
+  };
+
+  // Updating is deliberately a manual act: adbq stays on the version it ships a
+  // digest for, and anything newer is only installed after the user has seen
+  // which version it is and what it hashes to.
+  const checkForUpdate = async () => {
+    setBusy('check');
+    try {
+      const rel = await API.JadxLatest();
+      if (!rel.newer && info?.version === rel.version) {
+        showToast({title: `jadx ${rel.version} is the newest release`, body: 'Nothing to do.', kind: 'ok'});
+        return;
+      }
+      if (!rel.sha256) {
+        showToast({
+          title: `jadx ${rel.version} cannot be verified`,
+          body: 'That release publishes no checksum, so adbq will not download it. Install it yourself and point adbq at it below.',
+          kind: 'err', ttl: 9000,
+        });
+        return;
+      }
+      const ok = await confirmDialog({
+        title: `Install jadx ${rel.version}?`,
+        body: [
+          `adbq ships pinned to ${info?.pinnedVersion ?? ''}. This installs a newer release instead.`,
+          '',
+          `Version: ${rel.version}${rel.published ? ` (published ${rel.published.slice(0, 10)})` : ''}`,
+          `Source: ${rel.asset}`,
+          `SHA-256 (published by GitHub): ${rel.sha256}`,
+          '',
+          'The download is verified against that digest before anything is unpacked.',
+        ].join('\n'),
+        confirmLabel: 'Download and verify',
+      });
+      if (!ok) return;
+      setBusy('download');
+      setInfo(await API.UpdateJadx(rel));
+      invalidateJadxInfo();
+    } catch (e) {
+      showToast({title: 'Could not check for a newer release', body: String(e), kind: 'err'});
+    } finally {
+      setBusy(''); setStage(''); refresh();
+    }
+  };
+
+  const remove = async () => {
+    const ok = await confirmDialog({
+      title: 'Remove the downloaded jadx?',
+      body: 'Only the copy adbq downloaded is deleted. It can be downloaded again at any time.',
+      confirmLabel: 'Remove', danger: true,
+    });
+    if (!ok) return;
+    setBusy('remove');
+    try {
+      setInfo(await API.RemoveJadx());
+      invalidateJadxInfo();
+    } catch (e) {
+      showToast({title: 'Could not remove jadx', body: String(e), kind: 'err'});
+    } finally {
+      setBusy(''); refresh();
+    }
+  };
+
+  const pick = async (what: 'jadx' | 'java') => {
+    const p = what === 'jadx' ? await API.PickJadxPath() : await API.PickJavaPath();
+    if (!p) return;
+    try {
+      setInfo(what === 'jadx' ? await API.SetJadxPath(p) : await API.SetJavaPath(p));
+      invalidateJadxInfo();
+    } catch (e) {
+      showToast({title: 'Could not use that path', body: String(e), kind: 'err'});
+    }
+  };
+
+  const clear = async (what: 'jadx' | 'java') => {
+    setInfo(what === 'jadx' ? await API.SetJadxPath('') : await API.SetJavaPath(''));
+    invalidateJadxInfo();
+  };
+
+  return (
+    <div className='card'>
+      <div className='card-header'>
+        <span className='title' style={{fontSize: 12}}>jadx (decompiler)</span>
+        <Badge kind={info?.installed ? (info.java ? 'ok' : 'warn') : 'muted'}>
+          {info?.installed ? (info.kind === 'managed' ? `downloaded ${info.version}` : 'your own install') : 'not installed'}
+        </Badge>
+      </div>
+      <div className='card-body' style={{display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12}}>
+        <div className='spread'>
+          <span className='muted'>Launcher</span>
+          <span className='mono subtle' style={{fontSize: 11}}>{info?.bin || '—'}</span>
+        </div>
+        <div className='spread'>
+          <span className='muted'>Java</span>
+          <span className='mono subtle' style={{fontSize: 11}}>
+            {info?.java ? `${info.javaVersion} · ${info.javaSource}` : '—'}
+          </span>
+        </div>
+        {info && !info.java && (
+          <div className='muted' style={{fontSize: 11, color: 'var(--danger)'}}>{info.javaError}</div>
+        )}
+        {stage && <div className='muted' style={{fontSize: 11}}>{stage}…</div>}
+        {info && !info.installed && (
+          <CodeBlock multiline>{`${info.source}\nversion ${info.pinnedVersion}\nSHA-256 ${info.sha256}`}</CodeBlock>
+        )}
+        <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
+          {info?.kind !== 'external' && (
+            <button className='btn sm' disabled={busy !== '' || info?.installed} onClick={download}>Download</button>
+          )}
+          <button className='btn sm' disabled={busy !== ''} onClick={checkForUpdate}>Check for a newer release</button>
+          {info?.kind === 'managed' && (
+            <button className='btn sm' disabled={busy !== ''} onClick={remove}>Remove</button>
+          )}
+          <button className='btn sm' disabled={busy !== ''} onClick={() => pick('jadx')}>Use my own…</button>
+          {info?.kind === 'external' && (
+            <button className='btn sm' disabled={busy !== ''} onClick={() => clear('jadx')}>Back to auto-detect</button>
+          )}
+          <button className='btn sm' disabled={busy !== ''} onClick={() => pick('java')}>Set Java…</button>
+        </div>
+        {staged && (
+          <div className='spread' style={{marginTop: 4}}>
+            <span className='muted' style={{fontSize: 11}}>APKs copied here for analysis</span>
+            <button className='btn sm' disabled={busy !== ''} onClick={() => {
+              API.ClearStagedApks()
+                .then(() => showToast({title: 'Staged APKs cleared', kind: 'ok'}))
+                .catch(e => showToast({title: 'Could not clear them', body: String(e), kind: 'err'}));
+            }}>Clear</button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

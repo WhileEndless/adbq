@@ -55,6 +55,8 @@ export function ClearLogcat(arg1:string):Promise<string>;
 
 export function ClearShellHistory(arg1:string,arg2:string):Promise<void>;
 
+export function ClearStagedApks():Promise<void>;
+
 export function ClipboardSet(arg1:string,arg2:string):Promise<string>;
 
 export function CloseShell(arg1:string):Promise<void>;
@@ -99,6 +101,8 @@ export function DeviceKey(arg1:string):Promise<string>;
 
 export function DisconnectDevice(arg1:string):Promise<string>;
 
+export function DownloadJadx():Promise<adb.JadxInfo>;
+
 export function DownloadRootAVD():Promise<adb.RootAVDInfo>;
 
 export function EmulatorLaunchCommand(arg1:string,arg2:adb.EmulatorOpts):Promise<string>;
@@ -112,6 +116,8 @@ export function EnsureLogcat(arg1:string,arg2:string,arg3:boolean):Promise<boole
 export function ExportAPK(arg1:string,arg2:string):Promise<string>;
 
 export function ExportApks(arg1:string,arg2:string):Promise<string>;
+
+export function ExportAppBinaries(arg1:string,arg2:string):Promise<string>;
 
 export function ExportAppDataWithPicker(arg1:string,arg2:string):Promise<string>;
 
@@ -177,6 +183,10 @@ export function InstallTcpdumpWithPicker(arg1:string):Promise<adb.TcpdumpInfo>;
 
 export function IsAppRunning(arg1:string,arg2:string):Promise<adb.AppRunning>;
 
+export function JadxInfo():Promise<adb.JadxInfo>;
+
+export function JadxLatest():Promise<adb.JadxRelease>;
+
 export function KillExternalCapture(arg1:string):Promise<adb.CaptureState>;
 
 export function LaunchApp(arg1:string,arg2:string):Promise<string>;
@@ -241,6 +251,8 @@ export function MoveFile(arg1:string,arg2:string,arg3:string,arg4:boolean):Promi
 
 export function OpenAndroidStudio():Promise<void>;
 
+export function OpenInJadx(arg1:string,arg2:string):Promise<string>;
+
 export function OpenPath(arg1:string):Promise<void>;
 
 export function OpenShell(arg1:string,arg2:boolean):Promise<string>;
@@ -251,9 +263,17 @@ export function PickApkFile():Promise<string>;
 
 export function PickExternalFridaInterpreter():Promise<adb.FridaRuntime>;
 
+export function PickJadxPath():Promise<string>;
+
+export function PickJavaPath():Promise<string>;
+
 export function PickSDKRoot():Promise<string>;
 
 export function PlanApkInstall(arg1:string,arg2:string):Promise<adb.ApkInstallPlan>;
+
+export function PlanAppBinaries(arg1:string,arg2:string):Promise<adb.BinaryPlan>;
+
+export function PlanJadxOpen(arg1:string,arg2:string):Promise<adb.JadxOpenPlan>;
 
 export function PlanTcpdumpAutoInstall(arg1:string):Promise<adb.TcpdumpAutoPlan>;
 
@@ -292,6 +312,8 @@ export function RemoveFridaHistory(arg1:string):Promise<void>;
 export function RemoveFridaRuntime(arg1:string):Promise<void>;
 
 export function RemoveFridaSession(arg1:string):Promise<void>;
+
+export function RemoveJadx():Promise<adb.JadxInfo>;
 
 export function RemoveReverse(arg1:string,arg2:string):Promise<string>;
 
@@ -341,11 +363,17 @@ export function SetFridaManagedEnabled(arg1:boolean):Promise<void>;
 
 export function SetIptablesPolicy(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function SetJadxPath(arg1:string):Promise<adb.JadxInfo>;
+
+export function SetJavaPath(arg1:string):Promise<adb.JadxInfo>;
+
 export function SetLogcatSystem(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetProxy(arg1:string,arg2:string):Promise<string>;
 
 export function SetSDKRoot(arg1:string):Promise<adb.AndroidSDKInfo>;
+
+export function StagedApkDir():Promise<string>;
 
 export function StartAVD(arg1:string,arg2:adb.EmulatorOpts):Promise<string>;
 
@@ -400,6 +428,8 @@ export function UninstallApp(arg1:string,arg2:string):Promise<string>;
 export function UninstallSystemImage(arg1:string):Promise<void>;
 
 export function UpdateAVDHardware(arg1:string,arg2:adb.AVDHardware):Promise<adb.AVD>;
+
+export function UpdateJadx(arg1:adb.JadxRelease):Promise<adb.JadxInfo>;
 
 export function Version():Promise<string>;
 
