@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, FeatureNotice, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandPreview, FeatureNotice, SearchInput, confirmDialog, showToast} from '../ui';
 import {useDeviceData, mutateData, getCached} from '../cache';
 
 type Family = 'ipv4' | 'ipv6';
@@ -50,6 +50,26 @@ export function IptablesScreen({device}: {device: adb.Device}) {
     }
   }, [snap, chain]);
 
+  // What each action here will run, from Go: the table, the binary (iptables vs
+  // ip6tables) and the su form all depend on state the frontend should not be
+  // guessing at (CLAUDE.md §4.1).
+  const [cmds, setCmds] = useState<adb.IptablesCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setCmds(null); return; }
+    let live = true;
+    API.IptablesCommands(device.id, {family, table, chain, pos: 0, num: 0, policy: '', spec: []} as adb.IptablesCommandRequest)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    return () => { live = false; };
+  }, [device?.id, family, table, chain]);
+
+  // A one-off render for an action whose argument the user just chose (a rule
+  // number, a policy, a spec). Cheap: string work, no device access.
+  const commandsFor = (extra: Partial<adb.IptablesCommandRequest>) =>
+    API.IptablesCommands(device.id, {
+      family, table, chain, pos: 0, num: 0, policy: '', spec: [], ...extra,
+    } as adb.IptablesCommandRequest).catch(() => null);
+
   const selected = useMemo(
     () => snap?.chains?.find(c => c.name === chain) || snap?.chains?.[0] || null,
     [snap, chain]
@@ -57,7 +77,12 @@ export function IptablesScreen({device}: {device: adb.Device}) {
 
   async function del(num: number) {
     if (!selected) return;
-    const ok = await confirmDialog({title: `Delete rule #${num} in ${selected.name}?`, confirmLabel: 'Delete', danger: true});
+    const c = await commandsFor({chain: selected.name, num});
+    const ok = await confirmDialog({
+      title: `Delete rule #${num} in ${selected.name}?`,
+      body: <CommandPreview commands={c?.deleteRule ?? []} defaultOpen/>,
+      confirmLabel: 'Delete', danger: true,
+    });
     if (!ok) return;
     try {
       const sn = await API.DeleteIptablesRule(device.id, family, table, selected.name, num);
@@ -68,7 +93,14 @@ export function IptablesScreen({device}: {device: adb.Device}) {
 
   async function flush() {
     if (!selected) return;
-    const ok = await confirmDialog({title: `Flush ${selected.name}?`, body: 'Removes every rule in this chain. The default policy is unchanged.', confirmLabel: 'Flush', danger: true});
+    const ok = await confirmDialog({
+      title: `Flush ${selected.name}?`,
+      body: <>
+        Removes every rule in this chain. The default policy is unchanged.
+        <CommandPreview commands={cmds?.flushChain ?? []} defaultOpen/>
+      </>,
+      confirmLabel: 'Flush', danger: true,
+    });
     if (!ok) return;
     try {
       const sn = await API.FlushIptables(device.id, family, table, selected.name);
@@ -80,11 +112,13 @@ export function IptablesScreen({device}: {device: adb.Device}) {
   async function changePolicy(policy: string) {
     if (!selected) return;
     const dangerous = policy === 'DROP' || policy === 'REJECT';
+    const c = await commandsFor({chain: selected.name, policy});
     const ok = await confirmDialog({
       title: `Set policy of ${selected.name} to ${policy}?`,
-      body: dangerous
-        ? 'Dangerous on INPUT/OUTPUT — can disconnect adbq from the device. A 30-second safety timer will auto-revert if you don\'t cancel it.'
-        : undefined,
+      body: <>
+        {dangerous && 'Dangerous on INPUT/OUTPUT — can disconnect adbq from the device. A 30-second safety timer will auto-revert if you don\'t cancel it.'}
+        <CommandPreview commands={c?.policy ?? []} defaultOpen/>
+      </>,
       confirmLabel: dangerous ? `Set ${policy} (auto-revert in 30s)` : `Set ${policy}`,
       danger: dangerous,
     });
@@ -131,7 +165,10 @@ export function IptablesScreen({device}: {device: adb.Device}) {
   async function importRules() {
     const ok = await confirmDialog({
       title: 'Apply iptables-restore blob?',
-      body: 'Overwrites the entire ruleset for this family. A snapshot is kept so you can Undo.',
+      body: <>
+        Overwrites the entire ruleset for this family. A snapshot is kept so you can Undo.
+        <CommandPreview commands={cmds?.import ?? []} defaultOpen/>
+      </>,
       confirmLabel: 'Apply',
       danger: true,
     });
@@ -154,7 +191,14 @@ export function IptablesScreen({device}: {device: adb.Device}) {
   }
   async function deleteChain() {
     if (!selected || ['INPUT', 'OUTPUT', 'FORWARD', 'PREROUTING', 'POSTROUTING'].includes(selected.name)) return;
-    const ok = await confirmDialog({title: `Delete user chain ${selected.name}?`, body: 'The chain must be empty.', confirmLabel: 'Delete', danger: true});
+    const ok = await confirmDialog({
+      title: `Delete user chain ${selected.name}?`,
+      body: <>
+        The chain must be empty.
+        <CommandPreview commands={cmds?.dropChain ?? []} defaultOpen/>
+      </>,
+      confirmLabel: 'Delete', danger: true,
+    });
     if (!ok) return;
     try {
       await API.DeleteIptablesChain(device.id, family, table, selected.name);
@@ -194,6 +238,14 @@ export function IptablesScreen({device}: {device: adb.Device}) {
         <button className='btn sm' onClick={() => setShowRaw(true)}><Icon.Upload/>Raw / Import</button>
         <button className='btn sm' onClick={() => refresh()}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
       </div>
+
+      {cmds && (
+        <div style={{margin: '0 18px 10px', display: 'grid', gap: 4}}>
+          <CommandPreview commands={cmds.list ?? []} label='List'/>
+          <CommandPreview commands={cmds.save ?? []} label='Export'/>
+          <CommandPreview commands={cmds.undo ?? []} label='Undo'/>
+        </div>
+      )}
 
       {info && !info.available && (
         <div className='card' style={{margin: '0 18px 12px', padding: 10, borderColor: 'var(--err)'}}>
@@ -271,6 +323,7 @@ export function IptablesScreen({device}: {device: adb.Device}) {
 
       {addOpen && selected && <AddRuleModal
         chain={selected.name}
+        preview={(spec, pos) => commandsFor({chain: selected.name, spec, pos}).then(c => c?.addRule ?? [])}
         onClose={() => setAddOpen(false)}
         onSubmit={async (spec, pos) => {
           try {
@@ -294,7 +347,13 @@ export function IptablesScreen({device}: {device: adb.Device}) {
   );
 }
 
-function AddRuleModal({chain, onClose, onSubmit}: {chain: string; onClose: () => void; onSubmit: (spec: string[], pos: number) => void}) {
+function AddRuleModal({chain, preview, onClose, onSubmit}: {
+  chain: string;
+  /** Renders the command this form would run; from the backend, per §4.1. */
+  preview: (spec: string[], pos: number) => Promise<string[]>;
+  onClose: () => void;
+  onSubmit: (spec: string[], pos: number) => void;
+}) {
   const [target, setTarget] = useState('ACCEPT');
   const [proto, setProto] = useState('any');
   const [src, setSrc] = useState('');
@@ -319,7 +378,18 @@ function AddRuleModal({chain, onClose, onSubmit}: {chain: string; onClose: () =>
     spec.push('-j', target);
     return spec;
   }
-  const preview = `iptables -A ${chain} ${build().join(' ')}`;
+  // Re-rendered by the backend as the form changes: the table, the binary and
+  // whether this is -A or -I N are all decided there.
+  const [cmd, setCmd] = useState<string[]>([]);
+  const spec = build();
+  const specKey = spec.join(' ') + '|' + pos;
+  useEffect(() => {
+    let live = true;
+    preview(spec, parseInt(pos, 10) || 0)
+      .then(c => { if (live) setCmd(c); })
+      .catch(() => { if (live) setCmd([]); });
+    return () => { live = false; };
+  }, [specKey]);
 
   return (
     <div className='modal-backdrop' onClick={onClose}>
@@ -352,8 +422,8 @@ function AddRuleModal({chain, onClose, onSubmit}: {chain: string; onClose: () =>
           <label className='muted'>Position</label>
           <input className='btn sm mono' value={pos} onChange={e => setPos(e.target.value)} placeholder='blank = append (-A); number = insert at -I N'/>
         </div>
-        <div style={{margin: '12px 16px 0', padding: 8, background: 'var(--bg-inset)', borderRadius: 4, fontSize: 11}} className='mono'>
-          {preview}
+        <div style={{margin: '12px 16px 0'}}>
+          <CommandPreview commands={cmd} defaultOpen/>
         </div>
         <div className='modal-footer'>
           <button className='btn' onClick={onClose}>Cancel</button>

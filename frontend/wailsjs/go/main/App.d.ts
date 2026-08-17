@@ -189,6 +189,8 @@ export function InstallTcpdumpAuto(arg1:string,arg2:boolean):Promise<adb.Tcpdump
 
 export function InstallTcpdumpWithPicker(arg1:string):Promise<adb.TcpdumpInfo>;
 
+export function IptablesCommands(arg1:string,arg2:adb.IptablesCommandRequest):Promise<adb.IptablesCommands>;
+
 export function IsAppRunning(arg1:string,arg2:string):Promise<adb.AppRunning>;
 
 export function JadxInfo():Promise<adb.JadxInfo>;

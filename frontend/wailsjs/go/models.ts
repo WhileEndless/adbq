@@ -1503,6 +1503,62 @@ export namespace adb {
 		    return a;
 		}
 	}
+	export class IptablesCommandRequest {
+	    family: string;
+	    table: string;
+	    chain: string;
+	    pos: number;
+	    num: number;
+	    policy: string;
+	    spec: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new IptablesCommandRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.family = source["family"];
+	        this.table = source["table"];
+	        this.chain = source["chain"];
+	        this.pos = source["pos"];
+	        this.num = source["num"];
+	        this.policy = source["policy"];
+	        this.spec = source["spec"];
+	    }
+	}
+	export class IptablesCommands {
+	    list: string[] | null;
+	    save: string[] | null;
+	    addRule: string[] | null;
+	    deleteRule: string[] | null;
+	    flushChain: string[] | null;
+	    flushTable: string[] | null;
+	    policy: string[] | null;
+	    newChain: string[] | null;
+	    dropChain: string[] | null;
+	    import: string[] | null;
+	    undo: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new IptablesCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.list = source["list"];
+	        this.save = source["save"];
+	        this.addRule = source["addRule"];
+	        this.deleteRule = source["deleteRule"];
+	        this.flushChain = source["flushChain"];
+	        this.flushTable = source["flushTable"];
+	        this.policy = source["policy"];
+	        this.newChain = source["newChain"];
+	        this.dropChain = source["dropChain"];
+	        this.import = source["import"];
+	        this.undo = source["undo"];
+	    }
+	}
 	export class IptablesStep {
 	    enabled: boolean;
 	    v4Blob?: string;

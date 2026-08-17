@@ -221,8 +221,7 @@ func (c *Client) ListIptables(ctx context.Context, serial string, fam IPFamily, 
 		return c.listNftRuleset(ctx, serial, fam, IPTable(tbl))
 	}
 
-	bin := iptablesBinary(fam)
-	list, _, err := c.ShellSU(ctx, serial, bin+" -t "+tbl+" -nvL --line-numbers")
+	list, _, err := c.ShellSU(ctx, serial, iptListCmd(fam, IPTable(tbl)))
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
 	}
@@ -479,8 +478,7 @@ func (c *Client) DeleteIptablesRule(ctx context.Context, serial string, fam IPFa
 	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return nil, err
 	}
-	bin := iptablesBinary(fam)
-	cmd := fmt.Sprintf("%s -t %s -D %s %d", bin, table, chain, num)
+	cmd := iptDeleteRuleCmd(fam, table, chain, num)
 	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return nil, fmt.Errorf("delete: %w (%s)", err, strings.TrimSpace(out))
 	}
@@ -493,13 +491,7 @@ func (c *Client) FlushIptables(ctx context.Context, serial string, fam IPFamily,
 	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return nil, err
 	}
-	bin := iptablesBinary(fam)
-	var cmd string
-	if chain == "" {
-		cmd = fmt.Sprintf("%s -t %s -F", bin, table)
-	} else {
-		cmd = fmt.Sprintf("%s -t %s -F %s", bin, table, chain)
-	}
+	cmd := iptFlushCmd(fam, table, chain)
 	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return nil, fmt.Errorf("flush: %w (%s)", err, strings.TrimSpace(out))
 	}
@@ -516,8 +508,7 @@ func (c *Client) SetIptablesPolicy(ctx context.Context, serial string, fam IPFam
 	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return err
 	}
-	bin := iptablesBinary(fam)
-	cmd := fmt.Sprintf("%s -t %s -P %s %s", bin, table, chain, policy)
+	cmd := iptPolicyCmd(fam, table, chain, policy)
 	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return fmt.Errorf("policy: %w (%s)", err, strings.TrimSpace(out))
 	}
@@ -532,8 +523,7 @@ func (c *Client) CreateIptablesChain(ctx context.Context, serial string, fam IPF
 	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return err
 	}
-	bin := iptablesBinary(fam)
-	cmd := fmt.Sprintf("%s -t %s -N %s", bin, table, chain)
+	cmd := iptNewChainCmd(fam, table, chain)
 	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return fmt.Errorf("create chain: %w (%s)", err, strings.TrimSpace(out))
 	}
@@ -548,8 +538,7 @@ func (c *Client) DeleteIptablesChain(ctx context.Context, serial string, fam IPF
 	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return err
 	}
-	bin := iptablesBinary(fam)
-	cmd := fmt.Sprintf("%s -t %s -X %s", bin, table, chain)
+	cmd := iptDeleteChainCmd(fam, table, chain)
 	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return fmt.Errorf("delete chain: %w (%s)", err, strings.TrimSpace(out))
 	}
@@ -570,11 +559,11 @@ func (c *Client) ImportIptables(ctx context.Context, serial string, fam IPFamily
 	// We can't pass multi-line input through `adb shell`'s `su -c '...'` form
 	// reliably — newlines and quotes break the single-quoted string. Stage
 	// the blob in /data/local/tmp and feed it via input redirection.
-	tmp := "/data/local/tmp/adbq-ipt-restore.rules"
+	tmp := iptRestoreStaged
 	if err := c.pushBlob(ctx, serial, tmp, blob); err != nil {
 		return fmt.Errorf("stage blob: %w", err)
 	}
-	cmd := iptablesRestoreBinary(fam) + " < " + tmp
+	cmd := iptRestoreCmd(fam, tmp)
 	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return fmt.Errorf("restore: %w (%s)", err, strings.TrimSpace(out))
 	}
@@ -594,11 +583,11 @@ func (c *Client) UndoIptables(ctx context.Context, serial string, fam IPFamily) 
 	}
 	// We deliberately don't re-snapshot before undo: that would let the user
 	// "undo the undo" into the same state forever and confuse the ring.
-	tmp := "/data/local/tmp/adbq-ipt-undo.rules"
+	tmp := iptUndoStaged
 	if err := c.pushBlob(ctx, serial, tmp, blob); err != nil {
 		return nil, err
 	}
-	cmd := iptablesRestoreBinary(fam) + " < " + tmp
+	cmd := iptRestoreCmd(fam, tmp)
 	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return nil, fmt.Errorf("undo restore: %w (%s)", err, strings.TrimSpace(out))
 	}
@@ -641,13 +630,7 @@ func (c *Client) runIptablesMutation(ctx context.Context, serial string, fam IPF
 	if err := c.beginIptablesMutation(ctx, serial, fam); err != nil {
 		return nil, err
 	}
-	bin := iptablesBinary(fam)
-	var cmd string
-	if op == "-I" && pos > 0 {
-		cmd = fmt.Sprintf("%s -t %s %s %s %d %s", bin, table, op, chain, pos, strings.Join(spec, " "))
-	} else {
-		cmd = fmt.Sprintf("%s -t %s %s %s %s", bin, table, op, chain, strings.Join(spec, " "))
-	}
+	cmd := iptRuleCmd(fam, table, op, chain, pos, spec)
 	if out, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
 		return nil, fmt.Errorf("%s: %w (%s)", op, err, strings.TrimSpace(out))
 	}

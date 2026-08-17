@@ -806,6 +806,14 @@ func (a *App) CreateIptablesChain(serial, family, table, chain string) error {
 func (a *App) DeleteIptablesChain(serial, family, table, chain string) error {
 	return a.client.DeleteIptablesChain(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table), chain)
 }
+
+// IptablesCommands renders what the firewall screen's actions will run for the
+// family/table/chain currently selected — with the table and the `su` form the
+// old rule-text preview left out (CLAUDE.md §4.1).
+func (a *App) IptablesCommands(serial string, req adb.IptablesCommandRequest) adb.IptablesCommands {
+	return a.client.IptablesCommandsFor(a.ctx, serial, req)
+}
+
 func (a *App) ExportIptables(serial, family string) (string, error) {
 	return a.client.ExportIptables(a.ctx, serial, adb.IPFamily(family))
 }

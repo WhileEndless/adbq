@@ -374,6 +374,10 @@ export function InstallTcpdumpWithPicker(arg1) {
   return window['go']['main']['App']['InstallTcpdumpWithPicker'](arg1);
 }
 
+export function IptablesCommands(arg1, arg2) {
+  return window['go']['main']['App']['IptablesCommands'](arg1, arg2);
+}
+
 export function IsAppRunning(arg1, arg2) {
   return window['go']['main']['App']['IsAppRunning'](arg1, arg2);
 }
