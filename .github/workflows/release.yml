@@ -96,12 +96,23 @@ jobs:
           cd build/bin
           ditto -c -k --keepParent adbq.app "../../${{ matrix.artifact }}.zip"
 
+      # A bare binary in a tarball has no icon and no launcher entry, so the app
+      # shows up as a generic window with a generic name. Ship the desktop entry
+      # and the icon in the layout `install` expects, plus a script that puts
+      # them where the desktop environment looks.
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
-          cd build/bin
-          chmod +x adbq
-          tar -czf "../../${{ matrix.artifact }}.tar.gz" adbq
+          set -euo pipefail
+          stage="pkg/adbq"
+          mkdir -p "$stage/share/applications" "$stage/share/icons/hicolor/512x512/apps"
+          cp build/bin/adbq "$stage/adbq"
+          chmod +x "$stage/adbq"
+          cp build/linux/adbq.desktop "$stage/share/applications/adbq.desktop"
+          cp build/linux/adbq.png "$stage/share/icons/hicolor/512x512/apps/adbq.png"
+          cp build/linux/install.sh "$stage/install.sh"
+          chmod +x "$stage/install.sh"
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C pkg adbq
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

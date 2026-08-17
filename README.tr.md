@@ -95,7 +95,7 @@ ikili (binary) olarak çalışır.
 |----|-------|-----|
 | **macOS** (Apple Silicon + Intel) | `adbq-macos-universal.zip` | Aç → `adbq.app`'i Uygulamalar'a sürükle |
 | **Windows** (x64) | `adbq-windows-amd64.zip` | Aç → `adbq.exe`'yi çalıştır |
-| **Linux** (x64) | `adbq-linux-amd64.tar.gz` | `tar -xzf … && ./adbq` |
+| **Linux** (x64) | `adbq-linux-amd64.tar.gz` | `tar -xzf … && adbq/adbq` — ya da simgeli menü girdisi için `adbq/install.sh` |
 
 Elinizdeki sürümü her an doğrulayın:
 
