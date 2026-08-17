@@ -74,3 +74,36 @@ func TestDeviceRenderedCommandsCarryTheSerial(t *testing.T) {
 		}
 	}
 }
+
+// The root previews claim to show the `su` form this device accepts, not a
+// generic one. That is only checkable against a device: render a root command,
+// then run it if root is really available and confirm it reaches uid 0.
+func TestDeviceRootRenderingMatchesTheDevice(t *testing.T) {
+	if os.Getenv("ADBQ_SKIP_DEVICE") == "1" {
+		t.Skip("ADBQ_SKIP_DEVICE=1")
+	}
+	serial := os.Getenv("ADBQ_PROBE_SERIAL")
+	if serial == "" {
+		t.Skip("set ADBQ_PROBE_SERIAL to run device tests")
+	}
+	ctx := context.Background()
+	c := NewClient()
+
+	line := c.ShellCommandTextRoot(ctx, serial, "id", true)
+	t.Log(line)
+	if _, err := c.suStyleFor(ctx, serial); err != nil {
+		// Unrooted: the preview shows the attempt, and showing it must not imply
+		// it works. Nothing to execute here.
+		if !strings.Contains(line, "su -c") {
+			t.Errorf("an unrooted device should still show the attempt: %s", line)
+		}
+		t.Skip("device is not rooted — nothing to execute")
+	}
+	out, err := exec.CommandContext(ctx, "sh", "-c", line).CombinedOutput()
+	if err != nil {
+		t.Fatalf("the rendered root command failed: %v\n%s", err, out)
+	}
+	if !hasUID0(string(out)) {
+		t.Errorf("the rendered root command did not run as root: %s", out)
+	}
+}

@@ -94,3 +94,40 @@ func TestNetCommandsForCoversProxyAndFlush(t *testing.T) {
 		t.Errorf("connections: %s", got.Connections[0])
 	}
 }
+
+// A lookup runs three reads and the preview lists all three, in order — the
+// point of the panel is comparing what hosts says with what DNS says.
+func TestDNSLookupCommandsListEveryRead(t *testing.T) {
+	got := DNSLookupCommands("emulator-5554", "api.example.test", PlainRenderer("emulator-5554"))
+	if len(got) != 3 {
+		t.Fatalf("got %#v", got)
+	}
+	for i, want := range []string{"/etc/hosts", "ping -c 1", "nslookup"} {
+		if !strings.Contains(got[i], want) {
+			t.Errorf("step %d does not mention %q: %s", i, want, got[i])
+		}
+	}
+}
+
+// safeHost strips anything outside the host-name grammar rather than refusing
+// it, so what the preview shows is the sanitised name the lookup will really
+// use. What must never happen is a shell metacharacter reaching the rendered
+// command — the preview would then be advertising an injection.
+func TestDNSLookupCommandsShowTheSanitisedHost(t *testing.T) {
+	got := DNSLookupCommands("emulator-5554", "example.test; rm -rf /", PlainRenderer("emulator-5554"))
+	if len(got) != 3 {
+		t.Fatalf("got %#v", got)
+	}
+	// The hosts read is host-name independent; the two that interpolate are not.
+	for _, line := range got[1:] {
+		if strings.Contains(line, "rm -rf") || strings.Contains(line, ";") {
+			t.Errorf("unsafe input reached the command: %s", line)
+		}
+	}
+	// Nothing left after sanitising means there is no lookup to describe.
+	for _, bad := range []string{"", "$(){}", "///"} {
+		if cmds := DNSLookupCommands("emulator-5554", bad, PlainRenderer("emulator-5554")); cmds != nil {
+			t.Errorf("DNSLookupCommands(%q) = %#v, want none", bad, cmds)
+		}
+	}
+}

@@ -55,14 +55,31 @@ adbq/
 ├── wails.json          # Wails CLI metadata
 ├── go.mod
 ├── build/
-│   ├── appicon.png
+│   ├── appicon.png     # tek kaynak: .icns ve .ico buradan üretilir
 │   ├── darwin/         # Info.plist, entitlements
-│   └── windows/        # manifest, installer assets
+│   ├── windows/        # icon.ico (commit'li — aşağıya bak), manifest
+│   └── linux/          # adbq.desktop, adbq.png, install.sh
 └── frontend/
     ├── package.json
     ├── src/
     └── wailsjs/        # Otomatik üretilen JS/TS köprüsü
 ```
+
+### 4.1. Simge hangi platformda nereden geliyor
+
+| Platform | Kaynak | Ne zaman üretilir |
+|---|---|---|
+| macOS | `build/appicon.png` → `Contents/Resources/iconfile.icns` | her `wails build` |
+| Windows | `build/windows/icon.ico` → `.exe` kaynak bölümü | derleme anında; **dosya yoksa** Wails onu `appicon.png`'den üretir |
+| Linux | `linux.Options{Icon: …}` (gömülü `appicon.png`) + `build/linux/adbq.desktop` | çalışma anı / kurulum |
+
+`build/windows/icon.ico` bilinçli olarak **commit'lidir**: üretilmesine bırakılırsa
+sürümle ne gönderildiğini hiçbir şey sabitlemez. Dosya, Wails'in gömme sırasında
+kullandığı kütüphaneyle (`winres.LoadICO`) ayrıştırılabildiği doğrulanarak eklendi.
+
+Linux'ta paketleyici adım yok: ne bundle ne kaynak bölümü vardır, o yüzden simge
+hem çalışma anında (`linux.Options`) hem de `.desktop` girdisiyle verilir —
+ikincisi olmadan pencere menüde adsız/simgesiz görünür.
 
 ## 5. Temel `main.go` İskeleti
 

@@ -88,6 +88,14 @@ aynı adlı ince bir metot cihaz farkındalığını ekler. Örnek:
 `AppCommandsFor`, `FileCommandsFor`, `IptablesCommandsFor`, `NetCommandsFor`,
 `DeviceCommandsFor`, `FridaCommandsFor`.
 
+**K7 kabuğa sorularak doğrulanır.** Birim testleri dizeyi dizeyle karşılaştırır;
+yalnızca bir kabuğun yakalayacağı tırnaklama hatası hepsinden geçer. Bu yüzden
+`command_device_test.go` (opt-in, `ADBQ_PROBE_SERIAL`) salt-okunur önizlemeleri
+`sh -c` ile **çalıştırır**, ve root render'ının cihazın kabul ettiği `su` biçimi
+olduğunu `id` çıktısının uid=0 olmasıyla teyit eder. Testin yazdığı hiçbir şey
+cihazı değiştirmez — bir önizlemeyi doğrulamak için cihaza kurulum yapan test,
+aradığı hatadan kötü olurdu.
+
 **Aynı dizeyi hem çalıştıran hem gösteren tek kaynak.** Eylemin çalıştırdığı
 uzak komut, artık kod içinde satır olarak değil bir fonksiyon olarak durur
 (`appClearRemote`, `rmRemote`, `iptFlushCmd`, `fridaStartRemote`,

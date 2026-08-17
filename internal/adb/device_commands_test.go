@@ -141,3 +141,19 @@ func TestTcpdumpInstallCommandsCoverPushChmodAndProbe(t *testing.T) {
 		}
 	}
 }
+
+// Connecting is untargeted by nature: the address is the argument, and the
+// serial is what the command produces.
+func TestConnectCommandsForNameTheAddress(t *testing.T) {
+	got := ConnectCommandsFor("192.168.1.10:5555")
+	if got.Connect[0] != "adb connect 192.168.1.10:5555" {
+		t.Errorf("connect: %s", got.Connect[0])
+	}
+	if got.Disconnect[0] != "adb disconnect 192.168.1.10:5555" {
+		t.Errorf("disconnect: %s", got.Disconnect[0])
+	}
+	// Nothing typed yet, nothing to show.
+	if empty := ConnectCommandsFor(""); len(empty.Connect) != 0 || len(empty.Disconnect) != 0 {
+		t.Errorf("empty address: %#v", empty)
+	}
+}
