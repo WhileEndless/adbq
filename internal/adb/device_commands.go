@@ -150,9 +150,10 @@ func (c *Client) CaptureCommandFor(ctx context.Context, serial, iface, bpf strin
 	return CaptureCommandFor(serial, td, iface, bpf, wrap)
 }
 
-// screenRecordRemote is where a recording is written before being pulled. The
-// live path carries a timestamp; the preview names the fixed part so the line
-// stays copyable.
+// screenRecordRemote is where the fixed-duration recording (the one the Overview
+// button runs) is written before being pulled. The interactive start/stop path
+// timestamps its file instead, because that one can be left running while
+// another is started.
 func screenRecordRemote() string { return "/sdcard/adbq-screenrecord.mp4" }
 
 // screenRecordStopRemote asks the device-side recorder to stop cleanly so the

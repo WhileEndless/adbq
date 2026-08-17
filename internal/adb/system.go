@@ -498,7 +498,7 @@ func (c *Client) ScreenRecord(ctx context.Context, serial, outDir string, second
 	if seconds <= 0 || seconds > 180 {
 		seconds = 30
 	}
-	deviceTmp := "/sdcard/adbq-screenrecord.mp4"
+	deviceTmp := screenRecordRemote()
 	if _, err := c.Shell(ctx, serial, fmt.Sprintf("screenrecord --time-limit %d %s", seconds, deviceTmp)); err != nil {
 		return "", err
 	}
