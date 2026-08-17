@@ -1219,6 +1219,14 @@ func (a *App) DescribeApp(serial, pkg string) (*adb.AppDetail, error) {
 	return a.client.DescribeApp(a.ctx, serial, pkg)
 }
 
+// AppCommands is what the Apps panel's actions will run for one package, so
+// each button can show its command before it is pressed (CLAUDE.md §4.1).
+// Reads the device: the root steps are rendered with the `su` form it accepts,
+// and the export step names the file an export would suggest.
+func (a *App) AppCommands(serial, pkg string) adb.AppCommands {
+	return a.client.AppCommandsFor(a.ctx, serial, pkg)
+}
+
 // AndroidVersionMap exposes the SDK-level → "Android X (Codename)" table so
 // the frontend can label minSdk/targetSdk/compileSdk without a round-trip
 // for every package.

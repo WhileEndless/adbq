@@ -53,6 +53,19 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
     const t = setInterval(probe, 3000);
     return () => { cancelled = true; clearInterval(t); };
   }, [sel?.pkg, device?.id]);
+  // What each action in this panel will run. Fetched per selection because the
+  // export step is named after the app's version and the root steps carry the
+  // `su` form this device accepts — neither is guessable in the frontend.
+  const [cmds, setCmds] = useState<adb.AppCommands | null>(null);
+  useEffect(() => {
+    if (!sel) { setCmds(null); return; }
+    let live = true;
+    API.AppCommands(device.id, sel.pkg)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    return () => { live = false; };
+  }, [sel?.pkg, device?.id]);
+
   function refreshRunning() {
     if (!sel) return;
     API.IsAppRunning(device.id, sel.pkg).then(setRunning).catch(() => setRunning(null));
@@ -159,7 +172,14 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                 }} disabled={!running?.running}><Icon.Refresh/>Restart</button>
                 <button className='btn' onClick={async () => {
                   if (!sel) return;
-                  const ok = await confirmDialog({title: `Clear data for ${sel.name || sel.pkg}?`, body: 'Wipes app preferences, cache, and database. The app will start fresh.', confirmLabel: 'Clear', danger: true});
+                  const ok = await confirmDialog({
+                    title: `Clear data for ${sel.name || sel.pkg}?`,
+                    body: <>
+                      Wipes app preferences, cache, and database. The app will start fresh.
+                      <CommandPreview commands={cmds?.clear ?? []} defaultOpen/>
+                    </>,
+                    confirmLabel: 'Clear', danger: true,
+                  });
                   if (ok) doAction(API.ClearApp, 'Clear data');
                 }}>Clear data</button>
                 {setScreen && (
@@ -186,6 +206,13 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                   <Icon.Download/>Export data{!device.root && ' (root)'}
                 </button>
               </div>
+              {cmds && <DetailSection title='Commands'>
+                <CommandPreview commands={cmds?.launch ?? []} label='Launch'/>
+                <CommandPreview commands={cmds?.forceStop ?? []} label='Kill'/>
+                <CommandPreview commands={cmds?.clear ?? []} label='Clear data'/>
+                <CommandPreview commands={cmds?.exportData ?? []} label='Export data'/>
+                <CommandPreview commands={cmds?.uninstall ?? []} label='Uninstall'/>
+              </DetailSection>}
               <ApkToolsSection device={device} pkg={sel.pkg}/>
               <FridaAppSection device={device} pkg={sel.pkg} running={!!running?.running} setScreen={setScreen}/>
               {detail && <>
@@ -238,7 +265,14 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
               <button className='btn danger' style={{marginTop: 6, width: '100%'}}
                       onClick={async () => {
                         if (!sel) return;
-                        const ok = await confirmDialog({title: `Uninstall ${sel.name || sel.pkg}?`, body: sel.pkg, confirmLabel: 'Uninstall', danger: true});
+                        const ok = await confirmDialog({
+                          title: `Uninstall ${sel.name || sel.pkg}?`,
+                          body: <>
+                            <span className='mono'>{sel.pkg}</span>
+                            <CommandPreview commands={cmds?.uninstall ?? []} defaultOpen/>
+                          </>,
+                          confirmLabel: 'Uninstall', danger: true,
+                        });
                         if (ok) {
                           API.UninstallApp(device.id, sel.pkg)
                             .then(() => showToast({title: 'Uninstall started', body: 'See Tasks panel', kind: 'info'}));

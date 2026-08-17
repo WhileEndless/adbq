@@ -388,10 +388,9 @@ func shQuote(s string) string {
 
 // ExportAppData tars and gzips /data/data/<pkg> into a host file (root required).
 func (c *Client) ExportAppData(ctx context.Context, serial, pkg, localPath string) (string, error) {
-	remote := "/sdcard/adbq-appdata-" + pkg + ".tar.gz"
+	remote := appDataArchive(pkg)
 	// Run as root, write to /sdcard (world-readable), then pull.
-	cmd := fmt.Sprintf("tar -czf %s -C /data/data %s 2>&1 || tar -czf %s /data/data/%s 2>&1", remote, pkg, remote, pkg)
-	_, _, err := c.ShellSU(ctx, serial, cmd)
+	_, _, err := c.ShellSU(ctx, serial, appDataTarRemote(pkg))
 	if err != nil {
 		return "", err
 	}

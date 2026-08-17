@@ -21,6 +21,8 @@ export function AndroidVersionMap():Promise<Record<number, string>>;
 
 export function ApkSetOf(arg1:string,arg2:string):Promise<adb.ApkSet>;
 
+export function AppCommands(arg1:string,arg2:string):Promise<adb.AppCommands>;
+
 export function AppIcon(arg1:string,arg2:string):Promise<string>;
 
 export function AppendIptablesRule(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<adb.IPTSnapshot>;

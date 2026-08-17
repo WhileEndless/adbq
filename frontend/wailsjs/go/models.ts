@@ -272,6 +272,28 @@ export namespace adb {
 	        this.uid = source["uid"];
 	    }
 	}
+	export class AppCommands {
+	    pkg: string;
+	    launch: string[] | null;
+	    forceStop: string[] | null;
+	    clear: string[] | null;
+	    uninstall: string[] | null;
+	    exportData: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkg = source["pkg"];
+	        this.launch = source["launch"];
+	        this.forceStop = source["forceStop"];
+	        this.clear = source["clear"];
+	        this.uninstall = source["uninstall"];
+	        this.exportData = source["exportData"];
+	    }
+	}
 	export class GrantedPerm {
 	    name: string;
 	    granted: boolean;

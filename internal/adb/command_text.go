@@ -63,6 +63,31 @@ func ShellCommandText(serial, remote string) string {
 	return DeviceCommandText(serial, "shell", remote)
 }
 
+// CommandRenderer turns one remote command into the copyable adb line that
+// runs it. Builders take a renderer rather than a *Client so they stay pure and
+// unit-testable while still rendering the device's own `su` form when a caller
+// hands them the real thing.
+type CommandRenderer func(remote string, asRoot bool) string
+
+// Renderer is the CommandRenderer for one device.
+func (c *Client) Renderer(ctx context.Context, serial string) CommandRenderer {
+	return func(remote string, asRoot bool) string {
+		return c.ShellCommandTextRoot(ctx, serial, remote, asRoot)
+	}
+}
+
+// PlainRenderer renders remote commands without consulting a device, for
+// previews built before a device is reachable (and in tests). Root commands are
+// shown in the `su -c` form, which is what the attempt starts from.
+func PlainRenderer(serial string) CommandRenderer {
+	return func(remote string, asRoot bool) string {
+		if asRoot {
+			return ShellCommandText(serial, "su -c "+shQuote(remote))
+		}
+		return ShellCommandText(serial, remote)
+	}
+}
+
 // ShellCommandTextRoot renders what ShellSU would run, including the `su` form
 // this particular device accepts, so the displayed line is the line that runs.
 //

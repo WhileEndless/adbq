@@ -38,6 +38,10 @@ export function ApkSetOf(arg1, arg2) {
   return window['go']['main']['App']['ApkSetOf'](arg1, arg2);
 }
 
+export function AppCommands(arg1, arg2) {
+  return window['go']['main']['App']['AppCommands'](arg1, arg2);
+}
+
 export function AppIcon(arg1, arg2) {
   return window['go']['main']['App']['AppIcon'](arg1, arg2);
 }
