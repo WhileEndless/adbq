@@ -311,12 +311,19 @@ func (m *EmulatorManager) CreateAVD(ctx context.Context, s AVDSpec) (*AVD, error
 		return nil, fmt.Errorf("%s", avdManagerError(string(out), err))
 	}
 
-	if err := applyAVDConfigTweaks(info.AVDHome, s); err != nil {
-		// The AVD exists and is usable; a failed tweak is worth reporting but
-		// must not read as "creation failed".
-		return m.AVDByName(ctx, s.Name)
+	tweakErr := applyAVDConfigTweaks(info.AVDHome, s)
+	avd, err := m.AVDByName(ctx, s.Name)
+	if err != nil {
+		return nil, err
 	}
-	return m.AVDByName(ctx, s.Name)
+	// The AVD exists and boots; only the extra settings were lost. That must not
+	// read as "creation failed", but it must not vanish either — otherwise the
+	// AVD comes up with the emulator's frugal defaults and nothing says why.
+	if tweakErr != nil {
+		avd.Warning = "created, but the RAM/cores/disk/GPU settings could not be written to config.ini: " +
+			tweakErr.Error() + " — adjust them from the AVD's hardware settings"
+	}
+	return avd, nil
 }
 
 // applyAVDConfigTweaks rewrites config.ini keys avdmanager cannot set. The file
@@ -332,6 +339,10 @@ func applyAVDConfigTweaks(avdHome string, s AVDSpec) error {
 	if v := strings.TrimSpace(s.DataSize); v != "" {
 		changes["disk.dataPartition.size"] = v
 	}
+	// Written either way. "Off" is a choice the create form offers, and omitting
+	// the key would silently hand the decision back to the device profile — the
+	// switch would look like it did nothing.
+	changes["hw.keyboard"] = "no"
 	if s.Keyboard {
 		changes["hw.keyboard"] = "yes"
 	}
@@ -527,7 +538,7 @@ func (m *EmulatorManager) DeleteAVD(ctx context.Context, name string) error {
 	if !avdNameOK(name) {
 		return fmt.Errorf("%q is not a valid AVD name", name)
 	}
-	if m.IsManaged(name) {
+	if m.avdBusy(ctx, name) {
 		return fmt.Errorf("%s is running — stop it before deleting", name)
 	}
 	bin, err := m.sdk.AVDManagerBin()
@@ -556,7 +567,11 @@ func (m *EmulatorManager) DeleteSnapshot(name, snapshot string) error {
 	if snapshot == "" || strings.ContainsAny(snapshot, `/\`) || snapshot == "." || snapshot == ".." {
 		return fmt.Errorf("%q is not a valid snapshot name", snapshot)
 	}
-	if m.IsManaged(name) {
+	// Snapshots are read and rewritten by a live emulator, so this has to catch
+	// an AVD started from anywhere, not just adbq's own children.
+	bctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if m.avdBusy(bctx, name) {
 		return fmt.Errorf("%s is running — stop it before deleting snapshots", name)
 	}
 	info := m.sdk.Info()

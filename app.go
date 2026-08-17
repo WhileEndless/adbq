@@ -261,7 +261,9 @@ func (a *App) AVDDetail(name string) (*adb.AVD, error) { return a.emu.AVDByName(
 // EmulatorLaunchCommand renders the exact command StartAVD would run, so the UI
 // can show it live as the user toggles boot options (CLAUDE.md §4.1).
 func (a *App) EmulatorLaunchCommand(name string, opts adb.EmulatorOpts) string {
-	return adb.EmulatorCommand(a.sdk.Info().Emulator, name, 0, opts)
+	// With port 0 the rendered line would omit the -port flag StartAVD always
+	// passes, so the command on screen would not be the command that runs.
+	return adb.EmulatorCommand(a.sdk.Info().Emulator, name, a.emu.ConsolePortFor(name), opts)
 }
 
 // StartAVD boots an AVD and waits for it to come up, reporting progress as a task.

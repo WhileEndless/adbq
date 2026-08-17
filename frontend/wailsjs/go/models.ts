@@ -32,6 +32,7 @@ export namespace adb {
 	    managed: boolean;
 	    root: string;
 	    error: string;
+	    warning: string;
 	    commands: string[] | null;
 	
 	    static createFrom(source: any = {}) {
@@ -71,6 +72,7 @@ export namespace adb {
 	        this.managed = source["managed"];
 	        this.root = source["root"];
 	        this.error = source["error"];
+	        this.warning = source["warning"];
 	        this.commands = source["commands"];
 	    }
 	}

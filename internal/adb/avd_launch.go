@@ -43,14 +43,20 @@ type EmulatorManager struct {
 	mu    sync.Mutex
 	procs map[string]*emulatorProc // AVD name → process
 	logs  map[string]*hostLog      // AVD name → log, retained after exit
+	// avdBySerial remembers which AVD each serial was running. A wedged
+	// emulator's transport goes offline and can no longer answer `emu avd
+	// name`, so without this an AVD someone else started would drop back to
+	// "stopped" at the exact moment the user needs to see that it is stuck.
+	avdBySerial map[string]string
 }
 
 func NewEmulatorManager(sdk *SDKManager, client *Client) *EmulatorManager {
 	return &EmulatorManager{
-		sdk:    sdk,
-		client: client,
-		procs:  map[string]*emulatorProc{},
-		logs:   map[string]*hostLog{},
+		sdk:         sdk,
+		client:      client,
+		procs:       map[string]*emulatorProc{},
+		logs:        map[string]*hostLog{},
+		avdBySerial: map[string]string{},
 	}
 }
 
@@ -117,14 +123,31 @@ func (m *EmulatorManager) liveEmulators(ctx context.Context) map[string]liveEmul
 			continue
 		}
 		e := liveEmulator{serial: d.ID, state: d.State}
-		// An offline transport can't answer the console query; leave avd empty
-		// and let the caller fall back to its own process bookkeeping.
+		// An offline transport can't answer the console query, so fall back to
+		// the name we recorded while it was still talking.
 		if d.Online {
 			e.avd = m.consoleAVDName(ctx, d.ID)
+		}
+		if e.avd != "" {
+			m.rememberSerial(d.ID, e.avd)
+		} else {
+			e.avd = m.recallSerial(d.ID)
 		}
 		out[d.ID] = e
 	}
 	return out
+}
+
+func (m *EmulatorManager) rememberSerial(serial, avd string) {
+	m.mu.Lock()
+	m.avdBySerial[serial] = avd
+	m.mu.Unlock()
+}
+
+func (m *EmulatorManager) recallSerial(serial string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.avdBySerial[serial]
 }
 
 // consoleAVDName runs `adb -s <serial> emu avd name`, whose output is the AVD
@@ -221,16 +244,47 @@ func (m *EmulatorManager) rootKind(ctx context.Context, serial string) string {
 	if err == nil && strings.TrimSpace(out) == "0" {
 		return "adb-root"
 	}
-	if _, _, err := m.client.ShellSU(ctx, serial, "id -u"); err == nil {
-		return "su"
+	// ShellSU probes several `su` forms and, on an emulator, may restart adbd as
+	// root instead — so its success alone does not mean a su binary exists. The
+	// probe walks the device, hence the ceiling: this runs for every running AVD
+	// on every refresh and must not be able to stall the whole listing.
+	sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if _, _, err := m.client.ShellSU(sctx, serial, "id -u"); err != nil {
+		return "no"
 	}
-	return "no"
+	if out, err := m.client.ShellTimeout(ctx, serial, "id -u", 5*time.Second); err == nil && strings.TrimSpace(out) == "0" {
+		// The plain shell answers 0 now, so root came from adbd, not from su.
+		return "adb-root"
+	}
+	return "su"
+}
+
+// ConsolePortFor reports the console port a launch of this AVD would use: the
+// one it is already running on, or the next free port in the emulator's range.
+//
+// The UI needs this to show the command it is about to run rather than one
+// missing its -port flag (CLAUDE.md §4.1). It is a best-effort answer — the port
+// is only claimed at launch — but it is right in every case except a race with
+// something else grabbing the port in between.
+func (m *EmulatorManager) ConsolePortFor(name string) int {
+	m.mu.Lock()
+	p := m.procs[name]
+	m.mu.Unlock()
+	if p != nil && procAlive(p.cmd) {
+		return p.port
+	}
+	port, err := allocConsolePort()
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 // commandsFor renders the commands behind this AVD's row (CLAUDE.md §4.1).
 func (m *EmulatorManager) commandsFor(a *AVD) []string {
 	bin := m.sdk.Info().Emulator
-	cmds := []string{EmulatorCommand(bin, a.Name, 0, EmulatorOpts{})}
+	cmds := []string{EmulatorCommand(bin, a.Name, a.Port, EmulatorOpts{})}
 	if a.Serial != "" {
 		cmds = append(cmds, "adb -s "+a.Serial+" emu kill")
 	}
@@ -398,8 +452,17 @@ func (m *EmulatorManager) Stop(ctx context.Context, name string) error {
 	}
 }
 
-// StopAll terminates every emulator adbq started. Called on app shutdown so we
+// stopAllGrace is how long shutdown waits for an emulator to close itself
+// before killing it. Long enough for the snapshot write a graceful `emu kill`
+// triggers, short enough that quitting adbq still feels like quitting.
+const stopAllGrace = 6 * time.Second
+
+// StopAll shuts down every emulator adbq started. Called on app shutdown so we
 // don't leave orphaned VMs behind; emulators started elsewhere are left alone.
+//
+// The console kill comes first and the SIGKILL is only the fallback: an emulator
+// killed outright loses the snapshot it was writing, and a corrupted qcow2 is a
+// far worse parting gift than a couple of seconds of shutdown.
 func (m *EmulatorManager) StopAll() {
 	m.mu.Lock()
 	procs := make([]*emulatorProc, 0, len(m.procs))
@@ -408,11 +471,28 @@ func (m *EmulatorManager) StopAll() {
 	}
 	m.procs = map[string]*emulatorProc{}
 	m.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), stopAllGrace)
+	defer cancel()
+
+	var wg sync.WaitGroup
 	for _, p := range procs {
-		if p.cmd.Process != nil {
-			_ = p.cmd.Process.Kill()
-		}
+		wg.Add(1)
+		go func(p *emulatorProc) {
+			defer wg.Done()
+			if cmd, err := m.client.DeviceCommand(ctx, SerialForPort(p.port), "emu", "kill"); err == nil {
+				_, _ = Run(cmd)
+			}
+			select {
+			case <-p.done:
+			case <-ctx.Done():
+				if p.cmd.Process != nil {
+					_ = p.cmd.Process.Kill()
+				}
+			}
+		}(p)
 	}
+	wg.Wait()
 }
 
 // IsManaged reports whether adbq launched (and still supervises) this AVD.
@@ -421,6 +501,22 @@ func (m *EmulatorManager) IsManaged(name string) bool {
 	defer m.mu.Unlock()
 	p := m.procs[name]
 	return p != nil && procAlive(p.cmd)
+}
+
+// avdBusy reports whether an emulator is live behind this AVD, whoever started
+// it. Destructive operations gate on this rather than on IsManaged: an AVD
+// launched from Android Studio has files open just the same, and deleting them
+// underneath it corrupts the image instead of failing cleanly.
+func (m *EmulatorManager) avdBusy(ctx context.Context, name string) bool {
+	a, err := m.AVDByName(ctx, name)
+	if err != nil {
+		return false
+	}
+	switch a.State {
+	case AVDRunning, AVDBooting, AVDOffline:
+		return true
+	}
+	return false
 }
 
 // ─── logs ──────────────────────────────────────────────────────────────────

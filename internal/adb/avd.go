@@ -83,6 +83,12 @@ type AVD struct {
 	// hiding them makes a broken AVD look deleted.
 	Error string `json:"error"`
 
+	// Warning is a non-fatal problem with an AVD that otherwise works — a
+	// setting that could not be written, say. Unlike Error it does not mean the
+	// definition is untrustworthy, so the UI shows it once rather than marking
+	// the AVD broken.
+	Warning string `json:"warning"`
+
 	// Commands is the adb/emulator command line behind this entry (CLAUDE.md §4.1).
 	Commands []string `json:"commands"`
 }
