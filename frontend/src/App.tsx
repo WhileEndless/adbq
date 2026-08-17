@@ -467,13 +467,6 @@ function Sidebar({device, screen, setScreen, counts}:{device?: adb.Device; scree
         </div>
       )}
       <div className='group'>
-        <div className='label'>Host</div>
-        <div className={`nav${screen === 'emulators' ? ' active' : ''}`} onClick={() => setScreen('emulators')}>
-          <span className='icon'><Icon.Phone/></span>
-          <span>Emulators</span>
-        </div>
-      </div>
-      <div className='group'>
         <div className='label'>Device</div>
         {items.map(it => (
           <div key={it.key} className={`nav${screen === it.key ? ' active' : ''}`} onClick={() => setScreen(it.key)}>
@@ -482,6 +475,13 @@ function Sidebar({device, screen, setScreen, counts}:{device?: adb.Device; scree
             {it.count !== undefined && it.count > 0 && <span className='count'>{it.count}</span>}
           </div>
         ))}
+      </div>
+      <div className='group host'>
+        <div className='label'>Host</div>
+        <div className={`nav${screen === 'emulators' ? ' active' : ''}`} onClick={() => setScreen('emulators')}>
+          <span className='icon'><Icon.Phone/></span>
+          <span>Emulators</span>
+        </div>
       </div>
       <div className='footer'>
         <span>adbq · {import.meta.env.MODE}</span>

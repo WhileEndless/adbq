@@ -112,7 +112,11 @@ input, select, textarea { font: inherit; color: inherit; }
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  padding: 0 10px 0 80px; /* leave room for macOS traffic lights */
+  /* Aligned with the sidebar's nav labels (10px sidebar padding + 8px nav
+     padding). The old 80px reserved room for macOS traffic lights, which live
+     in the native title bar above this row — the window is not frameless — so
+     it was reserving space for something that is never drawn here. */
+  padding: 0 10px 0 18px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
@@ -127,22 +131,6 @@ input, select, textarea { font: inherit; color: inherit; }
   z-index: 20;
 }
 .titlebar .meta-line { font-family: var(--font-mono); font-size: 11px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.titlebar .traffic {
-  position: absolute;
-  left: 12px;
-  top: 11px;
-  display: flex;
-  gap: 8px;
-}
-.titlebar .traffic span {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  display: block;
-}
-.titlebar .traffic span:nth-child(1) { background: #ec6a5e; }
-.titlebar .traffic span:nth-child(2) { background: #f5bd4f; }
-.titlebar .traffic span:nth-child(3) { background: #61c454; }
 .titlebar-spacer { flex: 1; }
 .titlebar .brand {
   font-weight: 600;
@@ -312,8 +300,11 @@ input, select, textarea { font: inherit; color: inherit; }
 .sidebar .devicecard .badges {
   display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px;
 }
+/* Host actions sit at the bottom of the sidebar: they are about this computer,
+   not the connected device the groups above are scoped to. `auto` pushes the
+   pair (this group + the footer) down together. */
+.sidebar .group.host { margin-top: auto; }
 .sidebar .footer {
-  margin-top: auto;
   padding: 8px;
   display: flex;
   gap: 8px;
