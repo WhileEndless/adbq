@@ -3,7 +3,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOn, EventsOff} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
-import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandPreview, Modal, SearchInput, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
 import {rootUnavailableReason} from '../lib/android';
@@ -186,13 +186,36 @@ export function FridaScreen({device}: {device: adb.Device}) {
     }).catch(e => showToast({title: 'Push failed', body: String(e), kind: 'err'}));
   }
   function removeBinary(s: adb.FridaServer) {
-    confirmDialog({title: 'Delete binary?', body: s.path, confirmLabel: 'Delete', danger: true}).then(ok => {
-      if (!ok) return;
-      API.DeleteFile(device.id, s.path, false, false).then(reload);
-    });
+    // The rm comes from Go, same as everywhere else a file is deleted.
+    API.FileCommands(device.id, {dir: '/data/local/tmp', name: s.name, isDir: false, asRoot: false, mode: '', owner: ''} as adb.FileCommandRequest)
+      .catch(() => null)
+      .then(fc => confirmDialog({
+        title: 'Delete binary?',
+        body: <>
+          <span className='mono'>{s.path}</span>
+          <CommandPreview commands={fc?.delete ?? []} defaultOpen/>
+        </>,
+        confirmLabel: 'Delete', danger: true,
+      }))
+      .then(ok => {
+        if (!ok) return;
+        API.DeleteFile(device.id, s.path, false, false).then(reload);
+      });
   }
 
   const active = servers.find(s => s.active);
+
+  // Everything this tab does to the device, as commands. Only Go knows the
+  // daemonizing form and the `su` wrapper, so it renders them (CLAUDE.md §4.1).
+  const [cmds, setCmds] = useState<adb.FridaCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setCmds(null); return; }
+    let live = true;
+    API.FridaCommands(device.id, active?.path || '', active?.port || port)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    return () => { live = false; };
+  }, [device?.id, active?.path, active?.port, port]);
 
   return (
     <div className='screen'>
@@ -228,8 +251,8 @@ export function FridaScreen({device}: {device: adb.Device}) {
           <div className='card-body'>
             {active ? (
               <>
-                <div className='mono' style={{fontSize: 12, marginBottom: 8}}>
-                  <span className='muted'>$</span> {active.path} -l {iface}:{active.port}
+                <div style={{marginBottom: 8}}>
+                  <CommandPreview commands={cmds?.start ?? []} label='Started with' defaultOpen/>
                 </div>
                 <div style={{display: 'grid', gridTemplateColumns: 'auto 1fr auto 1fr auto', gap: 8, alignItems: 'center'}}>
                   <span className='muted' style={{fontSize: 11}}>Interface</span>
@@ -281,6 +304,7 @@ export function FridaScreen({device}: {device: adb.Device}) {
           </div>
           {logOpen && (
             <div className='card-body'>
+              <CommandPreview commands={cmds?.log ?? []} label='Read log'/>
               {srvLog.trim() ? (
                 <pre className='mono' style={{fontSize: 11, margin: 0, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap'}}>{srvLog}</pre>
               ) : (
@@ -342,6 +366,20 @@ export function FridaScreen({device}: {device: adb.Device}) {
             </div>
           ))}
         </div>
+
+        {cmds && (
+          <div className='card' style={{marginTop: 14}}>
+            <div className='card-header'><span className='title'>Commands</span></div>
+            <div className='card-body' style={{display: 'grid', gap: 4}}>
+              <CommandPreview commands={cmds.install ?? []} label='Install server'/>
+              <CommandPreview commands={cmds.list ?? []} label='List binaries'/>
+              <CommandPreview commands={cmds.start ?? []} label='Start'/>
+              <CommandPreview commands={cmds.stop ?? []} label='Stop'/>
+              <CommandPreview commands={cmds.log ?? []} label='Server log'/>
+              <CommandPreview commands={cmds.forward ?? []} label='Port forward'/>
+            </div>
+          </div>
+        )}
 
         {/* Script library */}
         <div className='card' style={{marginTop: 14}}>
@@ -1156,6 +1194,11 @@ function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
         {!slice.ended && slice.info.status === 'running'
           ? <button className='btn sm danger' onClick={() => store.stopFridaSession(id)}><Icon.Stop/>Stop</button>
           : <button className='btn sm' onClick={() => store.removeFridaSession(id)}><Icon.Trash width={11} height={11}/>Remove</button>}
+      </div>
+
+      <div style={{display: 'grid', gap: 4}}>
+        <CommandPreview commands={slice.info.commands?.runner ?? []} label='Running'/>
+        <CommandPreview commands={slice.info.commands?.cli ?? []} label='Same attach with the frida CLI'/>
       </div>
 
       <div className='frida-console-toolbar'>

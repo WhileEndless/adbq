@@ -141,6 +141,8 @@ export function ForwardCommands(arg1:string,arg2:string,arg3:Array<adb.Forward>)
 
 export function FridaArchInfo(arg1:string):Promise<adb.FridaArchInfo>;
 
+export function FridaCommands(arg1:string,arg2:string,arg3:number):Promise<adb.FridaCommands>;
+
 export function FridaHost():Promise<adb.FridaHostInfo>;
 
 export function FridaManagedEnabled():Promise<boolean>;

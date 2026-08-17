@@ -1753,6 +1753,13 @@ func (a *App) StartFrida(serial, path, iface string, port int) (string, error) {
 // last launch. Empty output means it started cleanly — the server only writes
 // here when something went wrong. Logs are per-port because a device can run
 // several servers at once. Pass 0 for frida's default port.
+// FridaCommands renders what the Frida screen's device-side actions will run for
+// one server binary and port: the push and chmod behind an install, the
+// daemonized start, the stop, the log read and the port forward.
+func (a *App) FridaCommands(serial, serverPath string, port int) adb.FridaCommands {
+	return a.client.FridaCommandsFor(a.ctx, serial, serverPath, port)
+}
+
 func (a *App) FridaServerLog(serial string, port int) (string, error) {
 	return a.client.FridaServerLog(a.ctx, serial, port)
 }

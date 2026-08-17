@@ -278,6 +278,10 @@ export function FridaArchInfo(arg1) {
   return window['go']['main']['App']['FridaArchInfo'](arg1);
 }
 
+export function FridaCommands(arg1, arg2, arg3) {
+  return window['go']['main']['App']['FridaCommands'](arg1, arg2, arg3);
+}
+
 export function FridaHost() {
   return window['go']['main']['App']['FridaHost']();
 }

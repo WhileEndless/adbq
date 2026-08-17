@@ -56,8 +56,7 @@ func (c *Client) ListFridaServers(ctx context.Context, serial string) ([]FridaSe
 	// Glob inside the dir (so names are basenames) instead of `ls | grep` —
 	// `grep` is absent on stripped ROMs. A non-matching glob just yields empty
 	// output. parseLsLine tolerates both ISO and BSD/toolbox date columns.
-	out, err := c.Shell(ctx, serial,
-		"cd "+shQuote(fridaServerDir)+" 2>/dev/null && ls -l *frida-server* 2>/dev/null")
+	out, err := c.Shell(ctx, serial, fridaListRemote())
 	if err != nil && strings.TrimSpace(out) == "" {
 		// An empty glob also exits non-zero, so tell "nothing matched" apart from
 		// "we could not ask" by checking the directory itself is reachable.
@@ -320,11 +319,7 @@ func (c *Client) StartFrida(ctx context.Context, serial, serverPath, iface strin
 	if iface == "" {
 		iface = "0.0.0.0"
 	}
-	q := shQuote(serverPath)
-	log := shQuote(fridaServerLogPath(port))
-	cmd := ": > " + log + " 2>/dev/null; " +
-		"chmod 755 " + q + " && " + q + " -l " + iface + ":" + strconv.Itoa(port) +
-		" -D </dev/null >>" + log + " 2>&1"
+	cmd := fridaStartRemote(serverPath, iface, port)
 
 	sctx, cancel := context.WithTimeout(ctx, fridaStartTimeout)
 	defer cancel()
@@ -355,6 +350,41 @@ func (c *Client) StartFrida(ctx context.Context, serial, serverPath, iface strin
 	}
 	return out, nil
 }
+
+// fridaStartRemote is the command that launches frida-server. The redirections
+// are load-bearing: a daemonized server inherits the adb shell's fds and adbd
+// holds the connection open until every holder is gone, so detaching all three
+// is what lets the call return, and the log file is what keeps the diagnostics
+// that used to vanish with them.
+func fridaStartRemote(serverPath, iface string, port int) string {
+	port = fridaPortOrDefault(port)
+	if iface == "" {
+		iface = "0.0.0.0"
+	}
+	q := shQuote(serverPath)
+	log := shQuote(fridaServerLogPath(port))
+	return ": > " + log + " 2>/dev/null; " +
+		"chmod 755 " + q + " && " + q + " -l " + iface + ":" + strconv.Itoa(port) +
+		" -D </dev/null >>" + log + " 2>&1"
+}
+
+// fridaLogRemote reads back what a start wrote.
+func fridaLogRemote(port int) string {
+	return "cat " + shQuote(fridaServerLogPath(port)) + " 2>/dev/null"
+}
+
+// fridaStopScript kills running servers with a procfs scan and the kill builtin,
+// because minimal ROMs ship neither pkill nor killall.
+const fridaStopScript = `for p in /proc/[0-9]*; do read c < "$p/comm" 2>/dev/null || continue; case "$c" in *frida-server*) kill "${p##*/}" 2>/dev/null; kill -9 "${p##*/}" 2>/dev/null;; esac; done; echo stopped`
+
+// fridaListRemote globs inside the server dir (so names come back as basenames)
+// rather than piping ls through grep, which stripped ROMs do not ship.
+func fridaListRemote() string {
+	return "cd " + shQuote(fridaServerDir) + " 2>/dev/null && ls -l *frida-server* 2>/dev/null"
+}
+
+// fridaChmodRemote makes a pushed server executable.
+func fridaChmodRemote(remote string) string { return "chmod 755 " + shQuote(remote) }
 
 // fridaStartFailure inspects the server log for a failure that prevented the
 // server from coming up at all, and returns a user-facing explanation ("" when
@@ -396,7 +426,7 @@ func fridaStartFailure(logOut, serverPath string) string {
 // available and falls back to the plain shell, so the log is still readable on
 // a device where su is denied.
 func (c *Client) FridaServerLog(ctx context.Context, serial string, port int) (string, error) {
-	cmd := "cat " + shQuote(fridaServerLogPath(port)) + " 2>/dev/null"
+	cmd := fridaLogRemote(port)
 	if out, _, err := c.ShellSU(ctx, serial, cmd); err == nil && strings.TrimSpace(out) != "" {
 		return out, nil
 	}
@@ -406,8 +436,7 @@ func (c *Client) FridaServerLog(ctx context.Context, serial string, port int) (s
 // StopFrida kills running frida-server processes. Uses a procfs scan + the kill
 // builtin instead of pkill/killall, which minimal ROMs don't ship.
 func (c *Client) StopFrida(ctx context.Context, serial string) (string, error) {
-	const script = `for p in /proc/[0-9]*; do read c < "$p/comm" 2>/dev/null || continue; case "$c" in *frida-server*) kill "${p##*/}" 2>/dev/null; kill -9 "${p##*/}" 2>/dev/null;; esac; done; echo stopped`
-	out, _, err := c.ShellSU(ctx, serial, script)
+	out, _, err := c.ShellSU(ctx, serial, fridaStopScript)
 	return out, err
 }
 

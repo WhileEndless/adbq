@@ -46,6 +46,10 @@ type FridaSessionInfo struct {
 	StartedAt  int64  `json:"startedAt"`
 	Status     string `json:"status"` // running|ended|error
 	StatusNote string `json:"statusNote,omitempty"`
+	// Commands is what this session runs on this computer, so the UI can show it
+	// while the session is live (CLAUDE.md §4.1). Empty for sessions adopted
+	// after a restart, where the driver invocation is no longer known.
+	Commands FridaSessionCommands `json:"commands"`
 }
 
 // FridaScriptArg is one script to load (name + JS source).
@@ -191,6 +195,7 @@ func StartFridaSession(ctx context.Context, c *Client, rt FridaRuntime, id, seri
 		info: FridaSessionInfo{
 			ID: id, Serial: serial, Package: pkg, Mode: mode,
 			Runtime: rt.FridaVersion, StartedAt: time.Now().UnixMilli(), Status: "running",
+			Commands: FridaSessionCommandsFor(py, driverPath, jobPath, pkg, mode, len(scripts), job.RemoteAddress),
 		},
 		cmd:     cmd,
 		stdin:   stdin,
