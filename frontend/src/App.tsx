@@ -2,7 +2,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../wailsjs/go/models';
 import * as API from '../wailsjs/go/main/App';
 import {Icon} from './icons';
-import {Badge, CodeBlock, ConfirmHost, IconBtn, Modal, PromptHost, ToastHost, confirmDialog, showToast, promptDialog, useTheme, ThemeMode} from './ui';
+import {Badge, CodeBlock, CommandPreview, ConfirmHost, IconBtn, Modal, PromptHost, ToastHost, confirmDialog, showToast, promptDialog, useTheme, ThemeMode} from './ui';
 import {invalidateJadxInfo, jadxInfo} from './lib/jadx';
 import {EventsOn} from '../wailsjs/runtime/runtime';
 import {StoreProvider} from './store';
@@ -328,6 +328,7 @@ function AppInner() {
         <div className='field'>
           <label>Address</label>
           <input className='input mono' value={connectAddr} onChange={e => setConnectAddr(e.target.value)} placeholder='192.168.1.10:5555'/>
+          <ConnectCommand addr={connectAddr}/>
         </div>
         <div className='muted' style={{marginTop: 10, fontSize: 11}}>
           Device must already be paired (developer options → Wireless debugging) or have ADB over network enabled.
@@ -476,6 +477,21 @@ function Sidebar({device, screen, setScreen, counts}:{device?: adb.Device; scree
       </div>
     </aside>
   );
+}
+
+// ConnectCommand shows the `adb connect` the dialog will run, live as the
+// address is typed. From Go like every other command (CLAUDE.md §4.1).
+function ConnectCommand({addr}: {addr: string}) {
+  const [cmds, setCmds] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    if (!addr.trim()) { setCmds([]); return; }
+    API.ConnectCommands(addr.trim())
+      .then(c => { if (live) setCmds(c.connect ?? []); })
+      .catch(() => { if (live) setCmds([]); });
+    return () => { live = false; };
+  }, [addr]);
+  return <CommandPreview commands={cmds} defaultOpen/>;
 }
 
 function Settings({open, onClose, themeMode, setTheme, accent, setAccent}:{open: boolean; onClose:()=>void; themeMode: ThemeMode; setTheme:(t:ThemeMode)=>void; accent: string; setAccent:(c:string)=>void}) {

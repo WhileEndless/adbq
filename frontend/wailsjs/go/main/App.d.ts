@@ -63,6 +63,8 @@ export function ClipboardSet(arg1:string,arg2:string):Promise<string>;
 
 export function CloseShell(arg1:string):Promise<void>;
 
+export function ConnectCommands(arg1:string):Promise<adb.ConnectCommands>;
+
 export function ConnectTCP(arg1:string):Promise<string>;
 
 export function CreateAVD(arg1:adb.AVDSpec):Promise<adb.AVD>;

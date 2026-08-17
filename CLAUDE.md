@@ -129,10 +129,18 @@ adbq bir adb sarmalayıcısıdır; kullanıcı bir düğmeye bastığında cihaz
 - Komut metnini **backend üretir** (`Commands []string` / `…Plan` / `StepPreview`);
   frontend'de elle string birleştirilmez — yanlış komut göstermek, hiç
   göstermemekten kötüdür.
-- Komutu üreten fonksiyon **saf ve birim testli** olur.
+- Komutu üreten fonksiyon **saf ve birim testli** olur: `CommandRenderer` alır,
+  komutun yazımını `internal/adb/command_text.go` kararlaştırır
+  (`DeviceCommandText` / `ShellCommandText` / `HostCommandText`).
+- Eylemin çalıştırdığı uzak komut, önizlemenin okuduğu **aynı fonksiyondan**
+  gelir (ör. `appClearRemote`, `rmRemote`, `iptFlushCmd`, `fridaStartRemote`) —
+  aksi hâlde önizleme, eylemin bir anlatımı olur ve zamanla ondan ayrışır.
 - Yıkıcı/geri alınamaz eylemlerde komut **onay diyaloğunda** görünür.
 - Akan işlemlerde (capture, logcat, frida-server) komut panelde **canlı** durur.
 - Metin terminale yapıştırıldığında çalışmalıdır; sır/token içermez.
+- Gösterim tek bir kontrolden geçer: `CommandPreview` (kapanır/açılır, tamamını
+  kopyalar). Frontend elle komut kurmaz; backend cevap verene kadar gösterilecek
+  komut yoktur.
 
 Yeni bir cihaz eylemi, komut gösterimi olmadan tamamlanmış sayılmaz.
 Desen, envanter ve geriye dönük fazlı plan: [`docs/command-visibility.md`](docs/command-visibility.md).

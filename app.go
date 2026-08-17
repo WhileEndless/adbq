@@ -941,8 +941,13 @@ func (a *App) ConnectTCP(addr string) (string, error) {
 	return a.client.Connect(ctx, addr)
 }
 func (a *App) DisconnectDevice(addr string) (string, error) { return a.client.Disconnect(a.ctx, addr) }
-func (a *App) GetStats(serial string) (*adb.Stats, error)   { return a.client.GetStats(a.ctx, serial) }
-func (a *App) ADBVersion() (string, error)                  { return a.client.ServerVersion(a.ctx) }
+
+// ConnectCommands renders the connect/disconnect pair for a Wi-Fi address.
+func (a *App) ConnectCommands(addr string) adb.ConnectCommands {
+	return adb.ConnectCommandsFor(addr)
+}
+func (a *App) GetStats(serial string) (*adb.Stats, error) { return a.client.GetStats(a.ctx, serial) }
+func (a *App) ADBVersion() (string, error)                { return a.client.ServerVersion(a.ctx) }
 
 // ─── Logcat streaming via events ────────────────────────────────────────
 

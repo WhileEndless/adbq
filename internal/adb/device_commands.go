@@ -73,6 +73,25 @@ func (c *Client) DeviceCommandsFor(ctx context.Context, serial string, tcpipPort
 	return DeviceCommandsFor(serial, tcpipPort, recordSeconds, scrcpy, c.Renderer(ctx, serial))
 }
 
+// ConnectCommands is the pair behind the Wi-Fi connect dialog. Both are
+// untargeted: they name the address rather than a serial, because the serial is
+// what they produce.
+type ConnectCommands struct {
+	Connect    []string `json:"connect"`
+	Disconnect []string `json:"disconnect"`
+}
+
+// ConnectCommandsFor renders them for one address.
+func ConnectCommandsFor(addr string) ConnectCommands {
+	if addr == "" {
+		return ConnectCommands{}
+	}
+	return ConnectCommands{
+		Connect:    []string{DeviceCommandText("", "connect", addr)},
+		Disconnect: []string{DeviceCommandText("", "disconnect", addr)},
+	}
+}
+
 // StreamCommands is a running stream's command plus the one that clears what it
 // has collected — the shape the log pane needs.
 type StreamCommands struct {

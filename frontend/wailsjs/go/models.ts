@@ -679,6 +679,20 @@ export namespace adb {
 	        this.sourceSha = source["sourceSha"];
 	    }
 	}
+	export class ConnectCommands {
+	    connect: string[] | null;
+	    disconnect: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connect = source["connect"];
+	        this.disconnect = source["disconnect"];
+	    }
+	}
 	export class Connection {
 	    proto: string;
 	    local: string;

@@ -122,6 +122,10 @@ export function CloseShell(arg1) {
   return window['go']['main']['App']['CloseShell'](arg1);
 }
 
+export function ConnectCommands(arg1) {
+  return window['go']['main']['App']['ConnectCommands'](arg1);
+}
+
 export function ConnectTCP(arg1) {
   return window['go']['main']['App']['ConnectTCP'](arg1);
 }
