@@ -235,3 +235,55 @@ func writeTestZip(t *testing.T, dst string, files map[string]string) {
 		t.Fatal(err)
 	}
 }
+
+// The macOS stub at /usr/bin/java answers `-version` whenever some JDK is
+// registered, so probing alone accepts it — and then it hangs as a child of a
+// GUI app with no console instead of failing, which is how a launch reported
+// success while no window ever appeared. Only a real Java home is accepted.
+func TestIsJavaHomeRejectsASystemPrefix(t *testing.T) {
+	if isJavaHome("/usr") {
+		t.Error("/usr is a system prefix, not a Java home")
+	}
+	if isJavaHome("") || isJavaHome(string(filepath.Separator)) {
+		t.Error("an empty path and the filesystem root are never Java homes")
+	}
+
+	// A directory that looks like a real runtime: bin/java plus the release
+	// file every JDK since 9 ships.
+	home := t.TempDir()
+	bin := filepath.Join(home, "bin", javaExe())
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if isJavaHome(home) {
+		t.Error("bin/java alone does not make a Java home — that is exactly the stub's shape")
+	}
+	if err := os.WriteFile(filepath.Join(home, "release"), []byte("JAVA_VERSION=\"17\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !isJavaHome(home) {
+		t.Error("a directory with bin/java and release is a Java home")
+	}
+}
+
+func TestResolveJavaRejectsAJavalessSetting(t *testing.T) {
+	// A user-set path that is not a runtime must not be accepted just because
+	// the user typed it.
+	dir := t.TempDir()
+	if bin, _, _, err := resolveJava(filepath.Join(dir, "nope"), ""); err == nil && bin == filepath.Join(dir, "nope") {
+		t.Error("a path that does not exist must not be used as the runtime")
+	}
+}
+
+func TestInstalledJavaCandidatesArePlausible(t *testing.T) {
+	// The list is generic — it must not be empty of shape, and every entry must
+	// end in the platform's java executable.
+	for _, p := range installedJavaCandidates() {
+		if filepath.Base(p) != javaExe() {
+			t.Errorf("candidate %q does not end in %q", p, javaExe())
+		}
+	}
+}

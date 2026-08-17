@@ -8,6 +8,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 // JadxOpenPlan is what opening the package in jadx would do, in full, before
@@ -138,14 +140,71 @@ func (c *Client) OpenInJadx(ctx context.Context, serial, pkg string, info JadxIn
 	cmd := exec.Command(info.Bin, staged.Files...)
 	cmd.Dir = staged.Dir
 	cmd.Env = jadxEnv(info.Java)
+
+	// The launcher's output is read, not discarded. A GUI process that dies on
+	// startup says why on stderr, and throwing that away is how a launch that
+	// produced no window still reported success.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	cmd.Stdout, cmd.Stderr = pw, pw
 	if err := cmd.Start(); err != nil {
+		pr.Close()
+		pw.Close()
 		return "", fmt.Errorf("could not launch jadx: %w", err)
 	}
-	// Release the child so it does not linger as a zombie once it exits; adbq
-	// has no further interest in it.
-	go func() { _ = cmd.Wait() }()
+	// Only the child holds the write end now, so the reader sees EOF when it
+	// exits.
+	pw.Close()
+
+	var mu sync.Mutex
+	var head []string
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		sc := LineScanner(pr)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			mu.Lock()
+			if line != "" && len(head) < jadxLaunchLogLines {
+				head = append(head, line)
+			}
+			mu.Unlock()
+		}
+		pr.Close()
+	}()
+
+	// Draining continues for the process's whole life: a full pipe would
+	// otherwise block the child once its log outgrew the buffer.
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+
+	select {
+	case werr := <-exited:
+		<-drained
+		mu.Lock()
+		why := strings.Join(head, "; ")
+		mu.Unlock()
+		if why == "" {
+			why = "no output"
+		}
+		return "", fmt.Errorf("jadx exited immediately instead of opening a window: %s (%v)", why, werr)
+	case <-time.After(jadxLaunchGrace):
+		// Still running, which for a GUI process means it is up.
+	}
 	return staged.Dir, nil
 }
+
+const (
+	// jadxLaunchGrace is how long a launch is watched before it counts as up.
+	// Long enough for a broken invocation to die and be reported, short enough
+	// not to make the button feel stuck.
+	jadxLaunchGrace = 2 * time.Second
+	// jadxLaunchLogLines bounds what is kept from the launcher's output for an
+	// error message.
+	jadxLaunchLogLines = 6
+)
 
 // jadxEnv points the launcher at the Java adbq probed, so the runtime that was
 // checked is the runtime that runs. Launched from Finder or the Dock the app

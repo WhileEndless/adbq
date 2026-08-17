@@ -241,17 +241,21 @@ func jadxVersionOf(bin string) string {
 // ─── Java ──────────────────────────────────────────────────────────────────
 
 // resolveJava finds a Java runtime jadx can use, in order of how much the user
-// has said about it: an explicit setting, then the environment, then the JDK
-// Android Studio ships — which is the one machine-wide Java many Android
-// developers actually have.
+// has said about it: an explicit setting, then the places a real JDK actually
+// installs itself, then the JDK Android Studio ships — which is the one
+// machine-wide Java many Android developers have.
+//
+// Only a runtime that lives inside a Java home is accepted. That rules out the
+// macOS stub at /usr/bin/java, which is not a runtime but a shim that asks the
+// user to install one: it answers `-version` when a JDK happens to be
+// registered, so probing alone accepts it, and then hangs as a child of a GUI
+// app with no console instead of failing. It also has no usable home — deriving
+// one gives `/usr`, which the launcher would pass on as JAVA_HOME.
 func resolveJava(userPath, studioPath string) (bin, version, source string, err error) {
 	type cand struct{ path, source string }
 	var cands []cand
 	if p := strings.TrimSpace(userPath); p != "" {
 		cands = append(cands, cand{javaBinOf(p), "user"})
-	}
-	if p, ok := lookTool(javaExe()); ok {
-		cands = append(cands, cand{p, "path"})
 	}
 	if h := os.Getenv("JAVA_HOME"); h != "" {
 		cands = append(cands, cand{filepath.Join(h, "bin", javaExe()), "JAVA_HOME"})
@@ -264,13 +268,27 @@ func resolveJava(userPath, studioPath string) (bin, version, source string, err 
 	for _, p := range studioJavaCandidates(studioPath) {
 		cands = append(cands, cand{p, "studio"})
 	}
+	for _, p := range installedJavaCandidates() {
+		cands = append(cands, cand{p, "installed"})
+	}
+	// PATH comes last: on macOS it is where the stub lives, and by this point a
+	// real JDK has had every chance to be found. It still matters on systems
+	// where Java is only on PATH.
+	if p, ok := lookTool(javaExe()); ok {
+		cands = append(cands, cand{p, "path"})
+	}
 
-	var tooOld string
+	var tooOld, stubbed string
 	for _, c := range cands {
 		if c.path == "" {
 			continue
 		}
 		if fi, statErr := os.Stat(c.path); statErr != nil || fi.IsDir() {
+			continue
+		}
+		if !isJavaHome(javaHomeOf(c.path)) {
+			// Almost always the macOS stub. Remember it so the error can say so.
+			stubbed = c.path
 			continue
 		}
 		v, major := javaVersion(c.path)
@@ -285,10 +303,72 @@ func resolveJava(userPath, studioPath string) (bin, version, source string, err 
 		}
 		return c.path, v, c.source, nil
 	}
-	if tooOld != "" {
+	switch {
+	case tooOld != "":
 		return "", "", "", fmt.Errorf("the Java on this computer is %s; jadx needs %d or newer — install a newer JDK or set the Java path in Settings", tooOld, jadxMinJava)
+	case stubbed != "":
+		return "", "", "", fmt.Errorf("%s is a stub, not a Java runtime, and no real JDK %d+ was found — install one (Android Studio ships one) or set the Java path in Settings", stubbed, jadxMinJava)
 	}
 	return "", "", "", fmt.Errorf("no Java %d+ runtime found — install one (Android Studio ships one) or set the Java path in Settings", jadxMinJava)
+}
+
+// isJavaHome reports whether dir looks like a Java home rather than a system
+// prefix that happens to contain a java executable. A home always ships the
+// runtime's own files next to bin/.
+func isJavaHome(dir string) bool {
+	if dir == "" || dir == string(filepath.Separator) {
+		return false
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "bin", javaExe())); err != nil || fi.IsDir() {
+		return false
+	}
+	// `release` is present in every JDK/JRE since 9; `lib/modules` and the older
+	// `jre/lib/rt.jar` cover the rest.
+	for _, marker := range []string{"release", filepath.Join("lib", "modules"), filepath.Join("jre", "lib", "rt.jar")} {
+		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// installedJavaCandidates lists where a real JDK puts itself on each platform.
+// These are generic locations, not this machine's: whoever installs adbq gets
+// the same search.
+func installedJavaCandidates() []string {
+	var homes []string
+	switch runtime.GOOS {
+	case "darwin":
+		homes = append(homes, globDirs("/Library/Java/JavaVirtualMachines/*/Contents/Home")...)
+		if home, err := os.UserHomeDir(); err == nil {
+			homes = append(homes, globDirs(filepath.Join(home, "Library", "Java", "JavaVirtualMachines", "*", "Contents", "Home"))...)
+		}
+		// Homebrew keeps its JDKs under the prefix rather than registering them.
+		for _, prefix := range []string{"/opt/homebrew/opt", "/usr/local/opt"} {
+			homes = append(homes, globDirs(prefix+"/openjdk*/libexec/openjdk.jdk/Contents/Home")...)
+			homes = append(homes, globDirs(prefix+"/openjdk*")...)
+		}
+	case "windows":
+		for _, env := range []string{"ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"} {
+			if v := os.Getenv(env); v != "" {
+				for _, vendor := range []string{"Java", "Eclipse Adoptium", "Microsoft", "Zulu", "Amazon Corretto"} {
+					homes = append(homes, globDirs(filepath.Join(v, vendor, "*"))...)
+				}
+			}
+		}
+	default:
+		homes = append(homes, globDirs("/usr/lib/jvm/*")...)
+		homes = append(homes, globDirs("/usr/lib64/jvm/*")...)
+		homes = append(homes, globDirs("/opt/java/*")...)
+	}
+	// Newest first, so a machine with several JDKs does not get pinned to the
+	// oldest one by directory order.
+	sort.Slice(homes, func(i, j int) bool { return homes[i] > homes[j] })
+	out := make([]string, 0, len(homes))
+	for _, h := range homes {
+		out = append(out, filepath.Join(h, "bin", javaExe()))
+	}
+	return out
 }
 
 func javaExe() string {
