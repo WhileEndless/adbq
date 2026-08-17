@@ -28,8 +28,9 @@ Uygulama kuralları:
 - **K2 — Yıkıcı/geri alınamaz eylemlerde komut, onay diyaloğunda görünür.**
   (kurulum, kaldırma, flush, remount, reboot, kural silme, dosya silme…)
   Kullanıcı "Evet" demeden önce ne çalışacağını okur.
-- **K3 — Sürekli/akan işlemlerde komut panelde görünür.** (capture, logcat,
-  frida-server, scrcpy) Metin, o an geçerli parametrelerle **canlı** güncellenir.
+- **K3 — Sürekli/akan işlemlerde komut panelden **bir tık** ötede durur.**
+  (capture, logcat, processes, frida-server) Araç çubuğundaki `CommandChip`
+  o an geçerli parametrelerle **canlı** günceller; ekranı kaplamaz.
 - **K4 — Çok adımlı işlemlerde tüm adımlar listelenir**, tek satır değil.
   Örnek: `.apks` dışa aktarımı `pm path` + N adet `pull` + paketleme.
 - **K5 — Salt-okunur listeleme çağrıları için zorunlu değildir**, ama tercih
@@ -37,20 +38,18 @@ Uygulama kuralları:
 - **K6 — Gizli veri sızdırma.** Komut metni cihaz seri numarası içerir; token,
   parola, sertifika özel anahtarı **içermez** — bunlar `<redacted>` ile
   gösterilir.
-- **K7 — Kopyalanabilir olmalı.** `CodeBlock` bileşeni tıkla-kopyala sağlar;
+- **K7 — Kopyalanabilir olmalı.** `CommandPreview`/`CommandChip`/toast eylemi
+  her hâlde tamamını kopyalar;
   gösterilen metin terminale yapıştırıldığında **çalışır** olmalıdır (host
   yolları tırnaklanır, cihaz tarafı komutlar `adb -s <serial> shell '…'`
   biçiminde tam yazılır).
 
 ## 2. Standart desen
 
-**Frontend** (`frontend/src/ui.tsx: CodeBlock`):
+**Frontend** (`frontend/src/ui.tsx: CommandPreview`):
 
 ```tsx
-<div style={{marginTop: 10, fontSize: 11}}>
-  <span className='muted'>Underlying command (click to copy):</span>{' '}
-  <CodeBlock multiline>{plan.commands.join('\n')}</CodeBlock>
-</div>
+<CommandPreview commands={cmds?.clear ?? []} label='Clear data'/>
 ```
 
 **Backend** — eylemi yapan fonksiyonun yanında, aynı girdiyle komutu üreten
@@ -68,69 +67,149 @@ Onay gerektiren eylemlerde ayrıca bir **plan** tipi olur: ne yapılacağını,
 neyin atlandığını ve komutu birlikte döndürür (`ApkInstallPlan`,
 `StepPreview`, `TcpdumpAutoPlan` aynı fikrin örnekleri).
 
+### 2.0. Komutun yazımı tek yerde kararlaştırılır
+
+`internal/adb/command_text.go`:
+
+| Yardımcı | Ne üretir |
+|---|---|
+| `DeviceCommandText(serial, args…)` | `adb -s <serial> <args…>` |
+| `ShellCommandText(serial, remote)` | `adb -s <serial> shell '<remote>'` — uzak komut **tek argüman** kalır |
+| `HostCommandText(bin, args…)` | bu bilgisayarda çalışan komut (emulator, jadx, frida, scrcpy) |
+| `quoteArg(s)` | yalnızca kabuğun bozacağı argümanı tırnaklar |
+| `CommandRenderer` | `func(remote string, asRoot bool) string` — builder'lar `*Client` yerine bunu alır |
+
+`Client.Renderer(ctx, serial)` cihazın **kabul ettiği** `su` biçimiyle render
+eder (`rootWrap`), yani gösterilen satır çalışan satırdır. `PlainRenderer`
+cihaza gitmeyen önizlemeler ve testler için `su -c` biçimini kullanır.
+
+Bir builder böyle yazılır: saf fonksiyon + renderer alır, `*Client` üzerinde
+aynı adlı ince bir metot cihaz farkındalığını ekler. Örnek:
+`AppCommandsFor`, `FileCommandsFor`, `IptablesCommandsFor`, `NetCommandsFor`,
+`DeviceCommandsFor`, `FridaCommandsFor`.
+
+**K7 kabuğa sorularak doğrulanır.** Birim testleri dizeyi dizeyle karşılaştırır;
+yalnızca bir kabuğun yakalayacağı tırnaklama hatası hepsinden geçer. Bu yüzden
+`command_device_test.go` (opt-in, `ADBQ_PROBE_SERIAL`) salt-okunur önizlemeleri
+`sh -c` ile **çalıştırır**, ve root render'ının cihazın kabul ettiği `su` biçimi
+olduğunu `id` çıktısının uid=0 olmasıyla teyit eder. Testin yazdığı hiçbir şey
+cihazı değiştirmez — bir önizlemeyi doğrulamak için cihaza kurulum yapan test,
+aradığı hatadan kötü olurdu.
+
+**Aynı dizeyi hem çalıştıran hem gösteren tek kaynak.** Eylemin çalıştırdığı
+uzak komut, artık kod içinde satır olarak değil bir fonksiyon olarak durur
+(`appClearRemote`, `rmRemote`, `iptFlushCmd`, `fridaStartRemote`,
+`hostsStrategies`, `cacertStrategies`, `flushDNSScript`…). Önizleme onu okur;
+böylece önizleme "eylemin anlatımı" değil, eylemin kendisi olur.
+
 Referans uygulamalar:
 
 | Yer | Ne gösteriyor |
 |---|---|
-| `screens/Network.tsx` (proxy) | `settings put global http_proxy …` |
+| `screens/Network.tsx` (proxy) | `settings put global http_proxy …` — metin `adb.ProxyCommand`'dan gelir |
 | `screens/Network.tsx` (capture) | tam `tcpdump` komut satırı, parametreler değiştikçe canlı |
-| `screens/Apps.tsx` (APK export/install) | `pm path` + `pull` listesi; onayda `install-multiple` |
+| `screens/Apps.tsx` (APK bölümü) | `pm path` + `pull` listesi; `JAVA_HOME=… jadx-gui <girdiler>`; binary toplama; kurulum onayında `install-multiple` |
+| `screens/Emulators.tsx` (sil / rootAVD) | onay diyaloğunun içinde, backend'den gelen komut |
+| `screens/Iptables.tsx` (kural ekle) | tablo + `-A`/`-I N` + `su` biçimi, form değiştikçe backend'den |
+| `screens/Files.tsx` (sil) | onay diyaloğunda `rm -rf`, Root anahtarı açıksa `su` sarmalayıcısıyla |
+| `screens/Frida.tsx` (oturum) | çalışan sürücü satırı **ve** eşdeğer `frida` CLI çağrısı (etiketli) |
+
+### 2.1. Gösterim: üç yer, üçü de tanımlı
+
+Kural komutun **ulaşılabilir** olması; her zaman ekranda durması değil. Her
+düğmenin altına bir komut bloğu koymak paneli kabuk duvarına çevirir — ve
+insanların o blokları görmezden gelmeyi öğrenmesinin yolu tam olarak budur.
+
+Bu yüzden komut yalnızca şu üç yerde görünür (`frontend/src/ui.tsx`):
+
+| Yer | Bileşen | Ne zaman |
+|---|---|---|
+| Diyaloğun içinde | `CommandPreview` (`defaultOpen`) | onay diyalogları (K2), `CommandSheet`, prompt ipucu, kurulum/oluşturma modalleri |
+| Ait olduğu şeyin yanında | `CommandChip` | araç çubukları, kart başlıkları, tablo satırları — tek terminal simgesi; hover'da komut, tıklayınca `CommandSheet` |
+| Olan biten bildirildiğinde | `commandToast(cmds)` | "screenshot kaydedildi", "scrcpy başlıyor", "proxy uygulandı" — komutu kopyalama eylemi toast'ta durur, sonra kaybolur |
+
+`CommandSheet`, bir panelin **bütün** eylemlerini komutlarıyla listeler; bilerek
+açıldığı için eksiksiz olmayı göze alabilir. Panelin kendisi panel olarak kalır.
+
+Aynı sebeple frontend'de **elle komut kurulmaz**: backend cevap verene kadar
+gösterilecek komut yoktur (`CommandPreview` ve `CommandChip` boş listede hiç
+render etmez). Yaklaşık bir satır göstermek, yanlış komut göstermenin yoludur.
+
+**Yapılmaması gereken** (bir kez yapıldı, geri alındı): akan panellere ve
+düğme altlarına `defaultOpen` blok serpmek. Processes tablosunun üstündeki
+komut bloğu, Overview'un "Quick actions" kartına eklenen ek satırlar ve Frida'nın
+"Commands" kartı bu hatanın örnekleriydi; hepsi chip'e dönüştü.
 
 ---
 
 ## 3. Geriye dönük durum envanteri
 
-Durum: ✅ var · ◐ kısmi (bazı eylemlerde) · ✗ yok
+Durum: ✅ var · ◐ kısmi (bazı eylemlerde) · ✗ yok — bu tabloda artık ✗ yok.
 
 | Ekran | Eylemler | Durum |
 |---|---|---|
-| Network — proxy | `settings put/delete global http_proxy` | ✅ |
-| Network — capture | `tcpdump` başlat/durdur/pull | ✅ |
+| Network — proxy | `settings put global http_proxy` | ✅ |
+| Network — capture (dosyaya) | `nohup tcpdump … -w`, `kill -INT` (pcap başlığı için), `pull` | ✅ |
+| Network — tcpdump kurulumu | `push`, `chmod 755`, `--version` yoklaması | ✅ |
+| Network — CA sertifikası | push + `chmod`, dört kalıcı strateji, tmpfs overlay | ✅ |
+| Network — hosts | staging, beş strateji, md5 doğrulama, Magisk modülü, DNS flush | ✅ |
+| Network — DNS/bağlantılar | `ndc resolver …`, `getprop`, `/proc/net/*` | ✅ |
 | Apps — APK dışa aktar / kur | `pm path`, `pull`, `install-multiple` | ✅ |
-| Network — CA sertifikası | remount, `cp`, hash, reboot | ✗ |
-| Network — hosts | remount, `cat >`, DNS flush | ✗ |
-| Network — DNS/bağlantılar | `ss`, `getprop`, `ndc resolver flushnet` | ✗ |
-| Apps — kaldır/temizle/durdur/başlat | `pm uninstall`, `pm clear`, `am force-stop`, `monkey` | ✗ |
-| Apps — uygulama verisi dışa aktar | `tar -czf … && pull` | ✗ |
-| Files | `ls -l`, `rm`, `mkdir`, `push`, `pull` | ✗ |
-| Forwards | `adb forward/reverse --list/--remove` | ✗ |
-| Iptables | `iptables …` / `nft …` (Undo/Export dahil) | ◐ (kural metni var, tam komut yok) |
-| Frida — sunucu | `chmod`, başlatma satırı, `pkill`, log `cat` | ◐ (log paneli var) |
-| Frida — kurulum | push, `chmod`, arşiv açma | ✗ |
-| Frida — oturum | host tarafı `frida` çağrısı, `adb forward` | ✗ |
-| Logcat | `logcat -v … --pid=…` | ✗ |
-| Processes | `ps -A` / procfs okuma | ✗ |
-| Overview | `reboot`, `tcpip`, `screenrecord`, `screencap`, `scrcpy` | ✗ |
-| Profiles | uygulanacak adımların komutları | ◐ (`StepPreview` var, komut metni yok) |
-| Capture (live) | `tcpdump` + akış | ◐ (Network'te var, burada yok) |
+| Apps — jadx ile aç | `pm path`, `pull`, `jadx-gui <girdiler>` | ✅ |
+| Apps — binary indir | `pm path`, `pull`, `pull …/lib` | ✅ |
+| Apps — kaldır/temizle/durdur/başlat | `pm uninstall`, `pm clear`, `am force-stop`, `monkey` | ✅ |
+| Apps — uygulama verisi dışa aktar | root `tar` + `pull` + `rm` | ✅ |
+| Files | `ls -lAp`, `rm [-rf]`, `mkdir -p`, `push`+`chmod`/`chown`, `pull` | ✅ |
+| Forwards | `forward`/`reverse` ekle, `--remove`, `--list` | ✅ |
+| Iptables | `-A`/`-I N`/`-D`/`-F`/`-P`/`-N`/`-X`, save, restore, undo | ✅ |
+| Emulators — başlat/durdur | `emulator -avd …`, `adb -s … emu kill` (satır chip'inde) | ✅ |
+| Emulators — AVD oluştur/sil | `avdmanager create/delete avd` | ✅ |
+| Emulators — donanım düzenle | yazılacak `config.ini` anahtarları | ✅ |
+| Emulators — system image | `sdkmanager <pkg>` / `--uninstall` | ✅ |
+| Emulators — rootAVD | `bash rootAVD.sh <ramdisk> [restore]` | ✅ |
+| Overview — reboot/power off/adbd | `reboot [mode]`, `reboot -p`, `stop/start adbd` | ✅ |
+| Overview — Wi-Fi adb / bağlan | `tcpip 5555`, `adb connect <addr>` | ✅ |
+| Overview — ekran görüntüsü/kayıt/scrcpy | `exec-out screencap -p`, `screenrecord`+`pull`, `scrcpy` | ✅ |
+| Overview — root testi | `which su; ls -d …magisk; magisk -V` | ✅ |
+| Logcat | `logcat -v threadtime --pid=… -T … '*:V'`, `logcat -c` | ✅ |
+| Processes | `/proc` taraması (root ya da shell — hangisiyse) | ✅ |
+| Capture (live) | `exec-out` içinde root'lu `tcpdump -U -s 0 -w -` | ✅ |
+| Frida — kurulum | `push` + `chmod 755` | ✅ |
+| Frida — sunucu | başlatma satırı (`-D`, yönlendirmeler), procfs `kill`, log `cat` | ✅ |
+| Frida — oturum | çalışan sürücü + eşdeğer `frida` CLI çağrısı | ✅ |
+| Apps — "Start with Frida" | oturum öncesi gereksinimler: sunucu push/chmod + başlatma | ✅ |
+| Cihaz bağla/kes | `adb connect <adres>`, `adb disconnect <adres>` | ✅ |
+| Profiles | her adımın komutları, uygulanma sırasıyla | ✅ |
 | Shell | — (kullanıcı zaten komutu yazıyor) | yok sayılır |
 
-## 4. Fazlı yol haritası
+Kapsam dışı bırakılanlar — ve nedeni:
 
-Her faz kendi commit'i, yeşil build, `wails dev` ile görsel doğrulama.
-Sıra "yıkıcılık + kullanıcı kafa karışıklığı" önceliğine göre.
+- **Salt-okunur listelemelerin çoğu** (uygulama listesi, `dumpsys package`,
+  cihaz özellikleri, AVD listesi): K5 zorunlu tutmuyor; her satıra bir komut
+  eklemek paneli okunmaz hâle getirir. Etki yaratan eylemlerin hepsi listede.
+- **CA sertifikasının tmpfs overlay adımı ve DNS flush betiği** çok satırlı
+  betikler. Tek argüman olarak tırnaklanıp aynen gösteriliyorlar (kopyala
+  çalışır), ama katlanmış hâlde ilk satırları görünür.
+- **Ekran kaydının cihaz yolu** canlı çalışmada zaman damgası taşır; önizleme
+  sabit adı gösterir, aksi hâlde satır kopyalanabilir olmaz.
+- **jadx / rootAVD / frida-server / tcpdump indirmeleri** komut değil; onay
+  diyaloğunda kaynak + SHA-256 + lisans olarak gösterilir (§1.4). tcpdump'ın
+  *cihaz* tarafı (push + chmod + yoklama) aynı diyalogda komut olarak durur.
+- **AVD snapshot silme** ve **jadx/rootAVD kaldırma** host tarafında dosya
+  silmedir; adb komutu yoktur, onay diyaloğu yolu gösterir.
+- **Cihaz clipboard'u** (`cmd clipboard set-text`): arka uçta var, UI'da eylem
+  yok. Var olmayan bir eylemin komutunu göstermek gürültüdür — o yüzden
+  `DeviceCommands` alanı da kaldırıldı.
 
-### Faz A — Yıkıcı eylemler (en yüksek öncelik)
-Onay diyaloğuna komut eklenecek eylemler: `pm uninstall`, `pm clear`,
-`am force-stop`, Files `rm -r`, Iptables `flush` / policy / chain silme,
-`reboot`, CA sertifikası kurulumu (remount içerir), hosts yazımı.
-Backend: her biri için `…Plan()` ya da `…Command()` saf fonksiyonu + birim testi.
+## 4. Fazlı yol haritası — durum
 
-### Faz B — Uzun süren / akan işlemler
-Logcat, Processes, Capture (live), Frida sunucu başlatma, scrcpy, screenrecord.
-Panelde canlı komut metni; parametre değiştikçe güncellenir.
-Frida sunucu satırı zaten `frida.go` içinde üretiliyor — sadece
-dışa açılması gerekiyor.
+A–D fazları tamamlandı: yıkıcı eylemler onay diyaloğunda komutu gösteriyor,
+akan işlemler komutu panelde canlı tutuyor, dosya/ağ yardımcıları ve profil
+adımları komutlarını üretiyor. Bunların hepsi backend'de saf, birim testli
+builder'lardan geliyor.
 
-### Faz C — Dosya ve ağ yardımcıları
-Files (`ls`/`push`/`pull`/`mkdir`), Forwards, DNS flush, bağlantı listeleme,
-uygulama verisi dışa aktarma.
+Kalan (Faz E — genel altyapı, henüz yapılmadı):
 
-### Faz D — Profiller ve toplu işlemler
-`StepPreview`'a `command` alanı; profil uygulama önizlemesi her adımın
-komutunu gösterir. Iptables import/undo aynı mekanizmayı kullanır.
-
-### Faz E — Genel altyapı
 - `RunCommand`/`RunCommandRoot` üzerinden geçen her çağrının **son çalıştırılan
   komut** kaydı: cihaz başına dönen tampon, "Son komutlar" paneli
   (mevcut `scrollback.go` deseni izlenir).
@@ -141,7 +220,8 @@ komutunu gösterir. Iptables import/undo aynı mekanizmayı kullanır.
 ## 5. Yeni özellik eklerken kontrol listesi
 
 - [ ] Backend komutu üretiyor mu (frontend'de string birleştirme yok)?
-- [ ] Komut üreten fonksiyon saf ve birim testli mi?
+- [ ] Komut üreten fonksiyon saf ve birim testli mi (`CommandRenderer` alıyor mu)?
+- [ ] Eylemin çalıştırdığı uzak komut, önizlemenin okuduğu **aynı** fonksiyondan mı geliyor?
 - [ ] Yıkıcıysa onay diyaloğunda komut görünüyor mu?
 - [ ] Metin terminale yapıştırıldığında çalışıyor mu (tırnaklama, `-s <serial>`)?
 - [ ] Sır/token içermiyor mu?

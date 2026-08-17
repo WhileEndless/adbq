@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+    <img src="docs/assets/logo-light.png" alt="adbq" width="315">
+  </picture>
+</p>
+
 # adbq — ADB Yöneticisi
 
 [![release](https://img.shields.io/github/v/release/WhileEndless/adbq?include_prereleases&sort=semver)](https://github.com/WhileEndless/adbq/releases)
@@ -88,7 +95,7 @@ ikili (binary) olarak çalışır.
 |----|-------|-----|
 | **macOS** (Apple Silicon + Intel) | `adbq-macos-universal.zip` | Aç → `adbq.app`'i Uygulamalar'a sürükle |
 | **Windows** (x64) | `adbq-windows-amd64.zip` | Aç → `adbq.exe`'yi çalıştır |
-| **Linux** (x64) | `adbq-linux-amd64.tar.gz` | `tar -xzf … && ./adbq` |
+| **Linux** (x64) | `adbq-linux-amd64.tar.gz` | `tar -xzf … && adbq/adbq` — ya da simgeli menü girdisi için `adbq/install.sh` |
 
 Elinizdeki sürümü her an doğrulayın:
 

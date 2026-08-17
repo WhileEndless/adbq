@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, SearchInput, confirmDialog, showToast} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
 import {parseFilter} from '../lib/captureFilter';
 import {CapturePacket, useStore} from '../store';
@@ -38,6 +38,10 @@ const PRESETS: {label: string; bpf: string; hint: string}[] = [
 export function CaptureScreen({device}: {device: adb.Device}) {
   const store = useStore();
   const slice = store.getCapture(device.id);
+  // The tcpdump invocation this capture runs, rendered by Go for the interface
+  // and filter currently selected, and kept on screen while packets arrive
+  // (CLAUDE.md §4.1 K3).
+  const [cmd, setCmd] = useState<string[]>([]);
   const {iface, bpf, preset, displayFilter, maxPackets, packets, active, state} = slice;
 
   const [selected, setSelected] = useState<CapturePacket | null>(null);
@@ -67,6 +71,20 @@ export function CaptureScreen({device}: {device: adb.Device}) {
     API.ProbeTcpdump(device.id).then(td => { if (!cancelled) setTdAvailable(!!td?.available); }).catch(() => { if (!cancelled) setTdAvailable(false); });
     return () => { cancelled = true; clearInterval(t); };
   }, [device?.id]);
+
+  // Re-render the command as the interface or filter changes. Resolving
+  // tcpdump's path is a device call, so it is debounced rather than run per
+  // keystroke.
+  useEffect(() => {
+    if (!device?.id) { setCmd([]); return; }
+    let live = true;
+    const t = setTimeout(() => {
+      API.LiveCaptureCommand(device.id, iface, bpf)
+        .then(c => { if (live) setCmd(c || []); })
+        .catch(() => { if (live) setCmd([]); });
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [device?.id, iface, bpf, tdAvailable]);
 
   useEffect(() => {
     if (!tail || !listRef.current) return;
@@ -228,6 +246,7 @@ export function CaptureScreen({device}: {device: adb.Device}) {
         {active
           ? <button className='btn danger' onClick={stop}><Icon.Stop/>Stop</button>
           : <button className='btn primary' onClick={start} disabled={!device.root || tdAvailable === false}><Icon.Play/>Start</button>}
+        <CommandChip label='Live capture' commands={cmd}/>
         <button className='btn' onClick={save} disabled={!packets.length}><Icon.Download/>Save .pcap</button>
         <button className='btn sm' onClick={clearList} disabled={!packets.length}>Clear</button>
         <label style={{display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-subtle)'}}>

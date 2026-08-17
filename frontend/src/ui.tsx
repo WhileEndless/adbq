@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState, useCallback} from 'react';
 import {Icon} from './icons';
-import {ToastMsg} from './types';
+import {ToastAction, ToastMsg} from './types';
 
 // ─── Theme tokens (light/dark/system) ──────────────────────────────────────
 
@@ -189,6 +189,8 @@ export interface PromptOpts {
   label: string;
   defaultValue?: string;
   placeholder?: string;
+  /** Shown under the field — the place for the command the answer will run. */
+  hint?: React.ReactNode;
 }
 export function promptDialog(opts: PromptOpts): Promise<string | null> {
   if (!promptFn) {
@@ -228,6 +230,7 @@ export function PromptHost() {
                onChange={e => setValue(e.target.value)}
                onKeyDown={e => e.key === 'Enter' && finish(value)}/>
       </div>
+      {opts.hint}
     </Modal>
   );
 }
@@ -404,6 +407,167 @@ export function CodeBlock({children, multiline}: {children: string; multiline?: 
       {children}
       {copied && <span style={{marginLeft: 8, color: 'var(--ok)', fontSize: 10}}>copied!</span>}
     </span>
+  );
+}
+
+// ─── CommandPreview: the command, without taking over the panel ─────────
+//
+// Every device action has to be able to show the command it runs
+// (CLAUDE.md §4.1), but a multi-line block per action crowds out everything
+// else on a panel that has several of them. Collapsed this is one line: what
+// runs, and how many steps there are. Expanding shows all of it, and copying
+// takes the whole thing either way — the rule is that the command is always
+// reachable, not that it is always in the way.
+// defaultOpen is for the panels CLAUDE.md §4.1 requires to keep the command
+// live — a running capture, a stream, a confirm dialog for something
+// irreversible. Those start expanded and can be collapsed; everything else
+// starts collapsed and can be expanded. The control is the same either way, so
+// copying works identically wherever a command appears.
+export function CommandPreview({commands, label = 'Command', defaultOpen}: {commands: string[]; label?: string; defaultOpen?: boolean}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  const [copied, setCopied] = useState(false);
+  const lines = (commands ?? []).filter(c => c.trim() !== '');
+  if (lines.length === 0) return null;
+  const all = lines.join('\n');
+
+  const copy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(all).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1100);
+    });
+  };
+
+  return (
+    <div style={{marginTop: 8}}>
+      <div onClick={() => setOpen(o => !o)}
+           title={open ? 'Hide the command' : 'Show the command'}
+           style={{
+             display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+             fontSize: 11, color: 'var(--text-dim)', userSelect: 'none',
+           }}>
+        <span style={{
+          display: 'inline-block', transition: 'transform .12s',
+          transform: open ? 'rotate(90deg)' : 'none', opacity: .7,
+        }}>›</span>
+        <span>{label}{lines.length > 1 ? ` · ${lines.length} steps` : ''}</span>
+        <span className='mono' style={{
+          flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap', opacity: open ? 0 : .55,
+        }}>{open ? '' : lines[0]}</span>
+        <button className='btn sm' onClick={copy} title='Copy every line'
+                style={{padding: '0 6px', fontSize: 10}}>
+          {copied ? 'copied!' : 'copy'}
+        </button>
+      </div>
+      {open && <div style={{marginTop: 6}}><CodeBlock multiline>{all}</CodeBlock></div>}
+    </div>
+  );
+}
+
+// ─── Where a command belongs ─────────────────────────────────────────────
+//
+// Every device action must be able to show its command (CLAUDE.md §4.1), but
+// "able to" is not "always on screen". A command block under every button turns
+// a panel into a wall of shell, which is how people learn to ignore them.
+//
+// So there are three placements, and only three:
+//
+//   1. Inside a dialog — a confirm the user is already reading, or a sheet they
+//      opened on purpose. That is where CommandPreview goes.
+//   2. A CommandChip next to the thing it belongs to: one small terminal glyph,
+//      clicked when someone wants it. Used in toolbars and panel headers.
+//   3. A toast action after a fire-and-forget action, so the command for the
+//      thing that just happened is one click away and then gone.
+//
+// Panels themselves stay clean.
+
+/** copyCommands puts every line on the clipboard as one block. */
+export function copyCommands(commands?: string[] | null): void {
+  const lines = (commands ?? []).filter(c => c.trim() !== '');
+  if (lines.length === 0) return;
+  void navigator.clipboard?.writeText(lines.join('\n'));
+}
+
+/**
+ * commandToast turns "here is what happened" into "here is what ran, if you
+ * want it". Spread it into a toast's actions; it contributes nothing when there
+ * is no command, so callers need no conditionals.
+ */
+export function commandToast(commands?: string[] | null): ToastAction[] {
+  const lines = (commands ?? []).filter(c => c.trim() !== '');
+  if (lines.length === 0) return [];
+  return [{
+    label: lines.length > 1 ? `Copy ${lines.length} commands` : 'Copy command',
+    onClick: () => { copyCommands(lines); showToast({title: 'Copied', body: lines[0], kind: 'ok', mono: true}); },
+  }];
+}
+
+export interface CommandGroup {
+  label: string;
+  commands?: string[] | null;
+  /** Optional one-liner explaining when this command runs. */
+  note?: string;
+}
+
+/**
+ * CommandSheet is the reference view: every action of one panel, with the
+ * command behind it. Opened deliberately, so it can afford to be complete.
+ */
+export function CommandSheet({open, onClose, title, groups}: {
+  open: boolean; onClose: () => void; title: string; groups: CommandGroup[];
+}) {
+  const shown = groups.filter(g => (g.commands ?? []).filter(c => c.trim() !== '').length > 0);
+  return (
+    <Modal open={open} onClose={onClose} width={760} title={`Commands · ${title}`}
+           footer={<button className='btn' onClick={onClose}>Close</button>}>
+      <div className='muted' style={{fontSize: 11.5, marginBottom: 12}}>
+        What adbq runs for each action here. Every line is complete — paste it into a
+        terminal to do the same thing by hand.
+      </div>
+      {shown.length === 0 && (
+        <div className='muted' style={{fontSize: 12, padding: 12}}>
+          Nothing to show yet — the commands appear once the device has answered.
+        </div>
+      )}
+      {shown.map(g => (
+        <div key={g.label} style={{paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid var(--border)'}}>
+          <CommandPreview commands={g.commands ?? []} label={g.label} defaultOpen/>
+          {g.note && <div className='subtle' style={{fontSize: 11, marginTop: 4}}>{g.note}</div>}
+        </div>
+      ))}
+    </Modal>
+  );
+}
+
+/**
+ * CommandChip is the in-place affordance: one glyph, the command on hover, the
+ * full thing (and a copy button) on click. Give it either one command list or a
+ * whole panel's worth of groups.
+ */
+export function CommandChip({commands, groups, label = 'Command', text}: {
+  commands?: string[] | null;
+  groups?: CommandGroup[];
+  label?: string;
+  /** Optional visible text beside the glyph, for a panel header. */
+  text?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const list: CommandGroup[] = groups ?? [{label, commands}];
+  const lines = list.flatMap(g => (g.commands ?? []).filter(c => c.trim() !== ''));
+  if (lines.length === 0) return null;
+  // Icon-only uses the app's icon-button shape rather than a squashed text
+  // button, so it sits in a toolbar or a table row like every other glyph does.
+  return (
+    <>
+      <button className={text ? 'btn sm' : 'iconbtn'}
+              onClick={e => { e.stopPropagation(); setOpen(true); }}
+              aria-label={`Show the command for ${label}`}
+              title={`${label} — the command adbq runs. Click to see or copy.\n\n${lines.join('\n')}`}>
+        <Icon.Terminal width={13} height={13}/>{text}
+      </button>
+      <CommandSheet open={open} onClose={() => setOpen(false)} title={label} groups={list}/>
+    </>
   );
 }
 

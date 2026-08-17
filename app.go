@@ -54,6 +54,10 @@ type App struct {
 	icons    *adb.IconCache
 	profiles *adb.ProfileStore
 	frida    *adb.FridaStore
+	host     *adb.HostStore
+	sdk      *adb.SDKManager
+	emu      *adb.EmulatorManager
+	pkgs     *adb.PackageManager
 
 	fridaMu   sync.Mutex
 	fridaSess map[string]*adb.FridaSession
@@ -70,8 +74,15 @@ func NewApp() *App {
 	store, _ := adb.NewSessionStore()
 	profiles, _ := adb.NewProfileStore()
 	frida, _ := adb.NewFridaStore()
+	host := adb.NewHostStore()
+	sdk := adb.NewSDKManager(host)
+	client := adb.NewClient()
 	return &App{
-		client:      adb.NewClient(),
+		client:      client,
+		host:        host,
+		sdk:         sdk,
+		emu:         adb.NewEmulatorManager(sdk, client),
+		pkgs:        adb.NewPackageManager(sdk),
 		tasks:       adb.NewTaskManager(),
 		logcats:     map[string]*logcatFeed{},
 		shells:      map[string]*adb.ShellSession{},
@@ -100,6 +111,11 @@ func (a *App) startup(ctx context.Context) {
 	a.tasks.OnUpdate(func(t *adb.TaskState) {
 		runtime.EventsEmit(a.ctx, "task:update", t)
 	})
+	// An explicit adb path from Settings must win before the first adb call, or
+	// the client caches whichever binary it found on PATH for the whole session.
+	if p := strings.TrimSpace(a.host.Get().ADBPath); p != "" {
+		a.client.SetBinary(p)
+	}
 	_ = a.client.StartServer(ctx)
 	// Reconcile persisted sessions: anything we left running on a device when
 	// adbq crashed/closed comes back as a task entry the user can see.
@@ -194,17 +210,301 @@ func (a *App) ListTasks() []adb.TaskState { return a.tasks.List() }
 func (a *App) CancelTask(id string)       { a.tasks.Cancel(id) }
 func (a *App) RemoveTask(id string)       { a.tasks.Remove(id) }
 
+// ─── Android SDK / Android Studio (host toolchain) ──────────────────────
+
+// AndroidSDK reports the Android SDK / Studio toolchain found on this computer.
+func (a *App) AndroidSDK() adb.AndroidSDKInfo { return a.sdk.Info() }
+
+// RecheckAndroidSDK re-probes after the user installs something or changes the
+// SDK path, so they don't have to restart adbq.
+func (a *App) RecheckAndroidSDK() adb.AndroidSDKInfo { return a.sdk.Recheck() }
+
+// HostSettings returns the user's host-machine overrides.
+func (a *App) HostSettings() adb.HostSettings { return a.host.Get() }
+
+// SetSDKRoot pins the Android SDK location. An empty string clears the override
+// and returns adbq to auto-detection.
+func (a *App) SetSDKRoot(path string) (adb.AndroidSDKInfo, error) {
+	hs := a.host.Get()
+	hs.SDKRoot = strings.TrimSpace(path)
+	if err := a.host.Set(hs); err != nil {
+		return adb.AndroidSDKInfo{}, err
+	}
+	return a.sdk.Recheck(), nil
+}
+
+// PickSDKRoot opens a folder chooser for the Android SDK root.
+func (a *App) PickSDKRoot() (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select the Android SDK folder",
+	})
+}
+
+// OpenAndroidStudio launches the IDE, for the few things adbq deliberately
+// leaves to Studio (project work, deep AVD hardware editing).
+func (a *App) OpenAndroidStudio() error {
+	info := a.sdk.Info()
+	if info.StudioPath == "" {
+		return fmt.Errorf("Android Studio not found on this computer")
+	}
+	return a.OpenPath(info.StudioPath)
+}
+
+// ─── Emulators / AVDs ───────────────────────────────────────────────────
+
+// ListAVDs returns every AVD defined on this machine with its live state.
+func (a *App) ListAVDs() ([]adb.AVD, error) { return a.emu.ListAVDs(a.ctx) }
+
+// AVDDetail returns one AVD, for the detail panel.
+func (a *App) AVDDetail(name string) (*adb.AVD, error) { return a.emu.AVDByName(a.ctx, name) }
+
+// EmulatorLaunchCommand renders the exact command StartAVD would run, so the UI
+// can show it live as the user toggles boot options (CLAUDE.md §4.1).
+func (a *App) EmulatorLaunchCommand(name string, opts adb.EmulatorOpts) string {
+	// With port 0 the rendered line would omit the -port flag StartAVD always
+	// passes, so the command on screen would not be the command that runs.
+	return adb.EmulatorCommand(a.sdk.Info().Emulator, name, a.emu.ConsolePortFor(name), opts)
+}
+
+// StartAVD boots an AVD and waits for it to come up, reporting progress as a task.
+func (a *App) StartAVD(name string, opts adb.EmulatorOpts) (string, error) {
+	id, ctx := a.tasks.Create("emulator-start", "Start "+name, "launching")
+	serial, err := a.emu.Start(ctx, name, opts)
+	if err != nil {
+		a.tasks.Finish(id, "err", "", err.Error())
+		return "", err
+	}
+	// Booting takes minutes; let the binding return so the UI stays responsive
+	// and report the rest through the task.
+	go func() {
+		werr := a.emu.WaitForBoot(ctx, serial, func(stage string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+		})
+		if werr != nil {
+			// Cancelling a "Start …" task can only mean "don't start it". Just
+			// dropping the wait would leave the emulator booting behind a task
+			// that says cancelled, so the cancel has to reach the emulator.
+			if ctx.Err() != nil {
+				sctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				_ = a.emu.Stop(sctx, name)
+				a.tasks.Finish(id, "cancelled", "", name+" stopped")
+				return
+			}
+			a.tasks.Finish(id, "err", "", werr.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", "", serial+" ready")
+	}()
+	return serial, nil
+}
+
+// StopAVD shuts an emulator down gracefully via the console.
+func (a *App) StopAVD(name string) error { return a.emu.Stop(a.ctx, name) }
+
+// EmulatorLog returns emulator output newer than sinceSeq. The UI polls this
+// only while the log panel is open, so a closed panel costs nothing.
+func (a *App) EmulatorLog(name string, sinceSeq int) []adb.HostLogLine {
+	return a.emu.LogSince(name, sinceSeq)
+}
+
+// ClearEmulatorLog empties one AVD's log buffer.
+func (a *App) ClearEmulatorLog(name string) { a.emu.ClearLog(name) }
+
+// ─── System images and AVD creation ─────────────────────────────────────
+
+// ListInstalledSystemImages reads the SDK tree directly — instant, offline, and
+// always correct about what is already on disk.
+func (a *App) ListInstalledSystemImages() []adb.SystemImage { return a.pkgs.ListInstalledImages() }
+
+// ListSystemImages merges the installed images with everything installable.
+// The remote half is cached; pass refresh to force a re-fetch.
+func (a *App) ListSystemImages(refresh bool) ([]adb.SystemImage, error) {
+	return a.pkgs.ListSystemImages(a.ctx, refresh)
+}
+
+// InstallSystemImage downloads a system image, reporting progress as a task.
+func (a *App) InstallSystemImage(pkg string) error {
+	id, ctx := a.tasks.Create("sdk-install", "Install "+pkg, "starting")
+	go func() {
+		err := a.pkgs.InstallSystemImage(ctx, pkg, func(stage string, pct int) {
+			a.tasks.Update(id, func(t *adb.TaskState) {
+				t.Detail = stage
+				t.Progress = pct
+			})
+		})
+		if err != nil {
+			a.tasks.Finish(id, "err", "", err.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", "", "installed "+pkg)
+	}()
+	return nil
+}
+
+// UninstallSystemImage removes an installed image. Destructive — the UI must
+// confirm first, showing the command.
+func (a *App) UninstallSystemImage(pkg string) error {
+	return a.pkgs.UninstallSystemImage(a.ctx, pkg)
+}
+
+// ListDeviceProfiles returns the hardware definitions available when creating.
+func (a *App) ListDeviceProfiles() ([]adb.DeviceProfile, error) {
+	return a.emu.ListDeviceProfiles(a.ctx)
+}
+
+// HostABIs lists the Android ABIs this computer can run, best first, so the UI
+// can explain why an x86 image is not an option on an arm64 machine.
+func (a *App) HostABIs() []string { return adb.HostABIs() }
+
+// DefaultAVDSpec proposes sensible settings for a new AVD from a chosen system
+// image, so the create form opens filled in rather than blank.
+func (a *App) DefaultAVDSpec(pkg string) (adb.AVDSpec, error) {
+	var img adb.SystemImage
+	for _, i := range a.pkgs.ListInstalledImages() {
+		if i.Pkg == pkg {
+			img = i
+			break
+		}
+	}
+	if img.Pkg == "" {
+		return adb.AVDSpec{}, fmt.Errorf("%q is not an installed system image", pkg)
+	}
+	profiles, _ := a.emu.ListDeviceProfiles(a.ctx)
+	return adb.DefaultAVDSpec(img, profiles), nil
+}
+
+// CreateAVDCommand renders the creation command for the confirm dialog.
+func (a *App) CreateAVDCommand(spec adb.AVDSpec) string {
+	return adb.CreateAVDCommand(a.sdk.Info().AVDManager, spec)
+}
+
+// DeleteAVDCommand renders the deletion command for the confirm dialog.
+func (a *App) DeleteAVDCommand(name string) string {
+	return adb.DeleteAVDCommand(a.sdk.Info().AVDManager, name)
+}
+
+// CreateAVD creates a new AVD and returns it.
+func (a *App) CreateAVD(spec adb.AVDSpec) (*adb.AVD, error) { return a.emu.CreateAVD(a.ctx, spec) }
+
+// DeleteAVD removes an AVD and its data. Irreversible.
+func (a *App) DeleteAVD(name string) error { return a.emu.DeleteAVD(a.ctx, name) }
+
+// DeleteAVDSnapshot removes one saved snapshot.
+func (a *App) DeleteAVDSnapshot(name, snapshot string) error {
+	return a.emu.DeleteSnapshot(name, snapshot)
+}
+
+// AVDHardwareChanges previews exactly which config.ini keys an edit would
+// write, so the UI can show them before anything is saved (CLAUDE.md §4.1).
+func (a *App) AVDHardwareChanges(hw adb.AVDHardware) (map[string]string, error) {
+	return adb.AVDHardwareChanges(hw)
+}
+
+// UpdateAVDHardware applies CPU/RAM/disk/display changes to an AVD. Changes
+// take effect the next time it boots.
+func (a *App) UpdateAVDHardware(name string, hw adb.AVDHardware) (*adb.AVD, error) {
+	return a.emu.UpdateAVDHardware(a.ctx, name, hw)
+}
+
+// ─── rootAVD (third-party, user-consented) ──────────────────────────────
+
+// RootAVDInfo describes the tool, its provenance and the risks, for the consent
+// dialog shown before anything is downloaded.
+func (a *App) RootAVDInfo() adb.RootAVDInfo { return adb.RootAVDStatus() }
+
+// RootAVDAdvice says whether rooting is needed, possible, or pointless for one
+// AVD, and why. The UI shows the reason verbatim.
+func (a *App) RootAVDAdvice(name string) (map[string]string, error) {
+	avd, err := a.emu.AVDByName(a.ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	action, reason := adb.RootAVDAdvice(avd.API, avd.PlayStore, avd.Root, avd.Patched)
+	return map[string]string{
+		"action":  action,
+		"reason":  reason,
+		"offered": boolString(adb.RootAVDOffered(action)),
+	}, nil
+}
+
+// DownloadRootAVD fetches and verifies the pinned rootAVD tree. The caller must
+// have shown RootAVDInfo.Disclosures and obtained consent first.
+func (a *App) DownloadRootAVD() (adb.RootAVDInfo, error) {
+	id, ctx := a.tasks.Create("rootavd-download", "Download rootAVD", "starting")
+	info, err := adb.InstallRootAVD(ctx, func(stage string) {
+		a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+	})
+	if err != nil {
+		a.tasks.Finish(id, "err", "", err.Error())
+		return adb.RootAVDInfo{}, err
+	}
+	a.tasks.Finish(id, "ok", "", "verified "+info.Commit[:12])
+	return info, nil
+}
+
+// RemoveRootAVD deletes the downloaded copy of the tool.
+func (a *App) RemoveRootAVD() error { return adb.RemoveRootAVD() }
+
+// RootAVDCommand renders the command that would run, for the confirm dialog.
+func (a *App) RootAVDCommand(name string, restore bool) (string, error) {
+	avd, err := a.emu.AVDByName(a.ctx, name)
+	if err != nil {
+		return "", err
+	}
+	return adb.RootAVDCommand(adb.RootAVDStatus().Dir, avd.RamdiskRel, restore), nil
+}
+
+// RootAVD patches an AVD's system image with Magisk, cold-boots it and verifies
+// root. Reported as a task; the transcript lands in the AVD's own log.
+func (a *App) RootAVD(name string) error {
+	a.runRootAVDTask("avd-root", "Root "+name, name, false)
+	return nil
+}
+
+// RestoreAVDRamdisk reverts a rootAVD patch from the backup it left behind.
+func (a *App) RestoreAVDRamdisk(name string) error {
+	a.runRootAVDTask("avd-restore", "Restore "+name, name, true)
+	return nil
+}
+
+func (a *App) runRootAVDTask(kind, title, name string, restore bool) {
+	id, ctx := a.tasks.Create(kind, title, "starting")
+	go func() {
+		fn := a.emu.RootAVD
+		if restore {
+			fn = a.emu.RestoreAVDRamdisk
+		}
+		err := fn(ctx, name, func(stage string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+		})
+		if err != nil {
+			a.tasks.Finish(id, "err", "", err.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", "", name+" done")
+	}()
+}
+
+func boolString(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
 // ─── scrcpy ─────────────────────────────────────────────────────────────
 
 func (a *App) ScrcpyAvailable() bool           { return a.scrcpy.Available() }
 func (a *App) ScrcpyActive(serial string) bool { return a.scrcpy.IsActive(serial) }
 func (a *App) StartScrcpy(serial string) error {
-	// Reasonable defaults: cap framerate, prefer h264 to avoid codec issues, USB if multiple.
-	return a.scrcpy.Start(a.ctx, serial, []string{
-		"--max-fps", "30",
-		"--video-codec", "h264",
-		"--window-title", "adbq · " + serial,
-	})
+	return a.scrcpy.Start(a.ctx, serial, adb.ScrcpyDefaultArgs(serial))
+}
+
+// ScrcpyCommand renders the command StartScrcpy would run, so the mirror button
+// can show it. Empty when scrcpy is not installed — there is no command then.
+func (a *App) ScrcpyCommand(serial string) string {
+	return a.scrcpy.Command(serial, adb.ScrcpyDefaultArgs(serial))
 }
 func (a *App) StopScrcpy(serial string) error { return a.scrcpy.Stop(serial) }
 
@@ -231,6 +531,14 @@ func (a *App) ApplyHostsConfig(serial string) (*adb.HostsApplyResult, error) {
 		return nil, fmt.Errorf("no saved hosts config for %s", serial)
 	}
 	return a.client.ApplyHostsRobust(a.ctx, serial, content)
+}
+
+// PlanHostsApply renders every write applying `content` will attempt, in order,
+// so the escalation is readable before a partition gets remounted
+// (CLAUDE.md §4.1 K2). Pass the editor's current text: the plan stages exactly
+// those bytes and names the md5 they hash to.
+func (a *App) PlanHostsApply(serial, content string) adb.HostsApplyPlan {
+	return a.client.PlanHostsApply(a.ctx, serial, content)
 }
 
 // FlushDeviceDNS clears the netd resolver cache so a fresh /etc/hosts entry
@@ -341,6 +649,14 @@ func (a *App) StopCapture(serial string) (*adb.CaptureState, error) {
 	}
 	return st, err
 }
+
+// CaptureCommands renders the file-capture panel's actions for the interface and
+// filter currently selected: the backgrounded tcpdump, the signal that finalises
+// the pcap, and the pull that brings it here.
+func (a *App) CaptureCommands(serial, iface, bpf string) adb.CaptureCommands {
+	return a.client.CaptureCommandsFor(a.ctx, serial, iface, bpf)
+}
+
 func (a *App) CaptureStatus(serial string) (*adb.CaptureState, error) {
 	st, err := a.client.CaptureStatus(a.ctx, serial, "", "")
 	if err != nil || st == nil {
@@ -375,6 +691,12 @@ func (a *App) PlanTcpdumpAutoInstall(serial string) (*adb.TcpdumpAutoPlan, error
 // the manifest-pinned tcpdump matching the device ABI. confirmed must be
 // true — pass it only after the user accepted the dialog backed by
 // PlanTcpdumpAutoInstall.
+// TcpdumpInstallCommands renders what installing tcpdump does to the device, so
+// the consent dialog can show it beside the source and the checksum.
+func (a *App) TcpdumpInstallCommands(serial string) []string {
+	return adb.TcpdumpInstallCommands(serial, a.client.Renderer(a.ctx, serial))
+}
+
 func (a *App) InstallTcpdumpAuto(serial string, confirmed bool) (*adb.TcpdumpInfo, error) {
 	return a.client.InstallTcpdumpAuto(a.ctx, serial, confirmed)
 }
@@ -409,6 +731,13 @@ func (a *App) StartLiveCapture(serial, iface, bpf string, opts adb.LiveCaptureOp
 
 // StopLiveCapture ends the in-process capture for serial. Safe to call when
 // no capture is running.
+// LiveCaptureCommand renders the tcpdump invocation a live capture runs for the
+// interface and filter currently selected, so the panel can keep it on screen
+// while packets arrive. Empty when tcpdump is not on the device.
+func (a *App) LiveCaptureCommand(serial, iface, bpf string) []string {
+	return a.client.CaptureCommandFor(a.ctx, serial, iface, bpf)
+}
+
 func (a *App) StopLiveCapture(serial string) error {
 	if a.client.Live == nil {
 		return nil
@@ -499,6 +828,14 @@ func (a *App) CreateIptablesChain(serial, family, table, chain string) error {
 func (a *App) DeleteIptablesChain(serial, family, table, chain string) error {
 	return a.client.DeleteIptablesChain(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table), chain)
 }
+
+// IptablesCommands renders what the firewall screen's actions will run for the
+// family/table/chain currently selected — with the table and the `su` form the
+// old rule-text preview left out (CLAUDE.md §4.1).
+func (a *App) IptablesCommands(serial string, req adb.IptablesCommandRequest) adb.IptablesCommands {
+	return a.client.IptablesCommandsFor(a.ctx, serial, req)
+}
+
 func (a *App) ExportIptables(serial, family string) (string, error) {
 	return a.client.ExportIptables(a.ctx, serial, adb.IPFamily(family))
 }
@@ -552,6 +889,9 @@ func (a *App) PullCapture(serial string) (string, error) {
 
 func (a *App) shutdown(ctx context.Context) {
 	a.scrcpy.StopAll()
+	// Only emulators adbq launched are killed; one the user started from
+	// Android Studio is theirs and must survive adbq closing.
+	a.emu.StopAll()
 	// lcMu keeps a StartLogcat that is mid-flight (blocked on a slow device)
 	// from re-registering its feed into the map we are about to clear, which
 	// would leave an adb child running past exit.
@@ -615,8 +955,13 @@ func (a *App) ConnectTCP(addr string) (string, error) {
 	return a.client.Connect(ctx, addr)
 }
 func (a *App) DisconnectDevice(addr string) (string, error) { return a.client.Disconnect(a.ctx, addr) }
-func (a *App) GetStats(serial string) (*adb.Stats, error)   { return a.client.GetStats(a.ctx, serial) }
-func (a *App) ADBVersion() (string, error)                  { return a.client.ServerVersion(a.ctx) }
+
+// ConnectCommands renders the connect/disconnect pair for a Wi-Fi address.
+func (a *App) ConnectCommands(addr string) adb.ConnectCommands {
+	return adb.ConnectCommandsFor(addr)
+}
+func (a *App) GetStats(serial string) (*adb.Stats, error) { return a.client.GetStats(a.ctx, serial) }
+func (a *App) ADBVersion() (string, error)                { return a.client.ServerVersion(a.ctx) }
 
 // ─── Logcat streaming via events ────────────────────────────────────────
 
@@ -669,6 +1014,21 @@ func (a *App) EnsureLogcat(serial, pkgFilter string, showSystem bool) (bool, err
 		return false, nil
 	}
 	return true, a.restartLogcatLocked(serial, pkgFilter, showSystem)
+}
+
+// LogcatCommands renders the logcat invocation feeding this screen right now,
+// pid filter included, plus the clear that empties the device buffer. The
+// command stays visible while the stream runs (CLAUDE.md §4.1 K3).
+func (a *App) LogcatCommands(serial string) adb.StreamCommands {
+	a.mu.Lock()
+	f := a.logcats[serial]
+	a.mu.Unlock()
+	pid := 0
+	if f != nil {
+		pid = f.pid()
+	}
+	stream, clear := adb.LogcatCommandsFor(serial, pid, logcatTailLines, a.client.Renderer(a.ctx, serial))
+	return adb.StreamCommands{Stream: stream, Clear: clear}
 }
 
 // SetLogcatSystem toggles OS-line visibility on the running feed without
@@ -800,6 +1160,21 @@ func (a *App) StartProcStream(serial string, intervalSec int) (*ProcStreamStatus
 	return &ProcStreamStatus{Running: true, IntervalSec: intervalSec}, nil
 }
 
+// ProcessCommands renders the procfs sweep the process table polls, as the user
+// it is actually being read by: the stream drops to the shell user when su is
+// denied, and a preview that always claimed root would explain nothing about a
+// half-empty table.
+func (a *App) ProcessCommands(serial string) []string {
+	a.procMu.Lock()
+	s := a.procStreams[serial]
+	a.procMu.Unlock()
+	asRoot := true
+	if s != nil {
+		asRoot = s.UsesRoot()
+	}
+	return adb.ProcessCommands(serial, asRoot, a.client.Renderer(a.ctx, serial))
+}
+
 func (a *App) StopProcStream(serial string) {
 	a.procMu.Lock()
 	defer a.procMu.Unlock()
@@ -915,6 +1290,14 @@ func (a *App) ListApps(serial string, onlyUser bool) ([]adb.App, error) {
 }
 func (a *App) DescribeApp(serial, pkg string) (*adb.AppDetail, error) {
 	return a.client.DescribeApp(a.ctx, serial, pkg)
+}
+
+// AppCommands is what the Apps panel's actions will run for one package, so
+// each button can show its command before it is pressed (CLAUDE.md §4.1).
+// Reads the device: the root steps are rendered with the `su` form it accepts,
+// and the export step names the file an export would suggest.
+func (a *App) AppCommands(serial, pkg string) adb.AppCommands {
+	return a.client.AppCommandsFor(a.ctx, serial, pkg)
 }
 
 // AndroidVersionMap exposes the SDK-level → "Android X (Codename)" table so
@@ -1049,17 +1432,23 @@ func (a *App) ExportApks(serial, pkg string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	title := "Save APK as…"
+	title, filter := "Save APK as…", runtime.FileFilter{DisplayName: "Android package (*.apk)", Pattern: "*.apk"}
 	if set.Split {
 		title = "Save APKS as…"
+		filter = runtime.FileFilter{DisplayName: "Android app bundle (*.apks)", Pattern: "*.apks"}
 	}
 	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           title,
 		DefaultFilename: set.Suggested,
+		Filters:         []runtime.FileFilter{filter},
 	})
 	if err != nil || dst == "" {
 		return "", err
 	}
+	// The dialog returns the typed name verbatim on every platform, so a split
+	// export can come back as `.apk` — a name no installer would read as an
+	// archive. Correct it rather than write a mislabelled file.
+	dst = adb.EnsureExportExt(dst, set.Split)
 	id, _ := a.tasks.Create("export-apk", "Exporting "+pkg, fmt.Sprintf("%d APK(s) → %s", len(set.Splits)+1, dst))
 	go func() {
 		out, err := a.client.ExportApks(a.ctx, serial, pkg, dst, func(s string) {
@@ -1077,7 +1466,7 @@ func (a *App) ExportApks(serial, pkg string) (string, error) {
 func (a *App) ExportAPK(serial, pkg string) (string, error) {
 	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Save APK as…",
-		DefaultFilename: pkg + ".apk",
+		DefaultFilename: a.client.ExportBaseNameFor(a.ctx, serial, pkg) + ".apk",
 	})
 	if err != nil || dst == "" {
 		return "", err
@@ -1094,6 +1483,171 @@ func (a *App) ExportAPK(serial, pkg string) (string, error) {
 	return id, nil
 }
 
+// ─── Binaries ────────────────────────────────────────────────────────────
+
+// PlanAppBinaries reports what collecting the app's binaries would pull and
+// produce, without doing any of it (CLAUDE.md §4.1).
+func (a *App) PlanAppBinaries(serial, pkg string) (*adb.BinaryPlan, error) {
+	set, err := a.client.ApkSetOf(a.ctx, serial, pkg)
+	if err != nil {
+		return nil, err
+	}
+	return adb.PlanAppBinaries(serial, set), nil
+}
+
+// ExportAppBinaries collects the app's native libraries, shipped executables
+// and known runtime blobs into one zip chosen by the user.
+func (a *App) ExportAppBinaries(serial, pkg string) (string, error) {
+	plan, err := a.PlanAppBinaries(serial, pkg)
+	if err != nil {
+		return "", err
+	}
+	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save binaries as…",
+		DefaultFilename: plan.Suggested,
+		Filters:         []runtime.FileFilter{{DisplayName: "Zip archive (*.zip)", Pattern: "*.zip"}},
+	})
+	if err != nil || dst == "" {
+		return "", err
+	}
+	if !strings.EqualFold(filepath.Ext(dst), ".zip") {
+		dst += ".zip"
+	}
+	id, _ := a.tasks.Create("export-binaries", "Collecting binaries for "+pkg, fmt.Sprintf("%d APK(s) → %s", plan.Sources, dst))
+	go func() {
+		out, err := a.client.ExportAppBinaries(a.ctx, serial, pkg, dst, func(s string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = s })
+		})
+		if err != nil {
+			a.tasks.Finish(id, "err", "", err.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", out, "")
+	}()
+	return id, nil
+}
+
+// ─── jadx (third-party, user-consented) ─────────────────────────────────
+
+// JadxInfo describes the decompiler, its provenance and the Java it would run
+// under, for the consent dialog and the settings card.
+func (a *App) JadxInfo() adb.JadxInfo {
+	return adb.JadxStatus(a.host.Get(), a.sdk.Info().StudioPath)
+}
+
+// DownloadJadx fetches and verifies the pinned release. The caller must have
+// shown JadxInfo.Disclosures and obtained consent first.
+func (a *App) DownloadJadx() (adb.JadxInfo, error) {
+	id, ctx := a.tasks.Create("jadx-download", "Download jadx", "starting")
+	err := adb.InstallJadx(ctx, func(stage string) {
+		a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+		runtime.EventsEmit(a.ctx, "jadx:progress", map[string]string{"stage": stage})
+	})
+	if err != nil {
+		a.tasks.Finish(id, "err", "", err.Error())
+		return adb.JadxInfo{}, err
+	}
+	info := a.JadxInfo()
+	a.tasks.Finish(id, "ok", info.Dir, "verified "+info.Version)
+	runtime.EventsEmit(a.ctx, "jadx:progress", map[string]string{"stage": "ready"})
+	return info, nil
+}
+
+// JadxLatest reports the newest published release and the digest that makes it
+// verifiable. Nothing is downloaded — this is what the update dialog describes.
+func (a *App) JadxLatest() (adb.JadxRelease, error) {
+	return adb.LatestJadxRelease(a.ctx)
+}
+
+// UpdateJadx installs a release the user picked from JadxLatest. The caller must
+// have shown its version and digest first.
+func (a *App) UpdateJadx(rel adb.JadxRelease) (adb.JadxInfo, error) {
+	id, ctx := a.tasks.Create("jadx-download", "Update jadx to "+rel.Version, "starting")
+	err := adb.InstallJadxRelease(ctx, rel, func(stage string) {
+		a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
+		runtime.EventsEmit(a.ctx, "jadx:progress", map[string]string{"stage": stage})
+	})
+	if err != nil {
+		a.tasks.Finish(id, "err", "", err.Error())
+		return adb.JadxInfo{}, err
+	}
+	info := a.JadxInfo()
+	a.tasks.Finish(id, "ok", info.Dir, "verified "+info.Version)
+	runtime.EventsEmit(a.ctx, "jadx:progress", map[string]string{"stage": "ready"})
+	return info, nil
+}
+
+// RemoveJadx deletes the downloaded copy. A jadx the user manages themselves is
+// untouched — adbq only owns what it downloaded.
+func (a *App) RemoveJadx() (adb.JadxInfo, error) {
+	if err := adb.RemoveJadx(); err != nil {
+		return adb.JadxInfo{}, err
+	}
+	return a.JadxInfo(), nil
+}
+
+// PickJadxPath opens a file dialog for a jadx installation the user manages.
+func (a *App) PickJadxPath() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select the jadx-gui launcher"})
+}
+
+// SetJadxPath records a jadx installation of the user's own. An empty path
+// clears it and returns to auto-detection.
+func (a *App) SetJadxPath(path string) (adb.JadxInfo, error) {
+	hs := a.host.Get()
+	hs.JadxPath = strings.TrimSpace(path)
+	if err := a.host.Set(hs); err != nil {
+		return adb.JadxInfo{}, err
+	}
+	return a.JadxInfo(), nil
+}
+
+// PickJavaPath opens a file dialog for a Java runtime.
+func (a *App) PickJavaPath() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select the java executable"})
+}
+
+// SetJavaPath records the Java runtime to launch host-side Java tools with. An
+// empty path clears it and returns to auto-detection.
+func (a *App) SetJavaPath(path string) (adb.JadxInfo, error) {
+	hs := a.host.Get()
+	hs.JavaPath = strings.TrimSpace(path)
+	if err := a.host.Set(hs); err != nil {
+		return adb.JadxInfo{}, err
+	}
+	return a.JadxInfo(), nil
+}
+
+// PlanJadxOpen reports which APKs would be copied here and the exact command
+// the decompiler would be launched with (CLAUDE.md §4.1).
+func (a *App) PlanJadxOpen(serial, pkg string) (*adb.JadxOpenPlan, error) {
+	return a.client.PlanJadxOpen(a.ctx, serial, pkg, a.JadxInfo())
+}
+
+// OpenInJadx copies every APK of the app here and opens all of them in one jadx
+// session, so a split install decompiles as one program.
+func (a *App) OpenInJadx(serial, pkg string) (string, error) {
+	info := a.JadxInfo()
+	id, _ := a.tasks.Create("jadx-open", "Opening "+pkg+" in jadx", "starting")
+	go func() {
+		out, err := a.client.OpenInJadx(a.ctx, serial, pkg, info, func(s string) {
+			a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = s })
+		})
+		if err != nil {
+			a.tasks.Finish(id, "err", "", err.Error())
+			return
+		}
+		a.tasks.Finish(id, "ok", out, "")
+	}()
+	return id, nil
+}
+
+// StagedApkDir reports where APKs copied here for analysis are kept.
+func (a *App) StagedApkDir() string { return adb.StageRoot() }
+
+// ClearStagedApks discards them. Nothing is lost — the next open re-copies.
+func (a *App) ClearStagedApks() error { return adb.ClearApkStage() }
+
 // ─── Files ───────────────────────────────────────────────────────────────
 
 func (a *App) ListDir(serial, path string, asRoot bool) ([]adb.FileEntry, error) {
@@ -1104,6 +1658,13 @@ func (a *App) DeleteFile(serial, path string, recursive, asRoot bool) (string, e
 }
 func (a *App) Mkdir(serial, path string, asRoot bool) (string, error) {
 	return a.client.Mkdir(a.ctx, serial, path, asRoot)
+}
+
+// FileCommands is what the Files screen's actions will run for the directory it
+// is showing and the entry selected in it (CLAUDE.md §4.1). Reads the device so
+// the root steps carry the `su` form it accepts.
+func (a *App) FileCommands(serial string, req adb.FileCommandRequest) adb.FileCommands {
+	return a.client.FileCommandsFor(a.ctx, serial, req)
 }
 
 func (a *App) PushFileWithPicker(serial, remoteDir string) (string, error) {
@@ -1151,6 +1712,14 @@ func (a *App) RemoveForward(serial, local string) (string, error) {
 }
 func (a *App) RemoveReverse(serial, remote string) (string, error) {
 	return a.client.RemoveReverse(a.ctx, serial, remote)
+}
+
+// ForwardCommands renders one entry per row, in row order, so the table can
+// show each mapping's add/remove line beside it. kind is "forward" or
+// "reverse"; the argument order differs between them and getting it backwards
+// is the mistake this preview prevents. Pure string work — no device access.
+func (a *App) ForwardCommands(serial, kind string, rows []adb.Forward) []adb.ForwardCommands {
+	return adb.ForwardCommandsForRows(serial, kind, rows)
 }
 
 // ─── Frida ───────────────────────────────────────────────────────────────
@@ -1203,6 +1772,13 @@ func (a *App) StartFrida(serial, path, iface string, port int) (string, error) {
 // last launch. Empty output means it started cleanly — the server only writes
 // here when something went wrong. Logs are per-port because a device can run
 // several servers at once. Pass 0 for frida's default port.
+// FridaCommands renders what the Frida screen's device-side actions will run for
+// one server binary and port: the push and chmod behind an install, the
+// daemonized start, the stop, the log read and the port forward.
+func (a *App) FridaCommands(serial, serverPath string, port int) adb.FridaCommands {
+	return a.client.FridaCommandsFor(a.ctx, serial, serverPath, port)
+}
+
 func (a *App) FridaServerLog(serial string, port int) (string, error) {
 	return a.client.FridaServerLog(a.ctx, serial, port)
 }
@@ -1802,11 +2378,51 @@ func (a *App) SetProxy(serial, hostPort string) (string, error) {
 	return a.client.SetProxy(a.ctx, serial, hostPort)
 }
 
+// ProxyCommand renders the command SetProxy would run, so the panel shows the
+// real thing instead of a reconstruction (CLAUDE.md §4.1).
+func (a *App) ProxyCommand(serial, hostPort string) string {
+	return adb.ProxyCommand(serial, hostPort)
+}
+
+// DNSLookupCommands renders the three reads a device-side lookup performs.
+func (a *App) DNSLookupCommands(serial, host string) []string {
+	return adb.DNSLookupCommands(serial, host, a.client.Renderer(a.ctx, serial))
+}
+
+// NetCommands renders the Network screen's smaller actions for the proxy value
+// currently in the form.
+func (a *App) NetCommands(serial, hostPort string) adb.NetCommands {
+	return a.client.NetCommandsFor(a.ctx, serial, hostPort)
+}
+
+// DeviceCommands renders the Overview screen's actions: reboots, tcpip,
+// screenshot, recording, clipboard and mirroring.
+func (a *App) DeviceCommands(serial string, recordSeconds int) adb.DeviceCommands {
+	return a.client.DeviceCommandsFor(a.ctx, serial, 5555, recordSeconds, a.ScrcpyCommand(serial))
+}
+
 // ─── System ──────────────────────────────────────────────────────────────
 
 func (a *App) Reboot(serial, mode string) (string, error) {
 	return a.client.Reboot(a.ctx, serial, mode)
 }
+
+// PowerOffDevice halts the device. Separate from Reboot because it is the one
+// action here that needs a person to press a physical button afterwards.
+func (a *App) PowerOffDevice(serial string) (string, error) {
+	return a.client.PowerOff(a.ctx, serial)
+}
+
+// RestartAdbd bounces the device-side adb daemon, dropping this connection.
+func (a *App) RestartAdbd(serial string) (string, error) {
+	return a.client.RestartAdbd(a.ctx, serial)
+}
+
+// RootSignals re-reads what the root badge is based on.
+func (a *App) RootSignals(serial string) (string, error) {
+	return a.client.RootSignals(a.ctx, serial)
+}
+
 func (a *App) ListConnections(serial string) ([]adb.Connection, error) {
 	return a.client.ListConnections(a.ctx, serial)
 }
@@ -1836,6 +2452,14 @@ func (a *App) InstallSystemCertWithPicker(serial string) (*adb.CertInstallResult
 	}
 	a.tasks.Finish(id, "ok", res.Path, res.Strategy+" · "+res.Subject)
 	return res, nil
+}
+
+// PlanCertInstall renders what installing a CA certificate will attempt on this
+// device: the system store when it is rooted, a staged manual import when it is
+// not. The trust-store file name is derived from the certificate, so the plan
+// carries a placeholder until a file is picked.
+func (a *App) PlanCertInstall(serial string) adb.CertInstallPlan {
+	return a.client.PlanCertInstall(a.ctx, serial)
 }
 
 // ListCACerts returns the certificates in the device CA trust store for the
@@ -1941,7 +2565,7 @@ func (a *App) RecordingActive(serial string) bool {
 func (a *App) ExportAppDataWithPicker(serial, pkg string) (string, error) {
 	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Save app data as…",
-		DefaultFilename: pkg + ".tar.gz",
+		DefaultFilename: a.client.ExportBaseNameFor(a.ctx, serial, pkg) + ".tar.gz",
 	})
 	if err != nil || dst == "" {
 		return "", err

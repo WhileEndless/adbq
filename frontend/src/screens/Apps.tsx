@@ -2,9 +2,10 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CodeBlock, Modal, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, Modal, SearchInput, commandToast, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {pickApkAndInstall} from '../lib/apk';
+import {ensureJadx, jadxInfo, jadxLabel} from '../lib/jadx';
 import {sdkLabel, rootUnavailableReason} from '../lib/android';
 
 export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
@@ -52,6 +53,19 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
     const t = setInterval(probe, 3000);
     return () => { cancelled = true; clearInterval(t); };
   }, [sel?.pkg, device?.id]);
+  // What each action in this panel will run. Fetched per selection because the
+  // export step is named after the app's version and the root steps carry the
+  // `su` form this device accepts — neither is guessable in the frontend.
+  const [cmds, setCmds] = useState<adb.AppCommands | null>(null);
+  useEffect(() => {
+    if (!sel) { setCmds(null); return; }
+    let live = true;
+    API.AppCommands(device.id, sel.pkg)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    return () => { live = false; };
+  }, [sel?.pkg, device?.id]);
+
   function refreshRunning() {
     if (!sel) return;
     API.IsAppRunning(device.id, sel.pkg).then(setRunning).catch(() => setRunning(null));
@@ -105,18 +119,104 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                 <div style={{minWidth: 0}}>
                   <div style={{fontWeight: 600, fontSize: 15}}>{sel.name || sel.pkg}</div>
                   <div className='pkg mono'>{sel.pkg}</div>
-                  <div style={{marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap'}}>
+                  <div style={{marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center'}}>
                     {detail?.v && <Badge>v{detail.v}</Badge>}
                     {sel.system ? <Badge>system</Badge> : <Badge kind='accent'>user</Badge>}
                     {detail?.uid && <Badge kind='info'>UID {detail.uid}</Badge>}
                     {running?.running
                       ? <Badge kind='ok'>running · pid {running.pid || '?'}</Badge>
                       : running && <Badge>stopped</Badge>}
+                    <CommandChip label={sel.pkg} groups={[
+                      {label: 'Launch', commands: cmds?.launch},
+                      {label: 'Kill', commands: cmds?.forceStop},
+                      {label: 'Clear data', commands: cmds?.clear},
+                      {label: 'Export data', commands: cmds?.exportData},
+                      {label: 'Uninstall', commands: cmds?.uninstall},
+                    ]}/>
                   </div>
                 </div>
               </div>
+              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 14}}>
+                {running?.running
+                  ? <button className='btn danger' onClick={async () => {
+                      if (!sel) return;
+                      // Force-stop kills *all* of the app's processes — same affordance as
+                      // Settings → App info → Force stop. Optimistic state flip so the
+                      // button doesn't appear stuck; reconciled by the next probe tick.
+                      setRunning({running: false, pid: 0});
+                      try {
+                        const out = await API.ForceStopApp(device.id, sel.pkg);
+                        showToast({title: 'Killed', body: out || sel.pkg, kind: 'ok', mono: true, actions: commandToast(cmds?.forceStop)});
+                      } catch (e) { showToast({title: 'Kill failed', body: String(e), kind: 'err'}); }
+                      refreshRunning();
+                    }}><Icon.Stop/>Kill{running.pid ? ` (pid ${running.pid})` : ''}</button>
+                  : <button className='btn primary' onClick={async () => {
+                      if (!sel) return;
+                      setRunning({running: true, pid: 0});
+                      try {
+                        const out = await API.LaunchApp(device.id, sel.pkg);
+                        showToast({title: 'Launch', body: out || sel.pkg, kind: 'ok', mono: true, actions: commandToast(cmds?.launch)});
+                      } catch (e) { showToast({title: 'Launch failed', body: String(e), kind: 'err'}); }
+                      // Apps take a moment to wire up their main process; give
+                      // pidof time to see the PID before reconciling.
+                      setTimeout(refreshRunning, 600);
+                    }}><Icon.Play/>Launch</button>}
+                <button className='btn' onClick={async () => {
+                  if (!sel) return;
+                  // "Restart" only shows when the app is running — kill then launch
+                  // so the user can reproduce a cold-start without two clicks.
+                  if (!running?.running) {
+                    showToast({title: 'Restart skipped', body: 'app is not running', kind: 'info'});
+                    return;
+                  }
+                  try {
+                    await API.ForceStopApp(device.id, sel.pkg);
+                    await new Promise(r => setTimeout(r, 250));
+                    await API.LaunchApp(device.id, sel.pkg);
+                    showToast({title: 'Restarted', body: sel.pkg, kind: 'ok', mono: true});
+                  } catch (e) { showToast({title: 'Restart failed', body: String(e), kind: 'err'}); }
+                  setTimeout(refreshRunning, 700);
+                }} disabled={!running?.running}><Icon.Refresh/>Restart</button>
+                <button className='btn' onClick={async () => {
+                  if (!sel) return;
+                  const ok = await confirmDialog({
+                    title: `Clear data for ${sel.name || sel.pkg}?`,
+                    body: <>
+                      Wipes app preferences, cache, and database. The app will start fresh.
+                      <CommandPreview commands={cmds?.clear ?? []} defaultOpen/>
+                    </>,
+                    confirmLabel: 'Clear', danger: true,
+                  });
+                  if (ok) doAction(API.ClearApp, 'Clear data');
+                }}>Clear data</button>
+                {setScreen && (
+                  <button className='btn' onClick={() => {
+                    if (!sel) return;
+                    // Queue a `cd` into the app's data dir; the Shell screen
+                    // opens a fresh session and types this on first paint.
+                    // Root is required to enter /data/data/PKG on most builds,
+                    // so we explicitly request root when the device supports it.
+                    store.queueShellCmd({
+                      serial: device.id,
+                      cmd: `cd /data/data/${sel.pkg} && ls -la`,
+                      root: !!device.root,
+                    });
+                    showToast({title: 'Opening shell', body: `cd /data/data/${sel.pkg}`, kind: 'info', mono: true});
+                    setScreen('shell');
+                  }}><Icon.Terminal/>Open shell</button>
+                )}
+                <button className='btn' onClick={() =>
+                  API.ExportAppDataWithPicker(device.id, sel.pkg)
+                    .then(() => showToast({title: 'Data export started', body: 'Watch the Tasks panel for progress', kind: 'info', actions: commandToast(cmds?.exportData)}))
+                    .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}))
+                } disabled={!device.root}>
+                  <Icon.Download/>Export data{!device.root && ' (root)'}
+                </button>
+              </div>
+              <ApkToolsSection device={device} pkg={sel.pkg}/>
+              <FridaAppSection device={device} pkg={sel.pkg} running={!!running?.running} setScreen={setScreen}/>
               {detail && <>
-                <DetailSection title='Versions'>
+                <DetailSection title='Versions' defaultOpen>
                   <Detail k='Version' v={detail.v ? `${detail.v}${detail.versionCode ? `  ·  code ${detail.versionCode}` : ''}` : detail.versionCode}/>
                   <Detail k='Target SDK' v={sdkLabel(detail.targetSdk)}/>
                   <Detail k='Min SDK'    v={sdkLabel(detail.minSdk)}/>
@@ -161,82 +261,18 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                   </DetailSection>
                 )}
               </>}
-              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 14}}>
-                {running?.running
-                  ? <button className='btn danger' onClick={async () => {
-                      if (!sel) return;
-                      // Force-stop kills *all* of the app's processes — same affordance as
-                      // Settings → App info → Force stop. Optimistic state flip so the
-                      // button doesn't appear stuck; reconciled by the next probe tick.
-                      setRunning({running: false, pid: 0});
-                      try {
-                        const out = await API.ForceStopApp(device.id, sel.pkg);
-                        showToast({title: 'Killed', body: out || sel.pkg, kind: 'ok', mono: true});
-                      } catch (e) { showToast({title: 'Kill failed', body: String(e), kind: 'err'}); }
-                      refreshRunning();
-                    }}><Icon.Stop/>Kill{running.pid ? ` (pid ${running.pid})` : ''}</button>
-                  : <button className='btn primary' onClick={async () => {
-                      if (!sel) return;
-                      setRunning({running: true, pid: 0});
-                      try {
-                        const out = await API.LaunchApp(device.id, sel.pkg);
-                        showToast({title: 'Launch', body: out || sel.pkg, kind: 'ok', mono: true});
-                      } catch (e) { showToast({title: 'Launch failed', body: String(e), kind: 'err'}); }
-                      // Apps take a moment to wire up their main process; give
-                      // pidof time to see the PID before reconciling.
-                      setTimeout(refreshRunning, 600);
-                    }}><Icon.Play/>Launch</button>}
-                <button className='btn' onClick={async () => {
-                  if (!sel) return;
-                  // "Restart" only shows when the app is running — kill then launch
-                  // so the user can reproduce a cold-start without two clicks.
-                  if (!running?.running) {
-                    showToast({title: 'Restart skipped', body: 'app is not running', kind: 'info'});
-                    return;
-                  }
-                  try {
-                    await API.ForceStopApp(device.id, sel.pkg);
-                    await new Promise(r => setTimeout(r, 250));
-                    await API.LaunchApp(device.id, sel.pkg);
-                    showToast({title: 'Restarted', body: sel.pkg, kind: 'ok', mono: true});
-                  } catch (e) { showToast({title: 'Restart failed', body: String(e), kind: 'err'}); }
-                  setTimeout(refreshRunning, 700);
-                }} disabled={!running?.running}><Icon.Refresh/>Restart</button>
-                <button className='btn' onClick={async () => {
-                  if (!sel) return;
-                  const ok = await confirmDialog({title: `Clear data for ${sel.name || sel.pkg}?`, body: 'Wipes app preferences, cache, and database. The app will start fresh.', confirmLabel: 'Clear', danger: true});
-                  if (ok) doAction(API.ClearApp, 'Clear data');
-                }}>Clear data</button>
-                {setScreen && (
-                  <button className='btn' onClick={() => {
-                    if (!sel) return;
-                    // Queue a `cd` into the app's data dir; the Shell screen
-                    // opens a fresh session and types this on first paint.
-                    // Root is required to enter /data/data/PKG on most builds,
-                    // so we explicitly request root when the device supports it.
-                    store.queueShellCmd({
-                      serial: device.id,
-                      cmd: `cd /data/data/${sel.pkg} && ls -la`,
-                      root: !!device.root,
-                    });
-                    showToast({title: 'Opening shell', body: `cd /data/data/${sel.pkg}`, kind: 'info', mono: true});
-                    setScreen('shell');
-                  }}><Icon.Terminal/>Open shell</button>
-                )}
-                <button className='btn' onClick={() =>
-                  API.ExportAppDataWithPicker(device.id, sel.pkg)
-                    .then(() => showToast({title: 'Data export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
-                    .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}))
-                } disabled={!device.root}>
-                  <Icon.Download/>Export data{!device.root && ' (root)'}
-                </button>
-              </div>
-              <ApkTransferSection device={device} pkg={sel.pkg}/>
-              <FridaAppSection device={device} pkg={sel.pkg} running={!!running?.running} setScreen={setScreen}/>
+              <PermissionsPanel detail={detail}/>
               <button className='btn danger' style={{marginTop: 6, width: '100%'}}
                       onClick={async () => {
                         if (!sel) return;
-                        const ok = await confirmDialog({title: `Uninstall ${sel.name || sel.pkg}?`, body: sel.pkg, confirmLabel: 'Uninstall', danger: true});
+                        const ok = await confirmDialog({
+                          title: `Uninstall ${sel.name || sel.pkg}?`,
+                          body: <>
+                            <span className='mono'>{sel.pkg}</span>
+                            <CommandPreview commands={cmds?.uninstall ?? []} defaultOpen/>
+                          </>,
+                          confirmLabel: 'Uninstall', danger: true,
+                        });
                         if (ok) {
                           API.UninstallApp(device.id, sel.pkg)
                             .then(() => showToast({title: 'Uninstall started', body: 'See Tasks panel', kind: 'info'}));
@@ -244,7 +280,6 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
                       }}>
                 <Icon.Trash/>Uninstall
               </button>
-              <PermissionsPanel detail={detail}/>
             </>
           ) : <div className='muted' style={{padding: 20}}>Select an app</div>}
         </div>
@@ -267,6 +302,20 @@ function FridaAppSection({device, pkg, running, setScreen}: {device: adb.Device;
   useEffect(() => { reload(); }, [pkg]);
 
   const count = binding?.scriptIds?.length || 0;
+
+  // One button here can push a frida-server, make it executable and daemonize it
+  // before the session even starts, so the commands behind that belong in reach
+  // (CLAUDE.md §4.1). The session's own host-side command shows up on the
+  // session, where its job file exists.
+  const [fcmds, setFcmds] = useState<adb.FridaCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setFcmds(null); return; }
+    let live = true;
+    API.FridaCommands(device.id, '', 0)
+      .then(c => { if (live) setFcmds(c); })
+      .catch(() => { if (live) setFcmds(null); });
+    return () => { live = false; };
+  }, [device?.id]);
 
   async function launch(mode: 'spawn' | 'attach', restart: boolean) {
     setBusy(mode + (restart ? '-restart' : ''));
@@ -297,6 +346,11 @@ function FridaAppSection({device, pkg, running, setScreen}: {device: adb.Device;
         <span className='title' style={{fontSize: 12, display: 'flex', alignItems: 'center', gap: 6}}><Icon.Zap width={13} height={13}/>Frida</span>
         {count > 0 && <Badge kind='accent'>{count} script{count === 1 ? '' : 's'}</Badge>}
         <div style={{flex: 1}}/>
+        <CommandChip label='Frida prerequisites' groups={[
+          {label: 'Install a server', commands: fcmds?.install, note: 'Only when the device has no matching frida-server yet.'},
+          {label: 'Start it', commands: fcmds?.start},
+          {label: 'Stop it', commands: fcmds?.stop},
+        ]}/>
         <button className='btn sm' onClick={() => setManage(true)}>Manage scripts</button>
       </div>
       <div className='card-body'>
@@ -385,25 +439,44 @@ function ManageFridaScriptsModal({pkg, onClose}: {pkg: string; onClose: () => vo
   );
 }
 
-// ─── APK export ───────────────────────────────────────────────
+// ─── APK: export, decompile, binaries ──────────────────────────────────
 //
-// App Bundle installs are several APKs (base + config splits). Exporting only
-// the base produces a file that fails to install later with
-// INSTALL_FAILED_MISSING_SPLIT, so those are exported as one .apks archive —
-// and only those. A plain single-APK app stays a plain .apk.
+// One section, because all three actions work off the same thing: the APKs that
+// make up the install. They were three separate blocks, each with its command
+// listing open, which is most of what made this panel unreadable.
+//
+// App Bundle installs are several APKs (base + config splits), and that shapes
+// every action here. Exporting only the base produces a file that fails to
+// install later with INSTALL_FAILED_MISSING_SPLIT, so those become one .apks
+// archive; the decompiler instead gets the parts, all at once, because the
+// bundle is not an input it reads and a feature split's code would otherwise be
+// missing.
 //
 // Installing lives in the screen header, not here: it targets the device, not
 // the app you happen to have selected.
-function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
+function ApkToolsSection({device, pkg}: {device: adb.Device; pkg: string}) {
   const [set, setSet] = useState<adb.ApkSet | null>(null);
+  const [plan, setPlan] = useState<adb.JadxOpenPlan | null>(null);
+  const [binPlan, setBinPlan] = useState<adb.BinaryPlan | null>(null);
+  const [info, setInfo] = useState<adb.JadxInfo | null>(null);
+  const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
 
   useEffect(() => {
     let live = true;
-    setSet(null); setErr('');
+    setSet(null); setPlan(null); setBinPlan(null); setErr('');
     API.ApkSetOf(device.id, pkg)
       .then(s => { if (live) setSet(s); })
       .catch(e => { if (live) setErr(String(e)); });
+    API.PlanJadxOpen(device.id, pkg)
+      .then(p => { if (live) setPlan(p); })
+      .catch(() => {});
+    API.PlanAppBinaries(device.id, pkg)
+      .then(p => { if (live) setBinPlan(p); })
+      .catch(() => {});
+    jadxInfo()
+      .then(i => { if (live) setInfo(i); })
+      .catch(() => {});
     return () => { live = false; };
   }, [device.id, pkg]);
 
@@ -412,35 +485,95 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
   const split = !!set?.split;
   const count = set ? splits.length + 1 : 0;
 
+  const exportApks = () => {
+    setBusy('apk');
+    API.ExportApks(device.id, pkg)
+      .then(id => id && showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
+      .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}))
+      .finally(() => setBusy(''));
+  };
+
+  const openJadx = async () => {
+    setBusy('jadx');
+    try {
+      const ready = await ensureJadx();
+      if (!ready) return;
+      setInfo(ready);
+      const id = await API.OpenInJadx(device.id, pkg);
+      if (id) {
+        showToast({
+          title: 'Opening in jadx',
+          body: plan?.staged
+            ? 'The APKs are already on this computer'
+            : 'Copying the APKs first — watch the Tasks panel',
+          kind: 'info',
+        });
+      }
+    } catch (e) {
+      showToast({title: 'Could not open jadx', body: String(e), kind: 'err'});
+    } finally {
+      setBusy('');
+      API.PlanJadxOpen(device.id, pkg).then(setPlan).catch(() => {});
+    }
+  };
+
+  const exportBinaries = () => {
+    setBusy('bin');
+    API.ExportAppBinaries(device.id, pkg)
+      .then(id => id && showToast({title: 'Collecting binaries', body: 'Watch the Tasks panel for progress', kind: 'info'}))
+      .catch(e => showToast({title: 'Collection failed', body: String(e), kind: 'err'}))
+      .finally(() => setBusy(''));
+  };
+
   return (
     <div className='app-detail-section'>
-      <div className='app-detail-section-title'>APK export</div>
+      <div className='app-detail-section-title' style={{display: 'flex', alignItems: 'center', gap: 8}}>
+        APK
+        <div style={{flex: 1}}/>
+        <CommandChip label='APK' groups={[
+          {label: split ? 'Export .apks' : 'Export .apk', commands: set?.commands},
+          {label: 'Open in jadx', commands: plan?.commands},
+          {label: 'Download binaries', commands: binPlan?.commands},
+        ]}/>
+      </div>
       {err && <div className='muted' style={{fontSize: 12, color: 'var(--danger)'}}>Could not read the APK layout: {err}</div>}
       {set && (
         <>
           <div className='app-detail-row'>
             <span className='app-detail-k'>Layout</span>
             <span className='app-detail-v'>
-              {split
-                ? <>App Bundle · base + {splits.length} split APK(s)</>
-                : <>Single APK</>}
+              {split ? <>App Bundle · base + {splits.length} split APK(s)</> : <>Single APK</>}
+              {plan?.staged ? ' · copied here' : ''}
             </span>
           </div>
-          <button className='btn' style={{width: '100%', marginTop: 8}} onClick={() => {
-            API.ExportApks(device.id, pkg)
-              .then(id => id && showToast({title: 'Export started', body: 'Watch the Tasks panel for progress', kind: 'info'}))
-              .catch(e => showToast({title: 'Export failed', body: String(e), kind: 'err'}));
-          }}>
-            <Icon.Download/>Export {split ? '.apks' : '.apk'}
+          <div className='app-detail-row'>
+            <span className='app-detail-k'>File</span>
+            <span className='app-detail-v mono'>{set.suggested}</span>
+          </div>
+
+          <button className='btn' style={{width: '100%', marginTop: 8}} disabled={busy !== ''} onClick={exportApks}>
+            <Icon.Download/>{busy === 'apk' ? '…exporting' : `Export ${split ? '.apks' : '.apk'}`}
           </button>
           {split && (
             <div className='muted' style={{fontSize: 11, marginTop: 6}}>
-              All {count} APKs go into one .apks archive. Installing only the base would fail with INSTALL_FAILED_MISSING_SPLIT.
+              All {count} APKs go into one archive. Installing only the base would fail with INSTALL_FAILED_MISSING_SPLIT.
             </div>
           )}
-          <div style={{marginTop: 10, fontSize: 11}}>
-            <span className='muted'>Underlying command (click to copy):</span>{' '}
-            <CodeBlock multiline>{(set.commands ?? []).join('\n')}</CodeBlock>
+
+          <button className='btn' style={{width: '100%', marginTop: 12}} disabled={busy !== ''} onClick={openJadx}>
+            <Icon.Layers/>{busy === 'jadx' ? '…opening' : 'Open in jadx'}
+          </button>
+          <div className='muted' style={{fontSize: 11, marginTop: 6}}>
+            {jadxLabel(info)}
+            {info?.installed && !info.java && <> · <span style={{color: 'var(--danger)'}}>no Java runtime</span></>}
+            {split && <> · all {count} APKs open in one session</>}
+          </div>
+
+          <button className='btn' style={{width: '100%', marginTop: 12}} disabled={busy !== ''} onClick={exportBinaries}>
+            <Icon.Cpu/>{busy === 'bin' ? '…collecting' : 'Download binaries'}
+          </button>
+          <div className='muted' style={{fontSize: 11, marginTop: 6}}>
+            Native libraries, shipped executables and the runtime blobs beside them, in one zip.
           </div>
         </>
       )}
@@ -448,19 +581,43 @@ function ApkTransferSection({device, pkg}: {device: adb.Device; pkg: string}) {
   );
 }
 
-function DetailSection({title, children}: {title: string; children: React.ReactNode}) {
+function DetailSection({title, children, defaultOpen}: {title: string; children: React.ReactNode; defaultOpen?: boolean}) {
   // Sections only render when they contain non-empty Detail rows, so we peek
   // at children and bail when everything resolved to null. Without this the
   // headings would dangle over empty space for system apps that don't expose
   // e.g. compileSdk or signatures.
   const arr = React.Children.toArray(children).filter(c => c !== null && c !== undefined);
+  const [open, setOpen] = useSectionOpen(title, !!defaultOpen);
   if (arr.length === 0) return null;
   return (
     <div className='app-detail-section'>
-      <div className='app-detail-section-title'>{title}</div>
-      {children}
+      <div className='app-detail-section-title' onClick={() => setOpen(!open)}
+           style={{cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none'}}>
+        <span style={{display: 'inline-block', transition: 'transform .12s', transform: open ? 'rotate(90deg)' : 'none', opacity: .7}}>›</span>
+        {title}
+      </div>
+      {open && children}
     </div>
   );
+}
+
+// useSectionOpen persists a section's state per title, so the panel comes back
+// the way the user left it instead of re-collapsing on every app they click.
+function useSectionOpen(key: string, initial: boolean): [boolean, (v: boolean) => void] {
+  const storeKey = 'adbq.appdetail.' + key;
+  const [open, setOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem(storeKey);
+      return v === null ? initial : v === '1';
+    } catch {
+      return initial;
+    }
+  });
+  const set = (v: boolean) => {
+    setOpen(v);
+    try { localStorage.setItem(storeKey, v ? '1' : '0'); } catch { /* private mode: state is per-session */ }
+  };
+  return [open, set];
 }
 
 function Detail({k, v, mono, copy}: {k: string; v?: string; mono?: boolean; copy?: boolean}) {

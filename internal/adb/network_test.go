@@ -1,6 +1,9 @@
 package adb
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseIfconfigBusybox(t *testing.T) {
 	out := `wlan0     Link encap:Ethernet  HWaddr 02:00:00:11:22:33
@@ -59,4 +62,21 @@ func findIface(ifs []NetIface, name string) *NetIface {
 		}
 	}
 	return nil
+}
+
+// The proxy command used to be assembled in the UI, which is how the displayed
+// line and the executed one could disagree. Both now come from here.
+func TestProxyCommandMatchesWhatSetProxyRuns(t *testing.T) {
+	if got := ProxyCommand("SER", "10.0.0.5:8080"); got != "adb -s SER shell settings put global http_proxy 10.0.0.5:8080" {
+		t.Errorf("ProxyCommand = %q", got)
+	}
+	// Clearing is not a delete: the framework reads :0 as "no proxy".
+	for _, empty := range []string{"", "   "} {
+		if got := ProxyCommand("SER", empty); !strings.HasSuffix(got, "http_proxy :0") {
+			t.Errorf("ProxyCommand(%q) = %q, want it to clear with :0", empty, got)
+		}
+	}
+	if proxyValue("1.2.3.4:9") != "1.2.3.4:9" || proxyValue("") != ":0" {
+		t.Error("proxyValue disagrees with the rendered command")
+	}
 }

@@ -312,6 +312,22 @@ func sumFile(path string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// tcpdumpInstallPath is where an installed tcpdump lands. /data/local/tmp is
+// writable without root and executable on the ROMs this tool targets.
+const tcpdumpInstallPath = "/data/local/tmp/tcpdump"
+
+// TcpdumpInstallCommands renders the device half of an install: the push, the
+// chmod, and the version probe that catches a binary built for another ABI. The
+// download and its checksum happen on this computer and are shown as source +
+// hash in the same dialog, not as commands.
+func TcpdumpInstallCommands(serial string, render CommandRenderer) []string {
+	return []string{
+		DeviceCommandText(serial, "push", "<tcpdump>", tcpdumpInstallPath),
+		render("chmod 755 "+tcpdumpInstallPath, false),
+		render(tcpdumpInstallPath+" --version 2>&1", false),
+	}
+}
+
 // InstallTcpdump copies a local tcpdump binary onto the device at
 // /data/local/tmp/tcpdump and chmod 755's it. Returns the on-device path.
 // Caller is expected to have validated the local file. We deliberately do not
@@ -319,7 +335,7 @@ func sumFile(path string) string {
 // blobs from unverified sources. The UI uses a file picker so the user is in
 // the loop about which binary lands on their device.
 func (c *Client) InstallTcpdump(ctx context.Context, serial, localPath string) (string, error) {
-	const remote = "/data/local/tmp/tcpdump"
+	const remote = tcpdumpInstallPath
 	if _, err := c.PushFile(ctx, serial, localPath, remote); err != nil {
 		return "", fmt.Errorf("push failed: %w", err)
 	}

@@ -2,7 +2,7 @@ import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Combobox, IconBtn, SearchInput, showToast} from '../ui';
+import {Combobox, CommandChip, IconBtn, SearchInput, showToast} from '../ui';
 import {useStore} from '../store';
 import {logcatStore, useLogcat} from '../logcatStore';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
@@ -57,6 +57,22 @@ export function LogcatScreen({device}: {device: adb.Device}) {
   useEffect(() => {
     logcatStore.ensure(device.id, logcatStore.getState(device.id).pkgFilter);
   }, [device.id]);
+
+  // The logcat invocation actually feeding this pane, pid filter and all. Only
+  // the backend knows which PID it attached to, so it renders the line
+  // (CLAUDE.md §4.1 K3) — re-read when the filter changes, and once shortly
+  // after, because attaching to a package that has just started takes a moment.
+  const [cmds, setCmds] = useState<adb.StreamCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) return;
+    let live = true;
+    const read = () => API.LogcatCommands(device.id)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    read();
+    const t = setTimeout(read, 1500);
+    return () => { live = false; clearTimeout(t); };
+  }, [device.id, state.pkgFilter]);
 
   useEffect(() => {
     if (!device?.id) return;
@@ -202,6 +218,10 @@ export function LogcatScreen({device}: {device: adb.Device}) {
         <IconBtn title='Clear' onClick={() => { logcatStore.clear(device.id); setExpanded(null); }}>
           <Icon.Trash width={14} height={14}/>
         </IconBtn>
+        <CommandChip label='Logcat' groups={[
+          {label: 'Streaming', commands: cmds?.stream, note: 'The PID filter is whichever process the feed attached to.'},
+          {label: 'Clear on device', commands: cmds?.clear},
+        ]}/>
         <button className='btn sm' onClick={() => exportLines(filtered, device.id)}><Icon.Download width={12} height={12}/>Export</button>
       </div>
 
@@ -282,7 +302,10 @@ export function LogcatScreen({device}: {device: adb.Device}) {
         <span>{state.paused ? 'Paused' : 'Live'} · ≥{levelMin} · {state.pkgFilter ? `pkg=${state.pkgFilter}` : 'all processes'} · {state.showSystem ? 'apps + system' : 'apps only'}</span>
         {collapsed > 0 && <span title='Identical lines repeated within 10 seconds'>{collapsed} repeats hidden</span>}
         <div style={{flex: 1}}/>
-        <span className='subtle'>adb -s {device.id} logcat -v threadtime{state.pkgFilter ? ` --pid=$(pidof ${state.pkgFilter})` : ''}</span>
+        {/* The command lives in the toolbar's chip, which renders what actually
+            runs; a second, hand-written copy here disagreed with it (the feed
+            resolves a PID, it does not run pidof). */}
+        <span className='subtle'>{device.id}</span>
       </div>
     </div>
   );

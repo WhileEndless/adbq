@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=adbq
+GenericName=ADB Manager
+Comment=Manage Android devices over adb — logcat, shell, apps, files, network, capture
+# Resolved from PATH so the entry works wherever the user unpacked the binary,
+# as long as it is on PATH. Installers that place it elsewhere should rewrite
+# this line rather than assume a prefix.
+Exec=adbq
+# Icon name, not a path: desktop environments look it up under
+# share/icons/hicolor/…/apps/adbq.png, which is where the tarball's install
+# step puts it.
+Icon=adbq
+Terminal=false
+Categories=Development;Utility;
+Keywords=android;adb;debug;logcat;frida;
+StartupWMClass=adbq

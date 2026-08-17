@@ -3,7 +3,7 @@ import {adb, main} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOff, EventsOn} from '../../wailsjs/runtime';
 import {Icon} from '../icons';
-import {Badge, IconBtn, SearchInput, showToast} from '../ui';
+import {Badge, CommandChip, IconBtn, SearchInput, showToast} from '../ui';
 
 interface ProcRow {
   pid: number;
@@ -38,6 +38,18 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
   const [running, setRunning] = useState(false);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  // The procfs sweep behind this table, as the user it is being read by: the
+  // stream drops to the shell user when su is refused, which is also why a table
+  // can come back half-empty (CLAUDE.md §4.1 K3).
+  const [cmds, setCmds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!device?.id) return;
+    let live = true;
+    API.ProcessCommands(device.id)
+      .then(c => { if (live) setCmds(c || []); })
+      .catch(() => { if (live) setCmds([]); });
+    return () => { live = false; };
+  }, [device?.id, snap?.root]);
 
   useEffect(() => {
     if (!device?.id) return;
@@ -133,6 +145,7 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
         <IconBtn title={paused ? 'Resume (p)' : 'Pause (p)'} active={paused} onClick={() => setPaused(p => !p)}>
           {paused ? <Icon.Play width={14} height={14}/> : <Icon.Pause width={14} height={14}/>}
         </IconBtn>
+        <CommandChip label='Sampling' commands={cmds}/>
       </div>
 
       <div className='logcat-toolbar proc-search'>
@@ -196,7 +209,8 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
         <span>{filteredSorted.length} visible</span>
         <span>{paused ? 'Paused' : 'Live'} · refresh {interval}s</span>
         <div style={{flex: 1}}/>
-        <span className='subtle'>adb -s {device.id} shell cat /proc/stat /proc/[0-9]*/stat /proc/meminfo · {interval}s</span>
+        {/* Same reasoning as Logcat: the toolbar chip holds the real command. */}
+        <span className='subtle'>procfs · {device.id}</span>
       </div>
     </div>
   );

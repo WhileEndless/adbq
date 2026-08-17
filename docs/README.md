@@ -9,5 +9,6 @@ Bu klasör projenin geliştirme rehberlerini içerir.
 - [compatibility-roadmap.md](compatibility-roadmap.md) — Eski/minimal Android (API 21-26) uyumluluk planı.
 - [command-visibility.md](command-visibility.md) — Çalıştırılan adb komutunun UI'da gösterilmesi: kural, desen, envanter, fazlı plan.
 - [apk-export-install.md](apk-export-install.md) — Split APK (App Bundle) dışa aktarma (`.apks`) ve geri kurma.
+- [emulator-manager.md](emulator-manager.md) — AVD/system-image yönetimi, emülatör yaşam döngüsü, rootAVD ile rootlama ve sertifika zinciri.
 
 Bağlayıcı kurallar için: [`../CLAUDE.md`](../CLAUDE.md).

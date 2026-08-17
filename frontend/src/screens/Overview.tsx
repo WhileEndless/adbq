@@ -2,7 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, Dropdown, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, Dropdown, commandToast, confirmDialog, showToast} from '../ui';
 import {getCached, mutateData} from '../cache';
 import {pickApkAndInstall} from '../lib/apk';
 
@@ -32,13 +32,34 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
     return () => { alive = false; clearInterval(t); };
   }, [device?.id]);
 
+  // The commands behind this screen's buttons. From Go, so the reboot dialog
+  // shows the line that runs rather than one typed out here (CLAUDE.md §4.1).
+  const [cmds, setCmds] = useState<adb.DeviceCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setCmds(null); return; }
+    let live = true;
+    API.DeviceCommands(device.id, 30)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    return () => { live = false; };
+  }, [device?.id]);
+
   const memPct = stats && stats.memTotalKb > 0 ? Math.round((1 - stats.memAvailKb / stats.memTotalKb) * 100) : 0;
   const storagePct = stats && stats.storageTotalKb > 0 ? Math.round((1 - stats.storageFreeKb / stats.storageTotalKb) * 100) : 0;
+
+  function rebootCmd(mode: string): string[] {
+    if (mode === 'recovery') return cmds?.rebootRecovery ?? [];
+    if (mode === 'bootloader') return cmds?.rebootBootloader ?? [];
+    // fastboot and anything else share the plain form with the mode appended,
+    // which only Go knows how to spell — fall back to no preview rather than
+    // guessing at it.
+    return mode === '' ? (cmds?.reboot ?? []) : [];
+  }
 
   function doReboot(mode: string) {
     confirmDialog({
       title: `Reboot ${mode || 'device'}?`,
-      body: `adb -s ${device.id} reboot${mode ? ' ' + mode : ''}`,
+      body: <CommandPreview commands={rebootCmd(mode)} defaultOpen/>,
       confirmLabel: 'Reboot',
       danger: true,
     }).then(ok => {
@@ -58,7 +79,7 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
         </h1>
         <span className='subtitle mono'>{device.id} · {device.via}</span>
         <div className='spacer' style={{flex: 1}}/>
-        <button className='btn' onClick={() => takeShot(device.id)}>
+        <button className='btn' onClick={() => takeShot(device.id, cmds?.screenshot)}>
           <Icon.Camera/> Screenshot
         </button>
         <Dropdown trigger={<button className='btn'><Icon.Refresh/>Reboot</button>} items={[
@@ -68,8 +89,12 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
           {label: 'Reboot to fastboot',   onClick: () => doReboot('fastboot')},
           {label: '', onClick: () => {}, divider: true},
           {label: 'Power off', danger: true, onClick: () => {
-            confirmDialog({title: 'Power off device?', confirmLabel: 'Power off', danger: true}).then(ok => {
-              if (ok) API.RunCommand(device.id, 'reboot -p').catch(() => API.RunCommandRoot(device.id, 'reboot -p'));
+            confirmDialog({
+              title: 'Power off device?',
+              body: <CommandPreview commands={cmds?.powerOff ?? []} defaultOpen/>,
+              confirmLabel: 'Power off', danger: true,
+            }).then(ok => {
+              if (ok) API.PowerOffDevice(device.id).catch(e => showToast({title: 'Power off failed', body: String(e), kind: 'err'}));
             });
           }},
         ]}/>
@@ -96,9 +121,23 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
 
         <div className='grid-2' style={{gap: 14, marginBottom: 14}}>
           <div className='card'>
-            <div className='card-header'><div className='title'>Quick actions</div></div>
+            <div className='card-header'>
+              <div className='title'>Quick actions</div>
+              <div style={{flex: 1}}/>
+              {/* One reference view for the panel instead of a command under
+                  every button — the panel stays a panel. */}
+              <CommandChip label='Quick actions' groups={[
+                {label: 'Screenshot', commands: cmds?.screenshot},
+                {label: 'Screen record', commands: cmds?.screenRecord, note: 'Stopping early is what finalises the MP4.'},
+                {label: 'Mirror (scrcpy)', commands: cmds?.scrcpy},
+                {label: 'Wi-Fi adb', commands: cmds?.tcpip},
+                {label: 'Restart adbd', commands: cmds?.restartAdbd},
+                {label: 'Reboot', commands: cmds?.reboot},
+                {label: 'Power off', commands: cmds?.powerOff},
+              ]}/>
+            </div>
             <div className='card-body' style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6}}>
-              <QA icon={<Icon.Camera/>} label='Screenshot' onClick={() => takeShot(device.id)}/>
+              <QA icon={<Icon.Camera/>} label='Screenshot' onClick={() => takeShot(device.id, cmds?.screenshot)}/>
               <QA icon={<Icon.Download/>} label='Save as…' onClick={() =>
                 API.SaveScreenshotAs(device.id).then(p => p && showToast({
                   title: 'Saved', body: p, kind: 'ok', mono: true,
@@ -114,41 +153,70 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
                   actions: [
                     {label: 'Open', onClick: () => API.OpenPath(p)},
                     {label: 'Reveal', onClick: () => API.RevealPath(p)},
+                    ...commandToast(cmds?.screenRecord),
                   ],
                 })).catch(e => showToast({title: 'Recording failed', body: String(e), kind: 'err'}));
               }}/>
               <QA icon={<Icon.Terminal/>} label='Open shell' onClick={() => setScreen?.('shell')}/>
-              <ScrcpyAction device={device}/>
+              <ScrcpyAction device={device} cmd={cmds?.scrcpy}/>
               <QA icon={<Icon.Upload/>} label='Install APK / APKS' onClick={() =>
                 pickApkAndInstall(device.id)}/>
               <QA icon={<Icon.Wifi/>} label='Wi-Fi adb' onClick={async () => {
-                const ok = await confirmDialog({title: 'Enable Wi-Fi adb (tcpip 5555)?', body: `Runs adb -s ${device.id} tcpip 5555 on the host. Connect afterwards with adb connect ${device.ip || '<ip>'}:5555.`, confirmLabel: 'Enable'});
+                const ok = await confirmDialog({
+                  title: 'Enable Wi-Fi adb (tcpip 5555)?',
+                  body: <>
+                    Afterwards connect with <span className='mono'>adb connect {device.ip || '<ip>'}:5555</span>.
+                    <CommandPreview commands={cmds?.tcpip ?? []} defaultOpen/>
+                  </>,
+                  confirmLabel: 'Enable',
+                });
                 if (!ok) return;
                 try {
                   await API.TcpipMode(device.id, 5555);
-                  showToast({title: 'Wi-Fi adb enabled', body: `adb connect ${device.ip || '<ip>'}:5555`, kind: 'ok', mono: true});
+                  // The body names the address to connect to, not a command:
+                  // the command to copy is the one that just ran.
+                  showToast({
+                    title: 'Wi-Fi adb enabled', body: `${device.ip || '<device ip>'}:5555`,
+                    kind: 'ok', mono: true, actions: commandToast(cmds?.tcpip),
+                  });
                 } catch (e) {
                   showToast({title: 'tcpip failed', body: String(e), kind: 'err'});
                 }
               }}/>
               <QA icon={<Icon.Refresh/>} label='Restart adbd' onClick={() =>
-                confirmDialog({title: 'Restart adbd?', body: 'Drops the current adb connection. Replug or reconnect afterwards.', danger: true, confirmLabel: 'Restart adbd'}).then(ok => {
+                confirmDialog({
+                  title: 'Restart adbd?',
+                  body: <>
+                    Drops the current adb connection. Replug or reconnect afterwards.
+                    <CommandPreview commands={cmds?.restartAdbd ?? []} defaultOpen/>
+                  </>,
+                  danger: true, confirmLabel: 'Restart adbd',
+                }).then(ok => {
                   if (!ok) return;
-                  API.RunCommandRoot(device.id, 'nohup sh -c "stop adbd; sleep 1; start adbd" >/dev/null 2>&1 &')
-                    .then(() => showToast({title: 'adbd restarting', body: 'reconnect in 2-3s', kind: 'info', mono: true}));
+                  API.RestartAdbd(device.id)
+                    .then(() => showToast({
+                      title: 'adbd restarting', body: 'reconnect in 2-3s',
+                      kind: 'info', mono: true, actions: commandToast(cmds?.restartAdbd),
+                    }))
+                    .catch(e => showToast({title: 'Restart failed', body: String(e), kind: 'err'}));
                 })}/>
             </div>
           </div>
           <div className='card'>
-            <div className='card-header'><div className='title'>Root</div></div>
+            <div className='card-header'>
+              <div className='title'>Root</div>
+              <div style={{flex: 1}}/>
+              <CommandChip label='Re-test root' commands={cmds?.rootProbe}/>
+            </div>
             <div className='card-body'>
               <Kv k='Status' v={device.root ? 'rooted' : 'unrooted'}/>
               <Kv k='Method' v={device.rootMethod || '—'}/>
               <Kv k='Detected via' v={device.root ? 'su / magisk / id' : 'no su; no magisk dir'}/>
               <div style={{marginTop: 10, display: 'flex', gap: 6}}>
                 <button className='btn' onClick={() =>
-                  API.RunCommand(device.id, 'which su; ls -d /sbin/.magisk /data/adb/magisk 2>/dev/null; magisk -V 2>/dev/null')
-                    .then(o => showToast({title: 'Re-tested root', body: o || '(no signals)', kind: 'info', mono: true}))}>
+                  API.RootSignals(device.id)
+                    .then(o => showToast({title: 'Re-tested root', body: o || '(no signals)', kind: 'info', mono: true}))
+                    .catch(e => showToast({title: 'Re-test failed', body: String(e), kind: 'err'}))}>
                   <Icon.Refresh/>Re-test
                 </button>
               </div>
@@ -186,7 +254,7 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
   );
 }
 
-function ScrcpyAction({device}: {device: adb.Device}) {
+function ScrcpyAction({device, cmd}: {device: adb.Device; cmd?: string[] | null}) {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [active, setActive] = useState(false);
   useEffect(() => {
@@ -217,20 +285,21 @@ function ScrcpyAction({device}: {device: adb.Device}) {
         API.StopScrcpy(device.id).then(() => { setActive(false); showToast({title: 'scrcpy stopped', kind: 'ok'}); });
       } else {
         API.StartScrcpy(device.id)
-          .then(() => { setActive(true); showToast({title: 'scrcpy starting', kind: 'ok'}); })
+          .then(() => { setActive(true); showToast({title: 'scrcpy starting', kind: 'ok', actions: commandToast(cmd)}); })
           .catch(e => showToast({title: 'scrcpy failed', body: String(e), kind: 'err'}));
       }
     }}/>
   );
 }
 
-function takeShot(serial: string) {
+function takeShot(serial: string, cmd?: string[] | null) {
   API.TakeScreenshot(serial)
     .then(p => showToast({
       title: 'Screenshot saved', body: p, kind: 'ok', mono: true,
       actions: [
         {label: 'Open', onClick: () => API.OpenPath(p)},
         {label: 'Reveal', onClick: () => API.RevealPath(p)},
+        ...commandToast(cmd),
       ],
     }))
     .catch(e => showToast({title: 'Screenshot failed', body: String(e), kind: 'err'}));

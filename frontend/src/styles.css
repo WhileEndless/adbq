@@ -112,7 +112,11 @@ input, select, textarea { font: inherit; color: inherit; }
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  padding: 0 10px 0 80px; /* leave room for macOS traffic lights */
+  /* Aligned with the sidebar's nav labels (10px sidebar padding + 8px nav
+     padding). The old 80px reserved room for macOS traffic lights, which live
+     in the native title bar above this row — the window is not frameless — so
+     it was reserving space for something that is never drawn here. */
+  padding: 0 10px 0 18px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
@@ -127,22 +131,6 @@ input, select, textarea { font: inherit; color: inherit; }
   z-index: 20;
 }
 .titlebar .meta-line { font-family: var(--font-mono); font-size: 11px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.titlebar .traffic {
-  position: absolute;
-  left: 12px;
-  top: 11px;
-  display: flex;
-  gap: 8px;
-}
-.titlebar .traffic span {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  display: block;
-}
-.titlebar .traffic span:nth-child(1) { background: #ec6a5e; }
-.titlebar .traffic span:nth-child(2) { background: #f5bd4f; }
-.titlebar .traffic span:nth-child(3) { background: #61c454; }
 .titlebar-spacer { flex: 1; }
 .titlebar .brand {
   font-weight: 600;
@@ -158,6 +146,12 @@ input, select, textarea { font: inherit; color: inherit; }
   border-radius: 2px;
   background: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* The mark carries its own dark tile, so it needs no themed treatment — just
+   enough rounding that its corners agree with the titlebar's other controls. */
+.titlebar .brand .brand-mark {
+  border-radius: 5px;
+  display: block;
 }
 .titlebar .meta { font-family: var(--font-mono); font-size: 11px; }
 
@@ -306,8 +300,11 @@ input, select, textarea { font: inherit; color: inherit; }
 .sidebar .devicecard .badges {
   display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px;
 }
+/* Host actions sit at the bottom of the sidebar: they are about this computer,
+   not the connected device the groups above are scoped to. `auto` pushes the
+   pair (this group + the footer) down together. */
+.sidebar .group.host { margin-top: auto; }
 .sidebar .footer {
-  margin-top: auto;
   padding: 8px;
   display: flex;
   gap: 8px;
@@ -340,6 +337,12 @@ input, select, textarea { font: inherit; color: inherit; }
 .badge.accent { background: var(--accent-soft); color: var(--accent-strong); }
 :root[data-theme="dark"] .badge.accent { color: #c5a3ff; }
 .badge .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+/* Inline warning copy. --warn is picked for badges and status dots, where it
+   sits on a tinted background; as 11px text on a white panel it lands near 2:1
+   contrast. Light mode gets the darker tone .badge.warn already uses. */
+.warn-text { color: #b07d20; }
+:root[data-theme="dark"] .warn-text { color: var(--warn); }
 
 /* ─── Main content ─────────────────────────────────────────────────────────── */
 .main {
@@ -683,6 +686,36 @@ input, select, textarea { font: inherit; color: inherit; }
   color: #fff;
   background: var(--accent);
   box-shadow: 0 1px 3px var(--accent-soft-strong);
+}
+
+/* Underlined screen tabs (Network, Emulators): a full-width strip under the
+   header, for screens whose sections are big enough to be pages of their own.
+   `.subtabs` above is the other idiom — a compact segmented control for
+   switching within one page. Both had been hand-rolled inline per screen. */
+.tabbar {
+  display: flex;
+  overflow-x: auto;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+.tabbar-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: color 0.12s, border-color 0.12s;
+}
+.tabbar-tab:hover { color: var(--text); }
+.tabbar-tab.active {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
 }
 
 /* Frida live session console — reuses the log color tokens for consistency. */
@@ -1454,6 +1487,25 @@ select.btn:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 /* Native popup uses the system palette; nudge a usable color set so the
    list of options isn't unreadable on Linux/Win WebView2 either. */
 select.btn option { background: var(--panel); color: var(--text); }
+
+/* A <select> inside a form field wears `.input`, and needed the same
+   treatment: without it the control keeps the platform's own chrome inside
+   our border (two frames on macOS, no chevron at all on Windows) and its
+   popup inherits the system palette. */
+select.input {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding-right: 24px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  cursor: pointer;
+}
+:root[data-theme="dark"] select.input {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23bbb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+select.input option { background: var(--panel); color: var(--text); }
 
 /* ─── Dark-theme readability tweaks ──────────────────────────────────────
    The neutral palette has --text-subtle close to the surface in dark mode,

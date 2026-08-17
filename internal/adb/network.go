@@ -299,13 +299,29 @@ func hexLEToIPv4(h string) string {
 		strconv.FormatInt(b[1], 10) + "." + strconv.FormatInt(b[0], 10)
 }
 
+// proxyValue is what lands in the setting. Clearing it is not a delete: the
+// framework reads `:0` as "no proxy", and an empty value leaves the old one in
+// place on some builds.
+func proxyValue(hostPort string) string {
+	if strings.TrimSpace(hostPort) == "" {
+		return ":0"
+	}
+	return hostPort
+}
+
+// ProxyCommand renders the command SetProxy will run.
+//
+// It lives here rather than in the UI because a command the user is shown must
+// be the one that runs: the two drifted apart while the text was assembled in
+// the frontend, and a wrong command is worse than no command
+// (CLAUDE.md §4.1).
+func ProxyCommand(serial, hostPort string) string {
+	return "adb -s " + serial + " shell settings put global http_proxy " + proxyValue(hostPort)
+}
+
 // SetProxy sets the global HTTP proxy. Use "" to clear.
 func (c *Client) SetProxy(ctx context.Context, serial, hostPort string) (string, error) {
-	v := hostPort
-	if v == "" {
-		v = ":0"
-	}
-	return c.Shell(ctx, serial, "settings put global http_proxy "+v)
+	return c.Shell(ctx, serial, "settings put global http_proxy "+proxyValue(hostPort))
 }
 
 // safeHost only allows hostname characters so it can be interpolated into a
@@ -353,11 +369,7 @@ func (c *Client) DNSLookup(ctx context.Context, serial, host string) (string, er
 	//    The matching is done host-side in Go (awk is absent on stripped ROMs);
 	//    here we just emit each resolved file path followed by its contents,
 	//    prefixed so the parser can attribute lines to a filename.
-	hostsCat := "for f in /system/etc/hosts /etc/hosts; do " +
-		"  r=$(readlink -f \"$f\" 2>/dev/null || echo \"$f\"); " +
-		"  [ -r \"$r\" ] && { echo \"@@FILE@@ $r\"; cat \"$r\"; }; " +
-		"done 2>/dev/null"
-	if out, err := c.Shell(ctx, serial, hostsCat); err == nil {
+	if out, err := c.Shell(ctx, serial, hostsCatRemote()); err == nil {
 		if matches := matchHostsLines(out, host); matches != "" {
 			sections = append(sections, "hosts file:\n"+matches)
 		}
@@ -365,7 +377,7 @@ func (c *Client) DNSLookup(ctx context.Context, serial, host string) (string, er
 
 	// 2. Bionic resolver via ping (respects hosts). `-c 1 -W 2` keeps it short.
 	//    `head` is absent on stripped ROMs, so cap the output host-side.
-	if out, err := c.Shell(ctx, serial, "ping -c 1 -W 2 "+q+" 2>&1"); err == nil {
+	if out, err := c.Shell(ctx, serial, pingRemote(q)); err == nil {
 		out = strings.TrimSpace(firstNLines(out, 2))
 		if out != "" {
 			sections = append(sections, "ping (bionic resolver):\n"+out)
@@ -376,7 +388,7 @@ func (c *Client) DNSLookup(ctx context.Context, serial, host string) (string, er
 	//    /system/bin/ping6 against the DNS server. Skip the section entirely
 	//    when the tool isn't installed (toybox builds often omit nslookup) so
 	//    the user doesn't see a noisy "not found" line.
-	if out, err := c.Shell(ctx, serial, "command -v nslookup >/dev/null 2>&1 && nslookup "+q+" 2>&1"); err == nil {
+	if out, err := c.Shell(ctx, serial, nslookupRemote(q)); err == nil {
 		out = strings.TrimSpace(firstNLines(out, 10))
 		if out != "" && !strings.Contains(out, "not found") {
 			sections = append(sections, "nslookup (DNS only, ignores hosts):\n"+out)
@@ -389,17 +401,55 @@ func (c *Client) DNSLookup(ctx context.Context, serial, host string) (string, er
 	return strings.Join(sections, "\n\n"), nil
 }
 
+// The three reads DNSLookup combines, each named so the preview and the lookup
+// cannot drift apart.
+
+func hostsCatRemote() string {
+	return "for f in /system/etc/hosts /etc/hosts; do " +
+		"  r=$(readlink -f \"$f\" 2>/dev/null || echo \"$f\"); " +
+		"  [ -r \"$r\" ] && { echo \"@@FILE@@ $r\"; cat \"$r\"; }; " +
+		"done 2>/dev/null"
+}
+
+func pingRemote(q string) string { return "ping -c 1 -W 2 " + q + " 2>&1" }
+
+func nslookupRemote(q string) string {
+	return "command -v nslookup >/dev/null 2>&1 && nslookup " + q + " 2>&1"
+}
+
+// DNSLookupCommands renders the reads a lookup performs, in order. Returns
+// nothing for a host name adbq would refuse to interpolate.
+func DNSLookupCommands(serial, host string, render CommandRenderer) []string {
+	q := safeHost(host)
+	if q == "" {
+		return nil
+	}
+	return []string{
+		render(hostsCatRemote(), false),
+		render(pingRemote(q), false),
+		render(nslookupRemote(q), false),
+	}
+}
+
 // FlushDNS clears the device-side DNS resolver cache. Required after editing
 // /system/etc/hosts because Android 9+ netd caches resolutions and will keep
 // returning stale IPs until either the cache TTL expires or it is flushed.
 // Best-effort: tries `ndc` (root), then per-network resolver clear, then a
 // netd restart as last resort.
 func (c *Client) FlushDNS(ctx context.Context, serial string) (string, error) {
-	// ndc resolver clearnetdns <iface> works on Android 7+, requires root.
-	// Pure shell builtins are used to parse iface/netId lists because awk is
-	// absent on stripped ROMs. `ip -o link` lines look like "2: eth0: <...>";
-	// `ndc network list` netId rows begin with a digit.
-	script := `set -e
+	out, _, err := c.ShellSU(ctx, serial, flushDNSScript())
+	return out, err
+}
+
+// flushDNSScript clears netd's DNS cache for every real interface and netId.
+//
+// `ndc resolver clearnetdns <iface>` works on Android 7+ and needs root; newer
+// releases flush per netId instead, so both are attempted. Interface and netId
+// lists are parsed with shell builtins because awk is absent on stripped ROMs:
+// `ip -o link` lines look like "2: eth0: <...>", and `ndc network list` netId
+// rows begin with a digit.
+func flushDNSScript() string {
+	return `set -e
 ip -o link show 2>/dev/null | while IFS= read -r line; do
   rest=${line#*: }            # drop "<index>: "
   name=${rest%%:*}            # keep up to next ":"
@@ -416,8 +466,6 @@ ndc network list 2>/dev/null | while IFS= read -r line; do
   esac
 done
 echo "DONE"`
-	out, _, err := c.ShellSU(ctx, serial, script)
-	return out, err
 }
 
 // HostLANIPs returns the host machine's non-loopback IPv4 addresses,

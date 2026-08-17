@@ -3,7 +3,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOn, EventsOff} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
-import {Badge, Modal, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, Modal, SearchInput, commandToast, confirmDialog, showToast} from '../ui';
 import {useStore} from '../store';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
 import {rootUnavailableReason} from '../lib/android';
@@ -136,7 +136,10 @@ export function FridaScreen({device}: {device: adb.Device}) {
           API.ListFridaServers(device.id).then(list => {
             const ok = (list || []).some(x => x.active);
             if (ok) {
-              showToast({title: 'frida-server started', body: `${s.version || s.name} on ${iface}:${port}`, kind: 'ok', mono: true});
+              showToast({
+                title: 'frida-server started', body: `${s.version || s.name} on ${iface}:${port}`,
+                kind: 'ok', mono: true, actions: commandToast(cmds?.start),
+              });
               setStarting(null);
               reload();
             } else if (tries >= 12) {
@@ -186,13 +189,36 @@ export function FridaScreen({device}: {device: adb.Device}) {
     }).catch(e => showToast({title: 'Push failed', body: String(e), kind: 'err'}));
   }
   function removeBinary(s: adb.FridaServer) {
-    confirmDialog({title: 'Delete binary?', body: s.path, confirmLabel: 'Delete', danger: true}).then(ok => {
-      if (!ok) return;
-      API.DeleteFile(device.id, s.path, false, false).then(reload);
-    });
+    // The rm comes from Go, same as everywhere else a file is deleted.
+    API.FileCommands(device.id, {dir: '/data/local/tmp', name: s.name, isDir: false, asRoot: false, mode: '', owner: ''} as adb.FileCommandRequest)
+      .catch(() => null)
+      .then(fc => confirmDialog({
+        title: 'Delete binary?',
+        body: <>
+          <span className='mono'>{s.path}</span>
+          <CommandPreview commands={fc?.delete ?? []} defaultOpen/>
+        </>,
+        confirmLabel: 'Delete', danger: true,
+      }))
+      .then(ok => {
+        if (!ok) return;
+        API.DeleteFile(device.id, s.path, false, false).then(reload);
+      });
   }
 
   const active = servers.find(s => s.active);
+
+  // Everything this tab does to the device, as commands. Only Go knows the
+  // daemonizing form and the `su` wrapper, so it renders them (CLAUDE.md §4.1).
+  const [cmds, setCmds] = useState<adb.FridaCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setCmds(null); return; }
+    let live = true;
+    API.FridaCommands(device.id, active?.path || '', active?.port || port)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    return () => { live = false; };
+  }, [device?.id, active?.path, active?.port, port]);
 
   return (
     <div className='screen'>
@@ -209,6 +235,14 @@ export function FridaScreen({device}: {device: adb.Device}) {
         </div>
         <div className='spacer' style={{flex: 1}}/>
         {tab === 'server' && <>
+          <CommandChip label='frida-server' groups={[
+            {label: 'Install', commands: cmds?.install, note: 'The download is verified on this computer before anything is pushed.'},
+            {label: 'List binaries', commands: cmds?.list},
+            {label: 'Start', commands: cmds?.start},
+            {label: 'Stop', commands: cmds?.stop},
+            {label: 'Server log', commands: cmds?.log},
+            {label: 'Port forward', commands: cmds?.forward},
+          ]}/>
           <button className='btn primary' onClick={openInstall}><Icon.Download/>Install server</button>
           <button className='btn' onClick={pushBinary}><Icon.Upload/>Push binary</button>
           <button className='btn' onClick={reload}><Icon.Refresh/></button>
@@ -228,8 +262,11 @@ export function FridaScreen({device}: {device: adb.Device}) {
           <div className='card-body'>
             {active ? (
               <>
-                <div className='mono' style={{fontSize: 12, marginBottom: 8}}>
-                  <span className='muted'>$</span> {active.path} -l {iface}:{active.port}
+                <div className='mono subtle' style={{fontSize: 11, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6}}>
+                  <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                    {active.path} · {iface}:{active.port}
+                  </span>
+                  <CommandChip label='Started with' commands={cmds?.start}/>
                 </div>
                 <div style={{display: 'grid', gridTemplateColumns: 'auto 1fr auto 1fr auto', gap: 8, alignItems: 'center'}}>
                   <span className='muted' style={{fontSize: 11}}>Interface</span>
@@ -275,6 +312,7 @@ export function FridaScreen({device}: {device: adb.Device}) {
               ? <Badge kind='warn'>output</Badge>
               : <span className='muted' style={{fontSize: 11}}>clean</span>}
             <div style={{flex: 1}}/>
+            <span onClick={e => e.stopPropagation()}><CommandChip label='Read log' commands={cmds?.log}/></span>
             <button className='btn sm' onClick={e => { e.stopPropagation(); loadServerLog(active?.port || port); setLogOpen(true); }}>
               <Icon.Refresh width={12} height={12}/>
             </button>
@@ -1152,6 +1190,10 @@ function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
                 disabled={rows.length === 0} onClick={() => exportFridaLog(rows, slice.info)}>
           <Icon.Download width={12} height={12}/>Export
         </button>
+        <CommandChip label={slice.info.package} groups={[
+          {label: 'Running', commands: slice.info.commands?.runner},
+          {label: 'Same attach with the frida CLI', commands: slice.info.commands?.cli},
+        ]}/>
         <button className='btn sm' onClick={() => store.clearFridaSession(id)}>Clear</button>
         {!slice.ended && slice.info.status === 'running'
           ? <button className='btn sm danger' onClick={() => store.stopFridaSession(id)}><Icon.Stop/>Stop</button>

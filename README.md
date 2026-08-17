@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+    <img src="docs/assets/logo-light.png" alt="adbq" width="315">
+  </picture>
+</p>
+
 # adbq — ADB Manager
 
 [![release](https://img.shields.io/github/v/release/WhileEndless/adbq?include_prereleases&sort=semver)](https://github.com/WhileEndless/adbq/releases)
@@ -84,7 +91,7 @@ Grab a prebuilt binary for your OS from the
 |----|-------|-----|
 | **macOS** (Apple Silicon + Intel) | `adbq-macos-universal.zip` | Unzip → drag `adbq.app` to Applications |
 | **Windows** (x64) | `adbq-windows-amd64.zip` | Unzip → run `adbq.exe` |
-| **Linux** (x64) | `adbq-linux-amd64.tar.gz` | `tar -xzf … && ./adbq` |
+| **Linux** (x64) | `adbq-linux-amd64.tar.gz` | `tar -xzf … && adbq/adbq` — or `adbq/install.sh` for a launcher entry with the icon |
 
 Verify what you have at any time:
 

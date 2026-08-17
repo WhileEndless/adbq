@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {adb, main} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CodeBlock, SearchInput, Switch, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, SearchInput, Switch, commandToast, confirmDialog, showToast} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
 import {useDeviceData} from '../cache';
 
@@ -38,15 +38,11 @@ export function NetworkScreen({device}: {device: adb.Device}) {
         <button className='btn' onClick={reload}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Refresh</button>
       </div>
 
-      <div style={{borderBottom: '1px solid var(--border)', padding: '0 18px', display: 'flex', gap: 0, overflowX: 'auto'}}>
+      <div className='tabbar'>
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            padding: '10px 12px', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
-            marginBottom: -1, background: 'none',
-            color: tab === t.id ? 'var(--text)' : 'var(--text-muted)',
-            fontWeight: tab === t.id ? 600 : 500, fontSize: 12.5,
-            display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap', cursor: 'pointer',
-          }}>{t.icon}{t.label}</button>
+          <button key={t.id} className={`tabbar-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
+            {t.icon}{t.label}
+          </button>
         ))}
       </div>
 
@@ -121,6 +117,16 @@ function NetProxy({device, info, reload}: {device: adb.Device; info: adb.Network
     if (i > 0) { setHost(v.slice(0, i)); setPort(v.slice(i + 1)); }
     else { setHost(v); setPort(''); }
   }, [info?.proxy]);
+  // The command comes from Go, and follows the fields as they are typed, so
+  // what is shown is what Apply would run (CLAUDE.md §4.1).
+  const [proxyCmd, setProxyCmd] = useState('');
+  useEffect(() => {
+    let live = true;
+    API.ProxyCommand(device.id, host && port ? `${host}:${port}` : '')
+      .then(c => { if (live) setProxyCmd(c); })
+      .catch(() => { if (live) setProxyCmd(''); });
+    return () => { live = false; };
+  }, [device.id, host, port]);
   const PRESETS = [
     {label: 'Burp Suite',  port: 8080},
     {label: 'mitmproxy',   port: 8080},
@@ -129,7 +135,13 @@ function NetProxy({device, info, reload}: {device: adb.Device; info: adb.Network
   const apply = (h = host, p = port) => {
     const v = h && p ? `${h}:${p}` : '';
     API.SetProxy(device.id, v)
-      .then(() => { showToast({title: 'Proxy ' + (v ? 'applied' : 'cleared'), body: v, kind: 'ok', mono: true}); reload(); })
+      .then(() => {
+        showToast({
+          title: 'Proxy ' + (v ? 'applied' : 'cleared'), body: v, kind: 'ok', mono: true,
+          actions: commandToast(proxyCmd ? [proxyCmd] : []),
+        });
+        reload();
+      })
       .catch(e => showToast({title: 'Apply failed', body: String(e), kind: 'err'}));
   };
 
@@ -169,6 +181,7 @@ function NetProxy({device, info, reload}: {device: adb.Device; info: adb.Network
             <input className='input mono' placeholder='port' value={port} onChange={e => setPort(e.target.value)}/>
             <button className='btn primary' onClick={() => apply()}>Apply</button>
           </div>
+          <div style={{marginTop: 8}}><CommandChip label='Proxy' commands={proxyCmd ? [proxyCmd] : []} text='Command'/></div>
           <div style={{marginTop: 10, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap'}}>
             <span className='muted' style={{fontSize: 11}}>Quick presets:</span>
             {PRESETS.map(p => (
@@ -177,10 +190,6 @@ function NetProxy({device, info, reload}: {device: adb.Device; info: adb.Network
                 {p.label}
               </button>
             ))}
-          </div>
-          <div style={{marginTop: 12, fontSize: 11}}>
-            <span className='muted'>Underlying command (click to copy):</span>{' '}
-            <CodeBlock>{`adb -s ${device.id} shell settings put global http_proxy ${host && port ? `${host}:${port}` : ':0'}`}</CodeBlock>
           </div>
         </div>
       </div>
@@ -199,6 +208,17 @@ function NetCert({device}: {device: adb.Device}) {
   const [q, setQ] = useState('');
   const [installing, setInstalling] = useState(false);
   const [last, setLast] = useState<adb.CertInstallResult | null>(null);
+  // What the install will attempt on this device. Root decides whether that is
+  // the system store or a staged manual import, so it comes from the backend.
+  const [plan, setPlan] = useState<adb.CertInstallPlan | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setPlan(null); return; }
+    let live = true;
+    API.PlanCertInstall(device.id)
+      .then(p => { if (live) setPlan(p); })
+      .catch(() => { if (live) setPlan(null); });
+    return () => { live = false; };
+  }, [device?.id]);
 
   const load = () => {
     if (!device?.id) return;
@@ -210,7 +230,19 @@ function NetCert({device}: {device: adb.Device}) {
   };
   useEffect(() => { load(); }, [device?.id]);
 
-  function install() {
+  async function install() {
+    // Landing a CA in the system store remounts or overlays a read-only
+    // partition, so the escalation is read before it runs (CLAUDE.md §4.1 K2).
+    const ok = await confirmDialog({
+      title: plan?.store === 'user' ? 'Stage a CA certificate?' : 'Install a CA into the system store?',
+      body: <>
+        {plan?.note}
+        <CommandPreview commands={plan?.commands ?? []} defaultOpen/>
+      </>,
+      confirmLabel: 'Pick a certificate',
+      danger: plan?.store !== 'user',
+    });
+    if (!ok) return;
     setInstalling(true);
     API.InstallSystemCertWithPicker(device.id)
       .then(res => {
@@ -250,9 +282,12 @@ function NetCert({device}: {device: adb.Device}) {
                   : 'This device is not rooted: the cert is staged to /sdcard and you finish via Settings (user store).'}
               </div>
             </div>
-            <button className='btn primary' onClick={install} disabled={installing}>
-              {installing ? '…installing' : <><Icon.Download/>Install CA</>}
-            </button>
+            <div style={{display: 'flex', gap: 6, alignItems: 'flex-start'}}>
+              <CommandChip label={plan?.store === 'user' ? 'Stage a CA' : 'Install a CA'} commands={plan?.commands}/>
+              <button className='btn primary' onClick={install} disabled={installing}>
+                {installing ? '…installing' : <><Icon.Download/>Install CA</>}
+              </button>
+            </div>
           </div>
           {last && (
             <div className='card' style={{padding: 12, borderColor: last.persistent ? 'var(--ok)' : 'var(--warn)'}}>
@@ -317,6 +352,8 @@ function NetHosts({device}: {device: adb.Device}) {
   const [saved, setSaved] = useState('');
   const [loading, setLoading] = useState(false);
   const [drifted, setDrifted] = useState(false);
+  const [plan, setPlan] = useState<adb.HostsApplyPlan | null>(null);
+  const [flushCmd, setFlushCmd] = useState<string[]>([]);
 
   const load = () => {
     if (!device?.id) return;
@@ -331,6 +368,8 @@ function NetHosts({device}: {device: adb.Device}) {
         setText(live);
         setSaved(persisted || '');
         setDrifted(!!persisted && persisted.trim() !== live.trim());
+        refreshPlan(live);
+        API.NetCommands(device.id, '').then(c => setFlushCmd(c.flushDns ?? [])).catch(() => setFlushCmd([]));
       })
       .catch(e => showToast({title: 'Read hosts failed', body: String(e), kind: 'err'}))
       .finally(() => setLoading(false));
@@ -352,11 +391,29 @@ function NetHosts({device}: {device: adb.Device}) {
     }).catch(() => {});
   }, [device?.id]);
 
-  function apply() {
+  // The plan is for the text in the editor, so it stages the bytes it shows.
+  // Refreshed on demand rather than per keystroke: resolving the real hosts
+  // path is a device call.
+  function refreshPlan(content: string) {
+    API.PlanHostsApply(device.id, content).then(setPlan).catch(() => setPlan(null));
+  }
+
+  async function apply() {
     if (!device.root) {
       showToast({title: 'Root required', body: 'Editing /system/etc/hosts needs root + writable /system.', kind: 'err'});
       return;
     }
+    const p = await API.PlanHostsApply(device.id, text).catch(() => null);
+    setPlan(p);
+    const ok = await confirmDialog({
+      title: `Write ${p?.path || '/system/etc/hosts'}?`,
+      body: <>
+        Tried in order until one write reads back intact; the last resort scaffolds a Magisk module and needs a reboot.
+        <CommandPreview commands={p?.commands ?? []} defaultOpen/>
+      </>,
+      confirmLabel: 'Save & Apply', danger: true,
+    });
+    if (!ok) return;
     // Persist locally first so a future reboot can restore it.
     API.SaveHostsConfig(device.id, text)
       .then(() => API.ApplyHostsConfig(device.id))
@@ -412,6 +469,10 @@ function NetHosts({device}: {device: adb.Device}) {
         <div className='card-header'>
           <span className='title mono' style={{fontSize: 11}}>/system/etc/hosts</span>
           <div style={{flex: 1}}/>
+          <CommandChip label='Hosts' groups={[
+            {label: 'Save & Apply', commands: plan?.commands, note: 'Tried in order until one write reads back intact.'},
+            {label: 'Flush DNS cache', commands: flushCmd},
+          ]}/>
           <button className='btn sm' onClick={load} disabled={loading}><Icon.Refresh/>Reload</button>
         </div>
         <textarea
@@ -454,6 +515,15 @@ function NetDns({device, info}: {device: adb.Device; info: adb.NetworkInfo | nul
   const [host, setHost] = useState('');
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<DnsRecord[]>([]);
+  const [cmds, setCmds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!device?.id || !host.trim()) { setCmds([]); return; }
+    let live = true;
+    API.DNSLookupCommands(device.id, host.trim())
+      .then(c => { if (live) setCmds(c || []); })
+      .catch(() => { if (live) setCmds([]); });
+    return () => { live = false; };
+  }, [device?.id, host]);
 
   function lookup() {
     if (!host.trim()) return;
@@ -492,6 +562,7 @@ function NetDns({device, info}: {device: adb.Device; info: adb.NetworkInfo | nul
             value={host}
             onChange={e => setHost(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && lookup()}/>
+          <CommandChip label='Lookup' commands={cmds}/>
           <button className='btn primary' onClick={lookup} disabled={busy || !host.trim()}>
             {busy ? '…' : 'Resolve'}
           </button>
@@ -574,12 +645,25 @@ function NetCapture({device}: {device: adb.Device}) {
   function stop() {
     setBusy(true);
     API.StopCapture(device.id)
-      .then(s => { setState(s); showToast({title: 'Capture stopped', body: `${fmtBytes(s?.sizeBytes || 0)} captured`, kind: 'ok'}); })
+      .then(s => { setState(s); showToast({title: 'Capture stopped', body: `${fmtBytes(s?.sizeBytes || 0)} captured`, kind: 'ok', actions: commandToast(cmds?.stop)}); })
       .catch(e => showToast({title: 'Stop failed', body: String(e), kind: 'err'}))
       .finally(() => setBusy(false));
   }
 
-  const cmd = `nohup tcpdump -i ${iface} -U -w /sdcard/adbq-capture.pcap${filter ? ' ' + JSON.stringify(filter) : ''} >/dev/null 2>&1 &`;
+  // Assembled by Go: the tcpdump path, the on-device pcap target and the `su`
+  // form are all things this panel would have to guess at, and the guess it used
+  // to print named a file the capture never writes (CLAUDE.md §4.1).
+  const [cmds, setCmds] = useState<adb.CaptureCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setCmds(null); return; }
+    let live = true;
+    const t = setTimeout(() => {
+      API.CaptureCommands(device.id, iface, filter)
+        .then(c => { if (live) setCmds(c); })
+        .catch(() => { if (live) setCmds(null); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [device?.id, iface, filter, td?.available]);
 
   return (
     <>
@@ -636,7 +720,7 @@ function NetCapture({device}: {device: adb.Device}) {
                 <button className='btn sm' onClick={() => API.AdoptExternalCapture(device.id).then(poll).then(() => showToast({title: 'Adopted', kind: 'ok'}))}>
                   Adopt
                 </button>
-                <button className='btn sm danger' onClick={() => API.KillExternalCapture(device.id).then(s => { setState(s); showToast({title: 'Killed external tcpdump', kind: 'ok'}); })}>
+                <button className='btn sm danger' onClick={() => API.KillExternalCapture(device.id).then(s => { setState(s); showToast({title: 'Killed external tcpdump', kind: 'ok', actions: commandToast(cmds?.stop)}); })}>
                   Kill it
                 </button>
               </div>
@@ -675,11 +759,13 @@ function NetCapture({device}: {device: adb.Device}) {
             <Icon.Download/>Pull pcap
           </button>
           <div style={{flex: 1}}/>
+          {/* The commands behind this panel, one click away. */}
+          <CommandChip label='Capture' groups={[
+            {label: 'Start', commands: cmds?.start},
+            {label: 'Stop', commands: cmds?.stop, note: 'SIGINT is what makes tcpdump finalise the pcap header.'},
+            {label: 'Pull the pcap', commands: cmds?.pull},
+          ]}/>
           <button className='btn sm' onClick={poll}><Icon.Refresh/>Refresh</button>
-        </div>
-        <div style={{padding: '8px 14px 14px'}}>
-          <span className='muted' style={{fontSize: 11}}>Underlying command (click to copy):</span>{' '}
-          <CodeBlock multiline>{cmd}</CodeBlock>
         </div>
       </div>
     </>
@@ -731,6 +817,18 @@ function NetConnections({device}: {device: adb.Device}) {
     return () => clearInterval(t);
   }, [device?.id, paused]);
 
+  // Sockets are read out of procfs; `ss` is missing on stripped ROMs, and the
+  // preview should say what actually runs.
+  const [cmds, setCmds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!device?.id) return;
+    let live = true;
+    API.NetCommands(device.id, '')
+      .then(c => { if (live) setCmds(c.connections ?? []); })
+      .catch(() => { if (live) setCmds([]); });
+    return () => { live = false; };
+  }, [device?.id]);
+
   const filtered = useMemo(() => {
     return rows.filter(r => {
       if (proto !== 'all' && !r.proto.startsWith(proto)) return false;
@@ -756,6 +854,7 @@ function NetConnections({device}: {device: adb.Device}) {
         <button className={`btn sm${paused ? ' primary' : ''}`} onClick={() => setPaused(p => !p)} title={paused ? 'Resume' : 'Pause'}>
           {paused ? <Icon.Play/> : <Icon.Pause/>}
         </button>
+        <CommandChip label='Read sockets' commands={cmds}/>
         <button className='btn sm' onClick={reload} disabled={busy}><Icon.Refresh/></button>
       </div>
       <div style={{flex: 1, minHeight: 0, overflow: 'auto'}}>

@@ -158,6 +158,29 @@ func resolveADBForScrcpy() string {
 // A 400 ms grace window after start is used to detect immediate failures (bad
 // flags, device not authorised, codec error, etc.) and surface them as an error
 // rather than silently doing nothing.
+// ScrcpyDefaultArgs are the flags adbq mirrors with: a capped framerate and
+// h264 avoid codec trouble on older devices, and the window title says which
+// device is on screen. Exported so the preview and the launch cannot disagree.
+func ScrcpyDefaultArgs(serial string) []string {
+	return []string{
+		"--max-fps", "30",
+		"--video-codec", "h264",
+		"--window-title", "adbq · " + serial,
+	}
+}
+
+// Command renders the command Start would run, after dropping the flags this
+// scrcpy build does not understand — showing a flag that gets filtered out
+// would be showing a command that never ran.
+func (m *ScrcpyManager) Command(serial string, extraArgs []string) string {
+	bin, err := m.Binary()
+	if err != nil {
+		return ""
+	}
+	args := append([]string{"-s", serial}, m.filterUnsupportedArgs(extraArgs)...)
+	return HostCommandText(bin, args...)
+}
+
 func (m *ScrcpyManager) Start(ctx context.Context, serial string, extraArgs []string) error {
 	if m.IsActive(serial) {
 		return nil

@@ -1,6 +1,6 @@
 import React from 'react';
 import * as API from '../../wailsjs/go/main/App';
-import {CodeBlock, confirmDialog, showToast} from '../ui';
+import {CommandPreview, confirmDialog, showToast} from '../ui';
 
 // pickApkAndInstall runs the whole install flow: pick a file, read the plan
 // off the device, show what will run, then install. Installing is not tied to
@@ -29,7 +29,8 @@ export async function pickApkAndInstall(serial: string): Promise<boolean> {
             ? `${plan.install?.length ?? 0} APKs will be committed in one pm session.`
             : 'A single APK will be installed.'}
         </div>
-        <CodeBlock multiline>{(plan.commands ?? []).join('\n')}</CodeBlock>
+        {/* An install is not undoable, so its command starts visible. */}
+        <CommandPreview commands={plan.commands ?? []} defaultOpen/>
         {(plan.skipped?.length ?? 0) > 0 && (
           <div className='muted' style={{marginTop: 8}}>
             Not installed on this device:

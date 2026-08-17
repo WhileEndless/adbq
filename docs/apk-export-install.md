@@ -152,3 +152,10 @@ ADBQ_PROBE_APKS_PKG=<paket> …
 Kurulum testi bilerek **ayrı bir hedef seri** ister: bir uygulamayı geldiği
 telefona yeniden kurmak canlı bir değişikliktir; test yalnızca gözden
 çıkarılabilir bir hedef (emülatör) açıkça verildiğinde çalışır.
+
+## 7. Sonraki adım: analiz
+
+Dışa aktardıktan sonra kodu okumak ve native binary'leri almak için
+[`apk-analysis.md`](apk-analysis.md) — Apps ekranındaki **Open in jadx** ve
+**Download binaries** eylemleri. Dosya adlarının sürüm taşıması da orada
+(§5) anlatılıyor.

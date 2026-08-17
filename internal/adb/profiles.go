@@ -127,12 +127,16 @@ type ApplyReport struct {
 
 // StepPreview describes what a step will do, for the pre-apply confirm dialog.
 type StepPreview struct {
-	Name       string `json:"name"`
-	Title      string `json:"title"`
-	Detail     string `json:"detail"`
-	NeedsRoot  bool   `json:"needsRoot"`
-	WillSkip   bool   `json:"willSkip"`
-	SkipReason string `json:"skipReason,omitempty"`
+	Name      string `json:"name"`
+	Title     string `json:"title"`
+	Detail    string `json:"detail"`
+	NeedsRoot bool   `json:"needsRoot"`
+	// Commands is what this step will run. A profile applies several unrelated
+	// changes in one click, which is exactly when a user most needs to see them
+	// listed before agreeing (CLAUDE.md §4.1 K2/K4).
+	Commands   []string `json:"commands"`
+	WillSkip   bool     `json:"willSkip"`
+	SkipReason string   `json:"skipReason,omitempty"`
 }
 
 // ── ProfileStore: JSON-on-disk persistence under ~/.adbq ─────────────────────

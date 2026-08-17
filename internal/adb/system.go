@@ -25,6 +25,28 @@ func (c *Client) Reboot(ctx context.Context, serial, mode string) (string, error
 	return Run(cmd)
 }
 
+// PowerOff shuts the device down. Root first, because a stock shell user is not
+// allowed to halt the device; the plain shell is tried anyway since userdebug
+// builds and emulators accept it.
+func (c *Client) PowerOff(ctx context.Context, serial string) (string, error) {
+	if out, _, err := c.ShellSU(ctx, serial, powerOffRemote()); err == nil {
+		return out, nil
+	}
+	return c.Shell(ctx, serial, powerOffRemote())
+}
+
+// RestartAdbd bounces the device-side daemon, which drops the current
+// connection — the caller is expected to have warned the user.
+func (c *Client) RestartAdbd(ctx context.Context, serial string) (string, error) {
+	out, _, err := c.ShellSU(ctx, serial, restartAdbdRemote())
+	return out, err
+}
+
+// RootSignals re-reads the evidence behind the root badge.
+func (c *Client) RootSignals(ctx context.Context, serial string) (string, error) {
+	return c.Shell(ctx, serial, rootProbeRemote())
+}
+
 // collapseIPv6 returns "::" notation by collapsing the longest run of zero
 // hextets, mirroring `net.IP.String()` behavior for typical addresses.
 func collapseIPv6(hextets []string) string {
@@ -72,10 +94,7 @@ var tcpStates = map[string]string{
 // ListConnections reads /proc/net/tcp(6) and /proc/net/udp(6) from the device.
 func (c *Client) ListConnections(ctx context.Context, serial string) ([]Connection, error) {
 	var conns []Connection
-	for _, src := range []struct{ proto, path string }{
-		{"tcp", "/proc/net/tcp"}, {"tcp6", "/proc/net/tcp6"},
-		{"udp", "/proc/net/udp"}, {"udp6", "/proc/net/udp6"},
-	} {
+	for _, src := range procNetSources {
 		out, err := c.Shell(ctx, serial, "cat "+src.path+" 2>/dev/null")
 		if err != nil {
 			continue
@@ -83,6 +102,23 @@ func (c *Client) ListConnections(ctx context.Context, serial string) ([]Connecti
 		conns = append(conns, parseProcNet(out, src.proto)...)
 	}
 	return conns, nil
+}
+
+// procNetSources are the procfs tables the connection list is built from. `ss`
+// would be shorter but is absent on stripped ROMs.
+var procNetSources = []struct{ proto, path string }{
+	{"tcp", "/proc/net/tcp"}, {"tcp6", "/proc/net/tcp6"},
+	{"udp", "/proc/net/udp"}, {"udp6", "/proc/net/udp6"},
+}
+
+// connectionsRemote renders the reads ListConnections performs as one command,
+// for the preview.
+func connectionsRemote() string {
+	parts := make([]string, 0, len(procNetSources))
+	for _, src := range procNetSources {
+		parts = append(parts, "cat "+src.path+" 2>/dev/null")
+	}
+	return strings.Join(parts, "; ")
 }
 
 func parseProcNet(out, proto string) []Connection {
@@ -221,7 +257,7 @@ func (c *Client) StopScreenRecord(ctx context.Context, sess *ScreenRecordSession
 		return "", fmt.Errorf("no active recording")
 	}
 	// Ask the device to terminate screenrecord cleanly.
-	_, _ = c.Shell(ctx, sess.Serial, "killall -INT screenrecord || pkill -INT screenrecord")
+	_, _ = c.Shell(ctx, sess.Serial, screenRecordStopRemote())
 	// Give it a moment to finalize the container.
 	select {
 	case <-sess.Done:
@@ -265,6 +301,62 @@ type CaptureState struct {
 // whereas /data/local/tmp is reliably writable.
 const capturePath = "/data/local/tmp/adbq-capture.pcap"
 
+// captureErrPath holds tcpdump's stderr for the file-capture path: its stdout is
+// the pcap, and a diagnostic mixed into that would corrupt the file.
+const captureErrPath = "/data/local/tmp/adbq-tcpdump.err"
+
+// captureStartRemote is the backgrounded tcpdump the file-capture path runs.
+// `nohup … &` is what lets the adb shell return while the capture keeps going.
+func captureStartRemote(bin, iface, bpf string) string {
+	args := bin + " -i " + shQuote(iface) + " -U -w " + capturePath
+	if bpf != "" {
+		args += " " + shQuote(bpf)
+	}
+	return "nohup " + args + " >/dev/null 2>" + captureErrPath + " </dev/null &"
+}
+
+// captureStopRemote signals the running tcpdump so it finalises the pcap header.
+// A procfs scan rather than pkill, which stripped ROMs do not ship; `kill` is a
+// shell builtin, so it is always there.
+func captureStopRemote(signal string) string {
+	return `for p in /proc/[0-9]*; do read c < "$p/comm" 2>/dev/null || continue; ` +
+		`case "$c" in tcpdump) kill -` + signal + ` "${p##*/}" 2>/dev/null;; esac; done`
+}
+
+// CaptureCommands are the file-capture panel's actions: start, stop, and pull
+// the pcap this computer will read.
+type CaptureCommands struct {
+	Start []string `json:"start"`
+	Stop  []string `json:"stop"`
+	Pull  []string `json:"pull"`
+}
+
+// CaptureCommandsFor renders them. tcpdumpPath empty means the device has no
+// tcpdump yet, and there is no honest command to show for a capture.
+func CaptureCommandsFor(serial, tcpdumpPath, iface, bpf string, render CommandRenderer) CaptureCommands {
+	if iface == "" {
+		iface = "any"
+	}
+	cc := CaptureCommands{
+		Stop: []string{render(captureStopRemote("INT"), true)},
+		Pull: []string{DeviceCommandText(serial, "pull", capturePath, "capture.pcap")},
+	}
+	if tcpdumpPath != "" {
+		cc.Start = []string{render(captureStartRemote(tcpdumpPath, iface, strings.Trim(bpf, "'\"")), true)}
+	}
+	return cc
+}
+
+// CaptureCommandsFor is the device-aware entry point: it resolves tcpdump the
+// same way a start would.
+func (c *Client) CaptureCommandsFor(ctx context.Context, serial, iface, bpf string) CaptureCommands {
+	bin, err := c.FindTcpdump(ctx, serial)
+	if err != nil {
+		bin = ""
+	}
+	return CaptureCommandsFor(serial, bin, iface, bpf, c.Renderer(ctx, serial))
+}
+
 // StartCapture launches tcpdump in the background. Returns final state.
 func (c *Client) StartCapture(ctx context.Context, serial, iface, bpf string) (*CaptureState, error) {
 	if iface == "" {
@@ -283,14 +375,9 @@ func (c *Client) StartCapture(ctx context.Context, serial, iface, bpf string) (*
 		_, _, _ = c.ShellSU(ctx, serial, "kill -9 "+itoa(int64(pid)))
 	}
 	_, _, _ = c.ShellSU(ctx, serial, "rm -f "+capturePath)
-	args := bin + " -i " + shQuote(iface) + " -U -w " + capturePath
-	if bpf != "" {
-		// Strip outer single quotes if user wrapped it
-		bpf = strings.Trim(bpf, "'\"")
-		args += " " + shQuote(bpf)
-	}
-	cmd := "nohup " + args + " >/dev/null 2>/data/local/tmp/adbq-tcpdump.err </dev/null &"
-	if _, _, err := c.ShellSU(ctx, serial, cmd); err != nil {
+	// Strip outer quotes if the user wrapped the filter themselves.
+	bpf = strings.Trim(bpf, "'\"")
+	if _, _, err := c.ShellSU(ctx, serial, captureStartRemote(bin, iface, bpf)); err != nil {
 		return nil, err
 	}
 	// Give tcpdump a moment then probe.
@@ -302,14 +389,10 @@ func (c *Client) StartCapture(ctx context.Context, serial, iface, bpf string) (*
 func (c *Client) StopCapture(ctx context.Context, serial string) (*CaptureState, error) {
 	// pkill is missing on stripped ROMs; scan procfs and kill by PID. `kill`
 	// is a shell builtin so it's always available.
-	for _, pid := range c.tcpdumpPIDs(ctx, serial) {
-		_, _, _ = c.ShellSU(ctx, serial, "kill -INT "+itoa(int64(pid)))
-	}
+	_, _, _ = c.ShellSU(ctx, serial, captureStopRemote("INT"))
 	time.Sleep(500 * time.Millisecond)
 	// If SIGINT didn't take, fall back to SIGKILL.
-	for _, pid := range c.tcpdumpPIDs(ctx, serial) {
-		_, _, _ = c.ShellSU(ctx, serial, "kill -9 "+itoa(int64(pid)))
-	}
+	_, _, _ = c.ShellSU(ctx, serial, captureStopRemote("9"))
 	return c.CaptureStatus(ctx, serial, "", "")
 }
 
@@ -388,10 +471,9 @@ func shQuote(s string) string {
 
 // ExportAppData tars and gzips /data/data/<pkg> into a host file (root required).
 func (c *Client) ExportAppData(ctx context.Context, serial, pkg, localPath string) (string, error) {
-	remote := "/sdcard/adbq-appdata-" + pkg + ".tar.gz"
+	remote := appDataArchive(pkg)
 	// Run as root, write to /sdcard (world-readable), then pull.
-	cmd := fmt.Sprintf("tar -czf %s -C /data/data %s 2>&1 || tar -czf %s /data/data/%s 2>&1", remote, pkg, remote, pkg)
-	_, _, err := c.ShellSU(ctx, serial, cmd)
+	_, _, err := c.ShellSU(ctx, serial, appDataTarRemote(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -416,7 +498,7 @@ func (c *Client) ScreenRecord(ctx context.Context, serial, outDir string, second
 	if seconds <= 0 || seconds > 180 {
 		seconds = 30
 	}
-	deviceTmp := "/sdcard/adbq-screenrecord.mp4"
+	deviceTmp := screenRecordRemote()
 	if _, err := c.Shell(ctx, serial, fmt.Sprintf("screenrecord --time-limit %d %s", seconds, deviceTmp)); err != nil {
 		return "", err
 	}
@@ -432,7 +514,5 @@ func (c *Client) ScreenRecord(ctx context.Context, serial, outDir string, second
 // ClipboardSet uses `cmd clipboard set-text` (Android 10+). Returns an error
 // if not supported.
 func (c *Client) ClipboardSet(ctx context.Context, serial, text string) (string, error) {
-	// escape single quotes
-	esc := strings.ReplaceAll(text, "'", `'\''`)
-	return c.Shell(ctx, serial, "cmd clipboard set-text '"+esc+"' || input text '"+esc+"'")
+	return c.Shell(ctx, serial, clipboardSetRemote(text))
 }

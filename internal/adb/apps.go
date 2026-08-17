@@ -477,12 +477,12 @@ func (c *Client) UninstallApp(ctx context.Context, serial, pkg string) (string, 
 
 // ClearApp wipes user data via `pm clear`.
 func (c *Client) ClearApp(ctx context.Context, serial, pkg string) (string, error) {
-	return c.Shell(ctx, serial, "pm clear "+pkg)
+	return c.Shell(ctx, serial, appClearRemote(pkg))
 }
 
 // ForceStopApp via `am force-stop`.
 func (c *Client) ForceStopApp(ctx context.Context, serial, pkg string) (string, error) {
-	return c.Shell(ctx, serial, "am force-stop "+pkg)
+	return c.Shell(ctx, serial, appForceStopRemote(pkg))
 }
 
 // AppRunning is the lightweight "is this app alive right now" snapshot the
@@ -574,7 +574,7 @@ func (c *Client) pidsForPackage(ctx context.Context, serial, pkg string) (main i
 
 // LaunchApp uses monkey to launch the default activity.
 func (c *Client) LaunchApp(ctx context.Context, serial, pkg string) (string, error) {
-	return c.Shell(ctx, serial, "monkey -p "+pkg+" -c android.intent.category.LAUNCHER 1")
+	return c.Shell(ctx, serial, appLaunchRemote(pkg))
 }
 
 // PullAPK copies the base APK to localPath. For split-APK (App Bundle) apps it

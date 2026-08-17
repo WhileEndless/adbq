@@ -44,6 +44,10 @@ const probeTimeout = 10 * time.Second
 // be a separate pid supervisor: the periodic proc-table refresh already knows
 // every pid, so a package filter can follow an app restart without a second
 // round-trip to the device.
+// logcatTailLines is the backfill a fresh feed asks for, so the pane has
+// something on it immediately instead of waiting for the device to speak.
+const logcatTailLines = 100
+
 type logcatFeed struct {
 	app    *App
 	serial string
@@ -137,6 +141,14 @@ func (a *App) startLogcatFeed(serial, pkg string, showSystem bool, tailLines int
 		return nil, err
 	}
 	return f, nil
+}
+
+// pid reports which process the current stream is filtered to, or 0 for the
+// whole device. Used to render the command that is actually running.
+func (f *logcatFeed) pid() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastPID
 }
 
 // attach starts an adb stream (optionally pid-filtered) and installs it as the

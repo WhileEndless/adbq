@@ -6,6 +6,14 @@ export function ADBVersion() {
   return window['go']['main']['App']['ADBVersion']();
 }
 
+export function AVDDetail(arg1) {
+  return window['go']['main']['App']['AVDDetail'](arg1);
+}
+
+export function AVDHardwareChanges(arg1) {
+  return window['go']['main']['App']['AVDHardwareChanges'](arg1);
+}
+
 export function AddForward(arg1, arg2, arg3) {
   return window['go']['main']['App']['AddForward'](arg1, arg2, arg3);
 }
@@ -18,12 +26,20 @@ export function AdoptExternalCapture(arg1) {
   return window['go']['main']['App']['AdoptExternalCapture'](arg1);
 }
 
+export function AndroidSDK() {
+  return window['go']['main']['App']['AndroidSDK']();
+}
+
 export function AndroidVersionMap() {
   return window['go']['main']['App']['AndroidVersionMap']();
 }
 
 export function ApkSetOf(arg1, arg2) {
   return window['go']['main']['App']['ApkSetOf'](arg1, arg2);
+}
+
+export function AppCommands(arg1, arg2) {
+  return window['go']['main']['App']['AppCommands'](arg1, arg2);
 }
 
 export function AppIcon(arg1, arg2) {
@@ -58,6 +74,10 @@ export function CancelTask(arg1) {
   return window['go']['main']['App']['CancelTask'](arg1);
 }
 
+export function CaptureCommands(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CaptureCommands'](arg1, arg2, arg3);
+}
+
 export function CaptureProfileFromDevice(arg1, arg2) {
   return window['go']['main']['App']['CaptureProfileFromDevice'](arg1, arg2);
 }
@@ -78,6 +98,10 @@ export function ClearApp(arg1, arg2) {
   return window['go']['main']['App']['ClearApp'](arg1, arg2);
 }
 
+export function ClearEmulatorLog(arg1) {
+  return window['go']['main']['App']['ClearEmulatorLog'](arg1);
+}
+
 export function ClearFridaHistory() {
   return window['go']['main']['App']['ClearFridaHistory']();
 }
@@ -90,6 +114,10 @@ export function ClearShellHistory(arg1, arg2) {
   return window['go']['main']['App']['ClearShellHistory'](arg1, arg2);
 }
 
+export function ClearStagedApks() {
+  return window['go']['main']['App']['ClearStagedApks']();
+}
+
 export function ClipboardSet(arg1, arg2) {
   return window['go']['main']['App']['ClipboardSet'](arg1, arg2);
 }
@@ -98,8 +126,20 @@ export function CloseShell(arg1) {
   return window['go']['main']['App']['CloseShell'](arg1);
 }
 
+export function ConnectCommands(arg1) {
+  return window['go']['main']['App']['ConnectCommands'](arg1);
+}
+
 export function ConnectTCP(arg1) {
   return window['go']['main']['App']['ConnectTCP'](arg1);
+}
+
+export function CreateAVD(arg1) {
+  return window['go']['main']['App']['CreateAVD'](arg1);
+}
+
+export function CreateAVDCommand(arg1) {
+  return window['go']['main']['App']['CreateAVDCommand'](arg1);
 }
 
 export function CreateIptablesChain(arg1, arg2, arg3, arg4) {
@@ -108,6 +148,26 @@ export function CreateIptablesChain(arg1, arg2, arg3, arg4) {
 
 export function DNSLookup(arg1, arg2) {
   return window['go']['main']['App']['DNSLookup'](arg1, arg2);
+}
+
+export function DNSLookupCommands(arg1, arg2) {
+  return window['go']['main']['App']['DNSLookupCommands'](arg1, arg2);
+}
+
+export function DefaultAVDSpec(arg1) {
+  return window['go']['main']['App']['DefaultAVDSpec'](arg1);
+}
+
+export function DeleteAVD(arg1) {
+  return window['go']['main']['App']['DeleteAVD'](arg1);
+}
+
+export function DeleteAVDCommand(arg1) {
+  return window['go']['main']['App']['DeleteAVDCommand'](arg1);
+}
+
+export function DeleteAVDSnapshot(arg1, arg2) {
+  return window['go']['main']['App']['DeleteAVDSnapshot'](arg1, arg2);
 }
 
 export function DeleteFile(arg1, arg2, arg3, arg4) {
@@ -142,6 +202,10 @@ export function DetectRunningFridaVersion(arg1) {
   return window['go']['main']['App']['DetectRunningFridaVersion'](arg1);
 }
 
+export function DeviceCommands(arg1, arg2) {
+  return window['go']['main']['App']['DeviceCommands'](arg1, arg2);
+}
+
 export function DeviceDetails(arg1) {
   return window['go']['main']['App']['DeviceDetails'](arg1);
 }
@@ -152,6 +216,22 @@ export function DeviceKey(arg1) {
 
 export function DisconnectDevice(arg1) {
   return window['go']['main']['App']['DisconnectDevice'](arg1);
+}
+
+export function DownloadJadx() {
+  return window['go']['main']['App']['DownloadJadx']();
+}
+
+export function DownloadRootAVD() {
+  return window['go']['main']['App']['DownloadRootAVD']();
+}
+
+export function EmulatorLaunchCommand(arg1, arg2) {
+  return window['go']['main']['App']['EmulatorLaunchCommand'](arg1, arg2);
+}
+
+export function EmulatorLog(arg1, arg2) {
+  return window['go']['main']['App']['EmulatorLog'](arg1, arg2);
 }
 
 export function EnsureFridaVenv(arg1) {
@@ -170,12 +250,20 @@ export function ExportApks(arg1, arg2) {
   return window['go']['main']['App']['ExportApks'](arg1, arg2);
 }
 
+export function ExportAppBinaries(arg1, arg2) {
+  return window['go']['main']['App']['ExportAppBinaries'](arg1, arg2);
+}
+
 export function ExportAppDataWithPicker(arg1, arg2) {
   return window['go']['main']['App']['ExportAppDataWithPicker'](arg1, arg2);
 }
 
 export function ExportIptables(arg1, arg2) {
   return window['go']['main']['App']['ExportIptables'](arg1, arg2);
+}
+
+export function FileCommands(arg1, arg2) {
+  return window['go']['main']['App']['FileCommands'](arg1, arg2);
 }
 
 export function FlushDeviceDNS(arg1) {
@@ -190,8 +278,16 @@ export function ForceStopApp(arg1, arg2) {
   return window['go']['main']['App']['ForceStopApp'](arg1, arg2);
 }
 
+export function ForwardCommands(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ForwardCommands'](arg1, arg2, arg3);
+}
+
 export function FridaArchInfo(arg1) {
   return window['go']['main']['App']['FridaArchInfo'](arg1);
+}
+
+export function FridaCommands(arg1, arg2, arg3) {
+  return window['go']['main']['App']['FridaCommands'](arg1, arg2, arg3);
 }
 
 export function FridaHost() {
@@ -238,8 +334,16 @@ export function GetStats(arg1) {
   return window['go']['main']['App']['GetStats'](arg1);
 }
 
+export function HostABIs() {
+  return window['go']['main']['App']['HostABIs']();
+}
+
 export function HostLANIPs(arg1) {
   return window['go']['main']['App']['HostLANIPs'](arg1);
+}
+
+export function HostSettings() {
+  return window['go']['main']['App']['HostSettings']();
 }
 
 export function HostsDrifted(arg1) {
@@ -274,6 +378,10 @@ export function InstallSystemCertWithPicker(arg1) {
   return window['go']['main']['App']['InstallSystemCertWithPicker'](arg1);
 }
 
+export function InstallSystemImage(arg1) {
+  return window['go']['main']['App']['InstallSystemImage'](arg1);
+}
+
 export function InstallTcpdumpAuto(arg1, arg2) {
   return window['go']['main']['App']['InstallTcpdumpAuto'](arg1, arg2);
 }
@@ -282,8 +390,20 @@ export function InstallTcpdumpWithPicker(arg1) {
   return window['go']['main']['App']['InstallTcpdumpWithPicker'](arg1);
 }
 
+export function IptablesCommands(arg1, arg2) {
+  return window['go']['main']['App']['IptablesCommands'](arg1, arg2);
+}
+
 export function IsAppRunning(arg1, arg2) {
   return window['go']['main']['App']['IsAppRunning'](arg1, arg2);
+}
+
+export function JadxInfo() {
+  return window['go']['main']['App']['JadxInfo']();
+}
+
+export function JadxLatest() {
+  return window['go']['main']['App']['JadxLatest']();
 }
 
 export function KillExternalCapture(arg1) {
@@ -292,6 +412,10 @@ export function KillExternalCapture(arg1) {
 
 export function LaunchApp(arg1, arg2) {
   return window['go']['main']['App']['LaunchApp'](arg1, arg2);
+}
+
+export function ListAVDs() {
+  return window['go']['main']['App']['ListAVDs']();
 }
 
 export function ListAppFridaScripts() {
@@ -308,6 +432,10 @@ export function ListCACerts(arg1) {
 
 export function ListConnections(arg1) {
   return window['go']['main']['App']['ListConnections'](arg1);
+}
+
+export function ListDeviceProfiles() {
+  return window['go']['main']['App']['ListDeviceProfiles']();
 }
 
 export function ListDeviceRecords() {
@@ -350,6 +478,10 @@ export function ListFridaSessions() {
   return window['go']['main']['App']['ListFridaSessions']();
 }
 
+export function ListInstalledSystemImages() {
+  return window['go']['main']['App']['ListInstalledSystemImages']();
+}
+
 export function ListIptables(arg1, arg2, arg3) {
   return window['go']['main']['App']['ListIptables'](arg1, arg2, arg3);
 }
@@ -370,8 +502,16 @@ export function ListShellHistory() {
   return window['go']['main']['App']['ListShellHistory']();
 }
 
+export function ListSystemImages(arg1) {
+  return window['go']['main']['App']['ListSystemImages'](arg1);
+}
+
 export function ListTasks() {
   return window['go']['main']['App']['ListTasks']();
+}
+
+export function LiveCaptureCommand(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LiveCaptureCommand'](arg1, arg2, arg3);
 }
 
 export function LiveCaptureStatus(arg1) {
@@ -380,6 +520,10 @@ export function LiveCaptureStatus(arg1) {
 
 export function LoadHostsConfig(arg1) {
   return window['go']['main']['App']['LoadHostsConfig'](arg1);
+}
+
+export function LogcatCommands(arg1) {
+  return window['go']['main']['App']['LogcatCommands'](arg1);
 }
 
 export function LookupDeviceProfile(arg1) {
@@ -392,6 +536,18 @@ export function Mkdir(arg1, arg2, arg3) {
 
 export function MoveFile(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['MoveFile'](arg1, arg2, arg3, arg4);
+}
+
+export function NetCommands(arg1, arg2) {
+  return window['go']['main']['App']['NetCommands'](arg1, arg2);
+}
+
+export function OpenAndroidStudio() {
+  return window['go']['main']['App']['OpenAndroidStudio']();
+}
+
+export function OpenInJadx(arg1, arg2) {
+  return window['go']['main']['App']['OpenInJadx'](arg1, arg2);
 }
 
 export function OpenPath(arg1) {
@@ -414,12 +570,44 @@ export function PickExternalFridaInterpreter() {
   return window['go']['main']['App']['PickExternalFridaInterpreter']();
 }
 
+export function PickJadxPath() {
+  return window['go']['main']['App']['PickJadxPath']();
+}
+
+export function PickJavaPath() {
+  return window['go']['main']['App']['PickJavaPath']();
+}
+
+export function PickSDKRoot() {
+  return window['go']['main']['App']['PickSDKRoot']();
+}
+
 export function PlanApkInstall(arg1, arg2) {
   return window['go']['main']['App']['PlanApkInstall'](arg1, arg2);
 }
 
+export function PlanAppBinaries(arg1, arg2) {
+  return window['go']['main']['App']['PlanAppBinaries'](arg1, arg2);
+}
+
+export function PlanCertInstall(arg1) {
+  return window['go']['main']['App']['PlanCertInstall'](arg1);
+}
+
+export function PlanHostsApply(arg1, arg2) {
+  return window['go']['main']['App']['PlanHostsApply'](arg1, arg2);
+}
+
+export function PlanJadxOpen(arg1, arg2) {
+  return window['go']['main']['App']['PlanJadxOpen'](arg1, arg2);
+}
+
 export function PlanTcpdumpAutoInstall(arg1) {
   return window['go']['main']['App']['PlanTcpdumpAutoInstall'](arg1);
+}
+
+export function PowerOffDevice(arg1) {
+  return window['go']['main']['App']['PowerOffDevice'](arg1);
 }
 
 export function PreviewProfile(arg1, arg2) {
@@ -432,6 +620,14 @@ export function ProbeIptables(arg1, arg2) {
 
 export function ProbeTcpdump(arg1) {
   return window['go']['main']['App']['ProbeTcpdump'](arg1);
+}
+
+export function ProcessCommands(arg1) {
+  return window['go']['main']['App']['ProcessCommands'](arg1);
+}
+
+export function ProxyCommand(arg1, arg2) {
+  return window['go']['main']['App']['ProxyCommand'](arg1, arg2);
 }
 
 export function PullCapture(arg1) {
@@ -462,6 +658,10 @@ export function Reboot(arg1, arg2) {
   return window['go']['main']['App']['Reboot'](arg1, arg2);
 }
 
+export function RecheckAndroidSDK() {
+  return window['go']['main']['App']['RecheckAndroidSDK']();
+}
+
 export function RecordingActive(arg1) {
   return window['go']['main']['App']['RecordingActive'](arg1);
 }
@@ -490,8 +690,16 @@ export function RemoveFridaSession(arg1) {
   return window['go']['main']['App']['RemoveFridaSession'](arg1);
 }
 
+export function RemoveJadx() {
+  return window['go']['main']['App']['RemoveJadx']();
+}
+
 export function RemoveReverse(arg1, arg2) {
   return window['go']['main']['App']['RemoveReverse'](arg1, arg2);
+}
+
+export function RemoveRootAVD() {
+  return window['go']['main']['App']['RemoveRootAVD']();
 }
 
 export function RemoveTask(arg1) {
@@ -502,8 +710,36 @@ export function ResizeShell(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResizeShell'](arg1, arg2, arg3);
 }
 
+export function RestartAdbd(arg1) {
+  return window['go']['main']['App']['RestartAdbd'](arg1);
+}
+
+export function RestoreAVDRamdisk(arg1) {
+  return window['go']['main']['App']['RestoreAVDRamdisk'](arg1);
+}
+
 export function RevealPath(arg1) {
   return window['go']['main']['App']['RevealPath'](arg1);
+}
+
+export function RootAVD(arg1) {
+  return window['go']['main']['App']['RootAVD'](arg1);
+}
+
+export function RootAVDAdvice(arg1) {
+  return window['go']['main']['App']['RootAVDAdvice'](arg1);
+}
+
+export function RootAVDCommand(arg1, arg2) {
+  return window['go']['main']['App']['RootAVDCommand'](arg1, arg2);
+}
+
+export function RootAVDInfo() {
+  return window['go']['main']['App']['RootAVDInfo']();
+}
+
+export function RootSignals(arg1) {
+  return window['go']['main']['App']['RootSignals'](arg1);
 }
 
 export function RunCommand(arg1, arg2) {
@@ -542,6 +778,10 @@ export function ScrcpyAvailable() {
   return window['go']['main']['App']['ScrcpyAvailable']();
 }
 
+export function ScrcpyCommand(arg1) {
+  return window['go']['main']['App']['ScrcpyCommand'](arg1);
+}
+
 export function ScreenRecord(arg1, arg2) {
   return window['go']['main']['App']['ScreenRecord'](arg1, arg2);
 }
@@ -562,12 +802,32 @@ export function SetIptablesPolicy(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SetIptablesPolicy'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function SetJadxPath(arg1) {
+  return window['go']['main']['App']['SetJadxPath'](arg1);
+}
+
+export function SetJavaPath(arg1) {
+  return window['go']['main']['App']['SetJavaPath'](arg1);
+}
+
 export function SetLogcatSystem(arg1, arg2) {
   return window['go']['main']['App']['SetLogcatSystem'](arg1, arg2);
 }
 
 export function SetProxy(arg1, arg2) {
   return window['go']['main']['App']['SetProxy'](arg1, arg2);
+}
+
+export function SetSDKRoot(arg1) {
+  return window['go']['main']['App']['SetSDKRoot'](arg1);
+}
+
+export function StagedApkDir() {
+  return window['go']['main']['App']['StagedApkDir']();
+}
+
+export function StartAVD(arg1, arg2) {
+  return window['go']['main']['App']['StartAVD'](arg1, arg2);
 }
 
 export function StartAppWithFrida(arg1, arg2, arg3) {
@@ -604,6 +864,10 @@ export function StartScrcpy(arg1) {
 
 export function StartScreenRecord(arg1, arg2) {
   return window['go']['main']['App']['StartScreenRecord'](arg1, arg2);
+}
+
+export function StopAVD(arg1) {
+  return window['go']['main']['App']['StopAVD'](arg1);
 }
 
 export function StopCapture(arg1) {
@@ -650,6 +914,10 @@ export function TakeScreenshot(arg1) {
   return window['go']['main']['App']['TakeScreenshot'](arg1);
 }
 
+export function TcpdumpInstallCommands(arg1) {
+  return window['go']['main']['App']['TcpdumpInstallCommands'](arg1);
+}
+
 export function TcpipMode(arg1, arg2) {
   return window['go']['main']['App']['TcpipMode'](arg1, arg2);
 }
@@ -660,6 +928,18 @@ export function UndoIptables(arg1, arg2) {
 
 export function UninstallApp(arg1, arg2) {
   return window['go']['main']['App']['UninstallApp'](arg1, arg2);
+}
+
+export function UninstallSystemImage(arg1) {
+  return window['go']['main']['App']['UninstallSystemImage'](arg1);
+}
+
+export function UpdateAVDHardware(arg1, arg2) {
+  return window['go']['main']['App']['UpdateAVDHardware'](arg1, arg2);
+}
+
+export function UpdateJadx(arg1) {
+  return window['go']['main']['App']['UpdateJadx'](arg1);
 }
 
 export function Version() {

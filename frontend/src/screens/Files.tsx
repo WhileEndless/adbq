@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, Modal, Switch, confirmDialog, promptDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, Modal, Switch, confirmDialog, promptDialog, showToast} from '../ui';
 import {useDeviceData} from '../cache';
 
 const ROOTS = ['/', '/sdcard', '/storage/emulated/0', '/data/local/tmp', '/data', '/system'];
@@ -24,6 +24,22 @@ export function FilesScreen({device}: {device: adb.Device}) {
     dirKey, () => API.ListDir(device.id, path, asRoot), {staleMs: 20000},
   );
   const entries = data || [];
+
+  // The commands behind this screen's actions, from the backend: the root
+  // wrapper depends on what the device accepts, so the frontend cannot spell
+  // these out itself (CLAUDE.md §4.1).
+  const [cmds, setCmds] = useState<adb.FileCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setCmds(null); return; }
+    let live = true;
+    API.FileCommands(device.id, {
+      dir: path, name: sel?.name || '', isDir: sel?.type === 'dir', asRoot,
+      mode: pushMode, owner: pushOwner,
+    } as adb.FileCommandRequest)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    return () => { live = false; };
+  }, [device?.id, path, sel?.name, sel?.type, asRoot, pushMode, pushOwner]);
   const load = (p: string = path) => { setSel(null); if (p === path) refresh(); else setPath(p); };
 
   function navigate(e: adb.FileEntry) {
@@ -51,15 +67,26 @@ export function FilesScreen({device}: {device: adb.Device}) {
   }
 
   async function doMkdir() {
-    const name = await promptDialog({title: 'Create folder', label: 'Folder name', placeholder: 'new-folder'});
+    const name = await promptDialog({
+      title: 'Create folder', label: 'Folder name', placeholder: 'new-folder',
+      hint: <CommandPreview commands={cmds?.mkdir ?? []} defaultOpen/>,
+    });
     if (!name) return;
     API.Mkdir(device.id, joinPath(path, name), asRoot).then(() => load()).catch(e => showToast({title: 'Mkdir failed', body: String(e), kind: 'err'}));
   }
 
   async function doDelete(e: adb.FileEntry) {
+    // The row's own command, not the selected entry's: the trash icon can be
+    // clicked on a row the panel isn't showing.
+    const rm = await API.FileCommands(device.id, {
+      dir: path, name: e.name, isDir: e.type === 'dir', asRoot, mode: '', owner: '',
+    } as adb.FileCommandRequest).then(c => c.delete ?? []).catch(() => []);
     const ok = await confirmDialog({
       title: `Delete "${e.name}"?`,
-      body: joinPath(path, e.name) + (e.type === 'dir' ? '  (recursive)' : ''),
+      body: <>
+        <span className='mono'>{joinPath(path, e.name)}</span>{e.type === 'dir' ? '  (recursive)' : ''}
+        <CommandPreview commands={rm} defaultOpen/>
+      </>,
       confirmLabel: 'Delete',
       danger: true,
     });
@@ -94,6 +121,13 @@ export function FilesScreen({device}: {device: adb.Device}) {
           <Icon.Upload/>Push
         </button>
         <button className='btn' onClick={doMkdir}><Icon.Plus/>New folder</button>
+        <CommandChip label={sel ? sel.name : path} groups={[
+          {label: 'List this directory', commands: cmds?.list},
+          {label: 'Push into it', commands: cmds?.push},
+          {label: 'New folder', commands: cmds?.mkdir},
+          {label: 'Pull the selected file', commands: cmds?.pull},
+          {label: 'Delete the selection', commands: cmds?.delete},
+        ]}/>
         <button className='btn' onClick={() => load()}><Icon.Refresh className={refreshing ? 'spin' : ''}/></button>
       </div>
 
@@ -199,6 +233,7 @@ export function FilesScreen({device}: {device: adb.Device}) {
             <label>Owner (chown) — optional</label>
             <input className='input mono' placeholder='shell  ·  root:root  ·  10042' value={pushOwner} onChange={e => setPushOwner(e.target.value)}/>
           </div>
+          <CommandPreview commands={cmds?.push ?? []} defaultOpen/>
           <div className='muted' style={{fontSize: 11}}>
             chmod/chown run after the push completes. {asRoot ? 'Will use su -c.' : <span>Will use shell user; enable <strong>Root</strong> toggle for restricted paths.</span>}
           </div>

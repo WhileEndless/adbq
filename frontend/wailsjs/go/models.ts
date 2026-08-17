@@ -1,5 +1,179 @@
 export namespace adb {
 	
+	export class AVD {
+	    name: string;
+	    display: string;
+	    path: string;
+	    target: string;
+	    api: number;
+	    androidVer: string;
+	    tag: string;
+	    tagDisplay: string;
+	    playStore: boolean;
+	    abi: string;
+	    device: string;
+	    deviceMfr: string;
+	    skin: string;
+	    ramMB: number;
+	    cores: number;
+	    density: number;
+	    resolution: string;
+	    sdCard: string;
+	    dataSize: string;
+	    gpuMode: string;
+	    keyboard: boolean;
+	    diskBytes: number;
+	    sysImgDir: string;
+	    ramdiskRel: string;
+	    patched: boolean;
+	    snapshots: string[] | null;
+	    state: string;
+	    serial: string;
+	    port: number;
+	    managed: boolean;
+	    root: string;
+	    error: string;
+	    warning: string;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new AVD(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.display = source["display"];
+	        this.path = source["path"];
+	        this.target = source["target"];
+	        this.api = source["api"];
+	        this.androidVer = source["androidVer"];
+	        this.tag = source["tag"];
+	        this.tagDisplay = source["tagDisplay"];
+	        this.playStore = source["playStore"];
+	        this.abi = source["abi"];
+	        this.device = source["device"];
+	        this.deviceMfr = source["deviceMfr"];
+	        this.skin = source["skin"];
+	        this.ramMB = source["ramMB"];
+	        this.cores = source["cores"];
+	        this.density = source["density"];
+	        this.resolution = source["resolution"];
+	        this.sdCard = source["sdCard"];
+	        this.dataSize = source["dataSize"];
+	        this.gpuMode = source["gpuMode"];
+	        this.keyboard = source["keyboard"];
+	        this.diskBytes = source["diskBytes"];
+	        this.sysImgDir = source["sysImgDir"];
+	        this.ramdiskRel = source["ramdiskRel"];
+	        this.patched = source["patched"];
+	        this.snapshots = source["snapshots"];
+	        this.state = source["state"];
+	        this.serial = source["serial"];
+	        this.port = source["port"];
+	        this.managed = source["managed"];
+	        this.root = source["root"];
+	        this.error = source["error"];
+	        this.warning = source["warning"];
+	        this.commands = source["commands"];
+	    }
+	}
+	export class AVDHardware {
+	    ramMB: number;
+	    cores: number;
+	    dataSize: string;
+	    sdCard: string;
+	    gpuMode: string;
+	    width: number;
+	    height: number;
+	    density: number;
+	    keyboard?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AVDHardware(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ramMB = source["ramMB"];
+	        this.cores = source["cores"];
+	        this.dataSize = source["dataSize"];
+	        this.sdCard = source["sdCard"];
+	        this.gpuMode = source["gpuMode"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.density = source["density"];
+	        this.keyboard = source["keyboard"];
+	    }
+	}
+	export class AVDSpec {
+	    name: string;
+	    pkg: string;
+	    device: string;
+	    sdCard: string;
+	    force: boolean;
+	    ramMB: number;
+	    cores: number;
+	    dataSize: string;
+	    keyboard: boolean;
+	    gpuMode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AVDSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.pkg = source["pkg"];
+	        this.device = source["device"];
+	        this.sdCard = source["sdCard"];
+	        this.force = source["force"];
+	        this.ramMB = source["ramMB"];
+	        this.cores = source["cores"];
+	        this.dataSize = source["dataSize"];
+	        this.keyboard = source["keyboard"];
+	        this.gpuMode = source["gpuMode"];
+	    }
+	}
+	export class AndroidSDKInfo {
+	    available: boolean;
+	    sdkRoot: string;
+	    source: string;
+	    emulator: string;
+	    emulatorVer: string;
+	    avdManager: string;
+	    sdkManager: string;
+	    adb: string;
+	    avdHome: string;
+	    studioPath: string;
+	    studioVer: string;
+	    accelerated: boolean;
+	    accelNote: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AndroidSDKInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.sdkRoot = source["sdkRoot"];
+	        this.source = source["source"];
+	        this.emulator = source["emulator"];
+	        this.emulatorVer = source["emulatorVer"];
+	        this.avdManager = source["avdManager"];
+	        this.sdkManager = source["sdkManager"];
+	        this.adb = source["adb"];
+	        this.avdHome = source["avdHome"];
+	        this.studioPath = source["studioPath"];
+	        this.studioVer = source["studioVer"];
+	        this.accelerated = source["accelerated"];
+	        this.accelNote = source["accelNote"];
+	        this.error = source["error"];
+	    }
+	}
 	export class ApkInstallPlan {
 	    file: string;
 	    install: string[] | null;
@@ -20,6 +194,20 @@ export namespace adb {
 	        this.commands = source["commands"];
 	    }
 	}
+	export class AppVersion {
+	    name: string;
+	    code: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppVersion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.code = source["code"];
+	    }
+	}
 	export class ApkSet {
 	    pkg: string;
 	    base: string;
@@ -27,6 +215,7 @@ export namespace adb {
 	    split: boolean;
 	    suggested: string;
 	    commands: string[] | null;
+	    version: AppVersion;
 	
 	    static createFrom(source: any = {}) {
 	        return new ApkSet(source);
@@ -40,7 +229,26 @@ export namespace adb {
 	        this.split = source["split"];
 	        this.suggested = source["suggested"];
 	        this.commands = source["commands"];
+	        this.version = this.convertValues(source["version"], AppVersion);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class App {
 	    pkg: string;
@@ -62,6 +270,28 @@ export namespace adb {
 	        this.name = source["name"];
 	        this.v = source["v"];
 	        this.uid = source["uid"];
+	    }
+	}
+	export class AppCommands {
+	    pkg: string;
+	    launch: string[] | null;
+	    forceStop: string[] | null;
+	    clear: string[] | null;
+	    uninstall: string[] | null;
+	    exportData: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkg = source["pkg"];
+	        this.launch = source["launch"];
+	        this.forceStop = source["forceStop"];
+	        this.clear = source["clear"];
+	        this.uninstall = source["uninstall"];
+	        this.exportData = source["exportData"];
 	    }
 	}
 	export class GrantedPerm {
@@ -206,6 +436,7 @@ export namespace adb {
 	        this.venvVer = source["venvVer"];
 	    }
 	}
+	
 	export class StepResult {
 	    name: string;
 	    status: string;
@@ -264,6 +495,24 @@ export namespace adb {
 		    return a;
 		}
 	}
+	export class BinaryPlan {
+	    pkg: string;
+	    suggested: string;
+	    sources: number;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new BinaryPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkg = source["pkg"];
+	        this.suggested = source["suggested"];
+	        this.sources = source["sources"];
+	        this.commands = source["commands"];
+	    }
+	}
 	export class CACert {
 	    fileName: string;
 	    store: string;
@@ -286,6 +535,22 @@ export namespace adb {
 	        this.notAfter = source["notAfter"];
 	        this.expired = source["expired"];
 	        this.selfSigned = source["selfSigned"];
+	    }
+	}
+	export class CaptureCommands {
+	    start: string[] | null;
+	    stop: string[] | null;
+	    pull: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new CaptureCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.start = source["start"];
+	        this.stop = source["stop"];
+	        this.pull = source["pull"];
 	    }
 	}
 	export class CaptureState {
@@ -316,6 +581,28 @@ export namespace adb {
 	        this.sizeBytes = source["sizeBytes"];
 	        this.packetHint = source["packetHint"];
 	        this.warning = source["warning"];
+	    }
+	}
+	export class CertInstallPlan {
+	    rooted: boolean;
+	    store: string;
+	    path: string;
+	    persistent: boolean;
+	    commands: string[] | null;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CertInstallPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rooted = source["rooted"];
+	        this.store = source["store"];
+	        this.path = source["path"];
+	        this.persistent = source["persistent"];
+	        this.commands = source["commands"];
+	        this.note = source["note"];
 	    }
 	}
 	export class CertInstallResult {
@@ -408,6 +695,20 @@ export namespace adb {
 	        this.sourceSha = source["sourceSha"];
 	    }
 	}
+	export class ConnectCommands {
+	    connect: string[] | null;
+	    disconnect: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connect = source["connect"];
+	        this.disconnect = source["disconnect"];
+	    }
+	}
 	export class Connection {
 	    proto: string;
 	    local: string;
@@ -484,6 +785,58 @@ export namespace adb {
 	        this.hardwareSerial = source["hardwareSerial"];
 	    }
 	}
+	export class DeviceCommands {
+	    reboot: string[] | null;
+	    rebootRecovery: string[] | null;
+	    rebootBootloader: string[] | null;
+	    tcpip: string[] | null;
+	    screenshot: string[] | null;
+	    screenRecord: string[] | null;
+	    powerOff: string[] | null;
+	    restartAdbd: string[] | null;
+	    rootProbe: string[] | null;
+	    scrcpy: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeviceCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.reboot = source["reboot"];
+	        this.rebootRecovery = source["rebootRecovery"];
+	        this.rebootBootloader = source["rebootBootloader"];
+	        this.tcpip = source["tcpip"];
+	        this.screenshot = source["screenshot"];
+	        this.screenRecord = source["screenRecord"];
+	        this.powerOff = source["powerOff"];
+	        this.restartAdbd = source["restartAdbd"];
+	        this.rootProbe = source["rootProbe"];
+	        this.scrcpy = source["scrcpy"];
+	    }
+	}
+	export class DeviceProfile {
+	    id: string;
+	    name: string;
+	    oem: string;
+	    tag: string;
+	    formFactor: string;
+	    recommended: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeviceProfile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.oem = source["oem"];
+	        this.tag = source["tag"];
+	        this.formFactor = source["formFactor"];
+	        this.recommended = source["recommended"];
+	    }
+	}
 	export class DeviceRecord {
 	    key: string;
 	    adbSerial: string;
@@ -510,6 +863,96 @@ export namespace adb {
 	        this.firstSeen = source["firstSeen"];
 	        this.lastSeen = source["lastSeen"];
 	        this.boundProfileId = source["boundProfileId"];
+	    }
+	}
+	export class EmulatorOpts {
+	    coldBoot: boolean;
+	    noSnapshotSave: boolean;
+	    noSnapshot: boolean;
+	    snapshot: string;
+	    wipeData: boolean;
+	    noWindow: boolean;
+	    noBootAnim: boolean;
+	    writableSystem: boolean;
+	    readOnly: boolean;
+	    gpu: string;
+	    memoryMB: number;
+	    cores: number;
+	    netSpeed: string;
+	    netDelay: string;
+	    dns: string;
+	    httpProxy: string;
+	    selinux: string;
+	    extra: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmulatorOpts(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.coldBoot = source["coldBoot"];
+	        this.noSnapshotSave = source["noSnapshotSave"];
+	        this.noSnapshot = source["noSnapshot"];
+	        this.snapshot = source["snapshot"];
+	        this.wipeData = source["wipeData"];
+	        this.noWindow = source["noWindow"];
+	        this.noBootAnim = source["noBootAnim"];
+	        this.writableSystem = source["writableSystem"];
+	        this.readOnly = source["readOnly"];
+	        this.gpu = source["gpu"];
+	        this.memoryMB = source["memoryMB"];
+	        this.cores = source["cores"];
+	        this.netSpeed = source["netSpeed"];
+	        this.netDelay = source["netDelay"];
+	        this.dns = source["dns"];
+	        this.httpProxy = source["httpProxy"];
+	        this.selinux = source["selinux"];
+	        this.extra = source["extra"];
+	    }
+	}
+	export class FileCommandRequest {
+	    dir: string;
+	    name: string;
+	    isDir: boolean;
+	    asRoot: boolean;
+	    mode: string;
+	    owner: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileCommandRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dir = source["dir"];
+	        this.name = source["name"];
+	        this.isDir = source["isDir"];
+	        this.asRoot = source["asRoot"];
+	        this.mode = source["mode"];
+	        this.owner = source["owner"];
+	    }
+	}
+	export class FileCommands {
+	    path: string;
+	    list: string[] | null;
+	    mkdir: string[] | null;
+	    push: string[] | null;
+	    pull: string[] | null;
+	    delete: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.list = source["list"];
+	        this.mkdir = source["mkdir"];
+	        this.push = source["push"];
+	        this.pull = source["pull"];
+	        this.delete = source["delete"];
 	    }
 	}
 	export class FileEntry {
@@ -552,6 +995,28 @@ export namespace adb {
 	        this.serial = source["serial"];
 	        this.local = source["local"];
 	        this.remote = source["remote"];
+	    }
+	}
+	export class ForwardCommands {
+	    kind: string;
+	    local: string;
+	    remote: string;
+	    add: string[] | null;
+	    remove: string[] | null;
+	    list: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new ForwardCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.local = source["local"];
+	        this.remote = source["remote"];
+	        this.add = source["add"];
+	        this.remove = source["remove"];
+	        this.list = source["list"];
 	    }
 	}
 	export class ForwardSpec {
@@ -634,6 +1099,30 @@ export namespace adb {
 	        this.bits64 = source["bits64"];
 	        this.primary = source["primary"];
 	        this.supported = source["supported"];
+	    }
+	}
+	export class FridaCommands {
+	    install: string[] | null;
+	    list: string[] | null;
+	    start: string[] | null;
+	    stop: string[] | null;
+	    log: string[] | null;
+	    forward: string[] | null;
+	    version: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new FridaCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.install = source["install"];
+	        this.list = source["list"];
+	        this.start = source["start"];
+	        this.stop = source["stop"];
+	        this.log = source["log"];
+	        this.forward = source["forward"];
+	        this.version = source["version"];
 	    }
 	}
 	export class FridaHistoryEntry {
@@ -820,6 +1309,20 @@ export namespace adb {
 	        this.runnable = source["runnable"];
 	    }
 	}
+	export class FridaSessionCommands {
+	    runner: string[] | null;
+	    cli: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new FridaSessionCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.runner = source["runner"];
+	        this.cli = source["cli"];
+	    }
+	}
 	export class FridaSessionInfo {
 	    id: string;
 	    serial: string;
@@ -829,6 +1332,7 @@ export namespace adb {
 	    startedAt: number;
 	    status: string;
 	    statusNote?: string;
+	    commands: FridaSessionCommands;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaSessionInfo(source);
@@ -844,7 +1348,26 @@ export namespace adb {
 	        this.startedAt = source["startedAt"];
 	        this.status = source["status"];
 	        this.statusNote = source["statusNote"];
+	        this.commands = this.convertValues(source["commands"], FridaSessionCommands);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class FridaStep {
 	    enabled: boolean;
@@ -871,6 +1394,58 @@ export namespace adb {
 	    }
 	}
 	
+	export class HostLogLine {
+	    seq: number;
+	    text: string;
+	    err: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostLogLine(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.seq = source["seq"];
+	        this.text = source["text"];
+	        this.err = source["err"];
+	    }
+	}
+	export class HostSettings {
+	    sdkRoot?: string;
+	    adbPath?: string;
+	    avdHome?: string;
+	    jadxPath?: string;
+	    javaPath?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sdkRoot = source["sdkRoot"];
+	        this.adbPath = source["adbPath"];
+	        this.avdHome = source["avdHome"];
+	        this.jadxPath = source["jadxPath"];
+	        this.javaPath = source["javaPath"];
+	    }
+	}
+	export class HostsApplyPlan {
+	    path: string;
+	    commands: string[] | null;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostsApplyPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.commands = source["commands"];
+	        this.note = source["note"];
+	    }
+	}
 	export class HostsApplyResult {
 	    path: string;
 	    strategy: string;
@@ -1046,6 +1621,62 @@ export namespace adb {
 		    return a;
 		}
 	}
+	export class IptablesCommandRequest {
+	    family: string;
+	    table: string;
+	    chain: string;
+	    pos: number;
+	    num: number;
+	    policy: string;
+	    spec: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new IptablesCommandRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.family = source["family"];
+	        this.table = source["table"];
+	        this.chain = source["chain"];
+	        this.pos = source["pos"];
+	        this.num = source["num"];
+	        this.policy = source["policy"];
+	        this.spec = source["spec"];
+	    }
+	}
+	export class IptablesCommands {
+	    list: string[] | null;
+	    save: string[] | null;
+	    addRule: string[] | null;
+	    deleteRule: string[] | null;
+	    flushChain: string[] | null;
+	    flushTable: string[] | null;
+	    policy: string[] | null;
+	    newChain: string[] | null;
+	    dropChain: string[] | null;
+	    import: string[] | null;
+	    undo: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new IptablesCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.list = source["list"];
+	        this.save = source["save"];
+	        this.addRule = source["addRule"];
+	        this.deleteRule = source["deleteRule"];
+	        this.flushChain = source["flushChain"];
+	        this.flushTable = source["flushTable"];
+	        this.policy = source["policy"];
+	        this.newChain = source["newChain"];
+	        this.dropChain = source["dropChain"];
+	        this.import = source["import"];
+	        this.undo = source["undo"];
+	    }
+	}
 	export class IptablesStep {
 	    enabled: boolean;
 	    v4Blob?: string;
@@ -1060,6 +1691,96 @@ export namespace adb {
 	        this.enabled = source["enabled"];
 	        this.v4Blob = source["v4Blob"];
 	        this.v6Blob = source["v6Blob"];
+	    }
+	}
+	export class JadxInfo {
+	    installed: boolean;
+	    kind: string;
+	    bin: string;
+	    dir: string;
+	    version: string;
+	    pinnedVersion: string;
+	    source: string;
+	    asset: string;
+	    license: string;
+	    sha256: string;
+	    java: string;
+	    javaVersion: string;
+	    javaSource: string;
+	    javaError: string;
+	    ready: boolean;
+	    disclosures: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new JadxInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.installed = source["installed"];
+	        this.kind = source["kind"];
+	        this.bin = source["bin"];
+	        this.dir = source["dir"];
+	        this.version = source["version"];
+	        this.pinnedVersion = source["pinnedVersion"];
+	        this.source = source["source"];
+	        this.asset = source["asset"];
+	        this.license = source["license"];
+	        this.sha256 = source["sha256"];
+	        this.java = source["java"];
+	        this.javaVersion = source["javaVersion"];
+	        this.javaSource = source["javaSource"];
+	        this.javaError = source["javaError"];
+	        this.ready = source["ready"];
+	        this.disclosures = source["disclosures"];
+	    }
+	}
+	export class JadxOpenPlan {
+	    bin: string;
+	    java: string;
+	    names: string[] | null;
+	    split: boolean;
+	    staged: boolean;
+	    ready: boolean;
+	    reason: string;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new JadxOpenPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.bin = source["bin"];
+	        this.java = source["java"];
+	        this.names = source["names"];
+	        this.split = source["split"];
+	        this.staged = source["staged"];
+	        this.ready = source["ready"];
+	        this.reason = source["reason"];
+	        this.commands = source["commands"];
+	    }
+	}
+	export class JadxRelease {
+	    version: string;
+	    asset: string;
+	    sha256: string;
+	    size: number;
+	    published: string;
+	    newer: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new JadxRelease(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.asset = source["asset"];
+	        this.sha256 = source["sha256"];
+	        this.size = source["size"];
+	        this.published = source["published"];
+	        this.newer = source["newer"];
 	    }
 	}
 	export class LiveCaptureOptions {
@@ -1217,6 +1938,28 @@ export namespace adb {
 	}
 	
 	
+	export class NetCommands {
+	    proxy: string[] | null;
+	    clearProxy: string[] | null;
+	    flushDns: string[] | null;
+	    readProxy: string[] | null;
+	    readDns: string[] | null;
+	    connections: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new NetCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.proxy = source["proxy"];
+	        this.clearProxy = source["clearProxy"];
+	        this.flushDns = source["flushDns"];
+	        this.readProxy = source["readProxy"];
+	        this.readDns = source["readDns"];
+	        this.connections = source["connections"];
+	    }
+	}
 	export class NetIface {
 	    name: string;
 	    ipv4: string;
@@ -1345,6 +2088,40 @@ export namespace adb {
 	}
 	
 	
+	export class RootAVDInfo {
+	    installed: boolean;
+	    dir: string;
+	    script: string;
+	    commit: string;
+	    source: string;
+	    archive: string;
+	    license: string;
+	    scriptSHA: string;
+	    magiskSHA: string;
+	    runner: string;
+	    runnerNote: string;
+	    disclosures: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new RootAVDInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.installed = source["installed"];
+	        this.dir = source["dir"];
+	        this.script = source["script"];
+	        this.commit = source["commit"];
+	        this.source = source["source"];
+	        this.archive = source["archive"];
+	        this.license = source["license"];
+	        this.scriptSHA = source["scriptSHA"];
+	        this.magiskSHA = source["magiskSHA"];
+	        this.runner = source["runner"];
+	        this.runnerNote = source["runnerNote"];
+	        this.disclosures = source["disclosures"];
+	    }
+	}
 	export class ScrollbackEntry {
 	    path: string;
 	    serial: string;
@@ -1406,6 +2183,7 @@ export namespace adb {
 	    title: string;
 	    detail: string;
 	    needsRoot: boolean;
+	    commands: string[] | null;
 	    willSkip: boolean;
 	    skipReason?: string;
 	
@@ -1419,11 +2197,66 @@ export namespace adb {
 	        this.title = source["title"];
 	        this.detail = source["detail"];
 	        this.needsRoot = source["needsRoot"];
+	        this.commands = source["commands"];
 	        this.willSkip = source["willSkip"];
 	        this.skipReason = source["skipReason"];
 	    }
 	}
 	
+	export class StreamCommands {
+	    stream: string[] | null;
+	    clear: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new StreamCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stream = source["stream"];
+	        this.clear = source["clear"];
+	    }
+	}
+	export class SystemImage {
+	    pkg: string;
+	    level: string;
+	    api: number;
+	    androidVer: string;
+	    tag: string;
+	    abi: string;
+	    playStore: boolean;
+	    revision: string;
+	    desc: string;
+	    installed: boolean;
+	    location: string;
+	    rootable: boolean;
+	    compatible: boolean;
+	    note: string;
+	    commands: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new SystemImage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkg = source["pkg"];
+	        this.level = source["level"];
+	        this.api = source["api"];
+	        this.androidVer = source["androidVer"];
+	        this.tag = source["tag"];
+	        this.abi = source["abi"];
+	        this.playStore = source["playStore"];
+	        this.revision = source["revision"];
+	        this.desc = source["desc"];
+	        this.installed = source["installed"];
+	        this.location = source["location"];
+	        this.rootable = source["rootable"];
+	        this.compatible = source["compatible"];
+	        this.note = source["note"];
+	        this.commands = source["commands"];
+	    }
+	}
 	export class TaskState {
 	    id: string;
 	    kind: string;

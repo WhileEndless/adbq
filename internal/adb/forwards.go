@@ -71,6 +71,48 @@ func parseForwardList(out, serial string) []Forward {
 	return res
 }
 
+// ForwardCommands is what the Forwards screen runs for one mapping: how it is
+// created, how it is removed, and how the current set is listed.
+type ForwardCommands struct {
+	Kind   string   `json:"kind"` // "forward" (host → device) or "reverse"
+	Local  string   `json:"local"`
+	Remote string   `json:"remote"`
+	Add    []string `json:"add"`
+	Remove []string `json:"remove"`
+	List   []string `json:"list"`
+}
+
+// ForwardCommandsFor renders one mapping's commands. `reverse` swaps the
+// argument order the way adb expects it — a reverse is declared device-side
+// first, and getting that backwards is exactly the mistake the preview is
+// there to prevent.
+func ForwardCommandsFor(serial, kind, local, remote string) ForwardCommands {
+	sub := "forward"
+	first, second := local, remote
+	if kind == "reverse" {
+		sub, first, second = "reverse", remote, local
+	}
+	fc := ForwardCommands{Kind: sub, Local: local, Remote: remote,
+		List: []string{DeviceCommandText(serial, sub, "--list")}}
+	if first != "" && second != "" {
+		fc.Add = []string{DeviceCommandText(serial, sub, first, second)}
+	}
+	if first != "" {
+		fc.Remove = []string{DeviceCommandText(serial, sub, "--remove", first)}
+	}
+	return fc
+}
+
+// ForwardCommandsForRows renders one entry per row, in the same order, so a
+// table can put each row's command next to it without N round trips.
+func ForwardCommandsForRows(serial, kind string, rows []Forward) []ForwardCommands {
+	out := make([]ForwardCommands, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ForwardCommandsFor(serial, kind, r.Local, r.Remote))
+	}
+	return out
+}
+
 // AddForward registers a new host->device forward.
 func (c *Client) AddForward(ctx context.Context, serial, local, remote string) (string, error) {
 	cmd, err := c.DeviceCommand(ctx, serial, "forward", local, remote)
