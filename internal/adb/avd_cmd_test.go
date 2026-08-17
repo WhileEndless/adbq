@@ -117,6 +117,8 @@ func TestSerialPortRoundTrip(t *testing.T) {
 	if got := PortForSerial("emulator-5556"); got != 5556 {
 		t.Errorf("PortForSerial = %d", got)
 	}
+	// Synthetic serials only: a test fixture is a bad place for a real device's
+	// identity, and the shape is all this assertion needs.
 	for _, s := range []string{"abcdef0123456789", "192.168.1.5:5555", "emulator-abc", ""} {
 		if got := PortForSerial(s); got != 0 {
 			t.Errorf("PortForSerial(%q) = %d, want 0", s, got)
