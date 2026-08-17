@@ -99,6 +99,8 @@ export function DescribeLivePacket(arg1:string,arg2:number):Promise<adb.LivePack
 
 export function DetectRunningFridaVersion(arg1:string):Promise<string>;
 
+export function DeviceCommands(arg1:string,arg2:number):Promise<adb.DeviceCommands>;
+
 export function DeviceDetails(arg1:string):Promise<adb.Device>;
 
 export function DeviceKey(arg1:string):Promise<string>;
@@ -249,9 +251,13 @@ export function ListSystemImages(arg1:boolean):Promise<Array<adb.SystemImage> | 
 
 export function ListTasks():Promise<Array<adb.TaskState> | null>;
 
+export function LiveCaptureCommand(arg1:string,arg2:string,arg3:string):Promise<Array<string> | null>;
+
 export function LiveCaptureStatus(arg1:string):Promise<adb.LiveCaptureState>;
 
 export function LoadHostsConfig(arg1:string):Promise<string>;
+
+export function LogcatCommands(arg1:string):Promise<adb.StreamCommands>;
 
 export function LookupDeviceProfile(arg1:string):Promise<string>;
 
@@ -293,11 +299,15 @@ export function PlanJadxOpen(arg1:string,arg2:string):Promise<adb.JadxOpenPlan>;
 
 export function PlanTcpdumpAutoInstall(arg1:string):Promise<adb.TcpdumpAutoPlan>;
 
+export function PowerOffDevice(arg1:string):Promise<string>;
+
 export function PreviewProfile(arg1:string,arg2:string):Promise<Array<adb.StepPreview> | null>;
 
 export function ProbeIptables(arg1:string,arg2:string):Promise<adb.IPTBackendInfo>;
 
 export function ProbeTcpdump(arg1:string):Promise<adb.TcpdumpInfo>;
+
+export function ProcessCommands(arg1:string):Promise<Array<string> | null>;
 
 export function ProxyCommand(arg1:string,arg2:string):Promise<string>;
 
@@ -341,6 +351,8 @@ export function RemoveTask(arg1:string):Promise<void>;
 
 export function ResizeShell(arg1:string,arg2:number,arg3:number):Promise<void>;
 
+export function RestartAdbd(arg1:string):Promise<string>;
+
 export function RestoreAVDRamdisk(arg1:string):Promise<void>;
 
 export function RevealPath(arg1:string):Promise<void>;
@@ -352,6 +364,8 @@ export function RootAVDAdvice(arg1:string):Promise<Record<string, string>>;
 export function RootAVDCommand(arg1:string,arg2:boolean):Promise<string>;
 
 export function RootAVDInfo():Promise<adb.RootAVDInfo>;
+
+export function RootSignals(arg1:string):Promise<string>;
 
 export function RunCommand(arg1:string,arg2:string):Promise<string>;
 
@@ -370,6 +384,8 @@ export function SaveScreenshotAs(arg1:string):Promise<string>;
 export function ScrcpyActive(arg1:string):Promise<boolean>;
 
 export function ScrcpyAvailable():Promise<boolean>;
+
+export function ScrcpyCommand(arg1:string):Promise<string>;
 
 export function ScreenRecord(arg1:string,arg2:number):Promise<string>;
 

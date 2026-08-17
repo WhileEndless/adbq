@@ -25,6 +25,28 @@ func (c *Client) Reboot(ctx context.Context, serial, mode string) (string, error
 	return Run(cmd)
 }
 
+// PowerOff shuts the device down. Root first, because a stock shell user is not
+// allowed to halt the device; the plain shell is tried anyway since userdebug
+// builds and emulators accept it.
+func (c *Client) PowerOff(ctx context.Context, serial string) (string, error) {
+	if out, _, err := c.ShellSU(ctx, serial, powerOffRemote()); err == nil {
+		return out, nil
+	}
+	return c.Shell(ctx, serial, powerOffRemote())
+}
+
+// RestartAdbd bounces the device-side daemon, which drops the current
+// connection — the caller is expected to have warned the user.
+func (c *Client) RestartAdbd(ctx context.Context, serial string) (string, error) {
+	out, _, err := c.ShellSU(ctx, serial, restartAdbdRemote())
+	return out, err
+}
+
+// RootSignals re-reads the evidence behind the root badge.
+func (c *Client) RootSignals(ctx context.Context, serial string) (string, error) {
+	return c.Shell(ctx, serial, rootProbeRemote())
+}
+
 // collapseIPv6 returns "::" notation by collapsing the longest run of zero
 // hextets, mirroring `net.IP.String()` behavior for typical addresses.
 func collapseIPv6(hextets []string) string {
@@ -235,7 +257,7 @@ func (c *Client) StopScreenRecord(ctx context.Context, sess *ScreenRecordSession
 		return "", fmt.Errorf("no active recording")
 	}
 	// Ask the device to terminate screenrecord cleanly.
-	_, _ = c.Shell(ctx, sess.Serial, "killall -INT screenrecord || pkill -INT screenrecord")
+	_, _ = c.Shell(ctx, sess.Serial, screenRecordStopRemote())
 	// Give it a moment to finalize the container.
 	select {
 	case <-sess.Done:
@@ -445,7 +467,5 @@ func (c *Client) ScreenRecord(ctx context.Context, serial, outDir string, second
 // ClipboardSet uses `cmd clipboard set-text` (Android 10+). Returns an error
 // if not supported.
 func (c *Client) ClipboardSet(ctx context.Context, serial, text string) (string, error) {
-	// escape single quotes
-	esc := strings.ReplaceAll(text, "'", `'\''`)
-	return c.Shell(ctx, serial, "cmd clipboard set-text '"+esc+"' || input text '"+esc+"'")
+	return c.Shell(ctx, serial, clipboardSetRemote(text))
 }

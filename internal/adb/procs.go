@@ -65,6 +65,11 @@ type TopStream struct {
 
 func (s *TopStream) Snapshots() <-chan ProcSnapshot { return s.out }
 
+// UsesRoot reports whether the sweep is still being read as root. It latches to
+// false the first time su is refused, and the preview follows it so the command
+// on screen names the user actually reading /proc.
+func (s *TopStream) UsesRoot() bool { return !s.rootless }
+
 func (s *TopStream) Stop() {
 	s.stopOnce.Do(func() {
 		if s.cancel != nil {

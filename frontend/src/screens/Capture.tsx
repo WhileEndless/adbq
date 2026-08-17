@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, SearchInput, confirmDialog, showToast} from '../ui';
+import {Badge, CommandPreview, SearchInput, confirmDialog, showToast} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
 import {parseFilter} from '../lib/captureFilter';
 import {CapturePacket, useStore} from '../store';
@@ -38,6 +38,10 @@ const PRESETS: {label: string; bpf: string; hint: string}[] = [
 export function CaptureScreen({device}: {device: adb.Device}) {
   const store = useStore();
   const slice = store.getCapture(device.id);
+  // The tcpdump invocation this capture runs, rendered by Go for the interface
+  // and filter currently selected, and kept on screen while packets arrive
+  // (CLAUDE.md §4.1 K3).
+  const [cmd, setCmd] = useState<string[]>([]);
   const {iface, bpf, preset, displayFilter, maxPackets, packets, active, state} = slice;
 
   const [selected, setSelected] = useState<CapturePacket | null>(null);
@@ -67,6 +71,20 @@ export function CaptureScreen({device}: {device: adb.Device}) {
     API.ProbeTcpdump(device.id).then(td => { if (!cancelled) setTdAvailable(!!td?.available); }).catch(() => { if (!cancelled) setTdAvailable(false); });
     return () => { cancelled = true; clearInterval(t); };
   }, [device?.id]);
+
+  // Re-render the command as the interface or filter changes. Resolving
+  // tcpdump's path is a device call, so it is debounced rather than run per
+  // keystroke.
+  useEffect(() => {
+    if (!device?.id) { setCmd([]); return; }
+    let live = true;
+    const t = setTimeout(() => {
+      API.LiveCaptureCommand(device.id, iface, bpf)
+        .then(c => { if (live) setCmd(c || []); })
+        .catch(() => { if (live) setCmd([]); });
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [device?.id, iface, bpf, tdAvailable]);
 
   useEffect(() => {
     if (!tail || !listRef.current) return;
@@ -233,6 +251,9 @@ export function CaptureScreen({device}: {device: adb.Device}) {
         <label style={{display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-subtle)'}}>
           <input type='checkbox' checked={tail} onChange={e => setTail(e.target.checked)}/>tail
         </label>
+      </div>
+      <div className='capture-toolbar' style={{paddingTop: 0, paddingBottom: 4}}>
+        <CommandPreview commands={cmd} defaultOpen/>
       </div>
       <div className='capture-toolbar' style={{paddingTop: 0, paddingBottom: 8}}>
         <span className='muted' style={{fontSize: 11}}>{PRESETS[preset]?.hint || ''}</span>

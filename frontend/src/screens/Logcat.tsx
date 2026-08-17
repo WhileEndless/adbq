@@ -2,7 +2,7 @@ import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Combobox, IconBtn, SearchInput, showToast} from '../ui';
+import {Combobox, CommandPreview, IconBtn, SearchInput, showToast} from '../ui';
 import {useStore} from '../store';
 import {logcatStore, useLogcat} from '../logcatStore';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
@@ -57,6 +57,22 @@ export function LogcatScreen({device}: {device: adb.Device}) {
   useEffect(() => {
     logcatStore.ensure(device.id, logcatStore.getState(device.id).pkgFilter);
   }, [device.id]);
+
+  // The logcat invocation actually feeding this pane, pid filter and all. Only
+  // the backend knows which PID it attached to, so it renders the line
+  // (CLAUDE.md §4.1 K3) — re-read when the filter changes, and once shortly
+  // after, because attaching to a package that has just started takes a moment.
+  const [cmds, setCmds] = useState<adb.StreamCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) return;
+    let live = true;
+    const read = () => API.LogcatCommands(device.id)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    read();
+    const t = setTimeout(read, 1500);
+    return () => { live = false; clearTimeout(t); };
+  }, [device.id, state.pkgFilter]);
 
   useEffect(() => {
     if (!device?.id) return;
@@ -221,6 +237,11 @@ export function LogcatScreen({device}: {device: adb.Device}) {
           <Icon.Layers width={12} height={12}/>Collapse repeats
         </button>
         <LevelMenu value={levelMin} onChange={setLevelMin}/>
+      </div>
+
+      <div style={{padding: '0 14px 8px', display: 'grid', gap: 4}}>
+        <CommandPreview commands={cmds?.stream ?? []} label='Streaming'/>
+        <CommandPreview commands={cmds?.clear ?? []} label='Clear on device'/>
       </div>
 
       <div className='logcat-viewport'>

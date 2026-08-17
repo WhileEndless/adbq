@@ -2,7 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, Dropdown, confirmDialog, showToast} from '../ui';
+import {Badge, CommandPreview, Dropdown, confirmDialog, showToast} from '../ui';
 import {getCached, mutateData} from '../cache';
 import {pickApkAndInstall} from '../lib/apk';
 
@@ -32,13 +32,34 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
     return () => { alive = false; clearInterval(t); };
   }, [device?.id]);
 
+  // The commands behind this screen's buttons. From Go, so the reboot dialog
+  // shows the line that runs rather than one typed out here (CLAUDE.md §4.1).
+  const [cmds, setCmds] = useState<adb.DeviceCommands | null>(null);
+  useEffect(() => {
+    if (!device?.id) { setCmds(null); return; }
+    let live = true;
+    API.DeviceCommands(device.id, 30)
+      .then(c => { if (live) setCmds(c); })
+      .catch(() => { if (live) setCmds(null); });
+    return () => { live = false; };
+  }, [device?.id]);
+
   const memPct = stats && stats.memTotalKb > 0 ? Math.round((1 - stats.memAvailKb / stats.memTotalKb) * 100) : 0;
   const storagePct = stats && stats.storageTotalKb > 0 ? Math.round((1 - stats.storageFreeKb / stats.storageTotalKb) * 100) : 0;
+
+  function rebootCmd(mode: string): string[] {
+    if (mode === 'recovery') return cmds?.rebootRecovery ?? [];
+    if (mode === 'bootloader') return cmds?.rebootBootloader ?? [];
+    // fastboot and anything else share the plain form with the mode appended,
+    // which only Go knows how to spell — fall back to no preview rather than
+    // guessing at it.
+    return mode === '' ? (cmds?.reboot ?? []) : [];
+  }
 
   function doReboot(mode: string) {
     confirmDialog({
       title: `Reboot ${mode || 'device'}?`,
-      body: `adb -s ${device.id} reboot${mode ? ' ' + mode : ''}`,
+      body: <CommandPreview commands={rebootCmd(mode)} defaultOpen/>,
       confirmLabel: 'Reboot',
       danger: true,
     }).then(ok => {
@@ -68,8 +89,12 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
           {label: 'Reboot to fastboot',   onClick: () => doReboot('fastboot')},
           {label: '', onClick: () => {}, divider: true},
           {label: 'Power off', danger: true, onClick: () => {
-            confirmDialog({title: 'Power off device?', confirmLabel: 'Power off', danger: true}).then(ok => {
-              if (ok) API.RunCommand(device.id, 'reboot -p').catch(() => API.RunCommandRoot(device.id, 'reboot -p'));
+            confirmDialog({
+              title: 'Power off device?',
+              body: <CommandPreview commands={cmds?.powerOff ?? []} defaultOpen/>,
+              confirmLabel: 'Power off', danger: true,
+            }).then(ok => {
+              if (ok) API.PowerOffDevice(device.id).catch(e => showToast({title: 'Power off failed', body: String(e), kind: 'err'}));
             });
           }},
         ]}/>
@@ -122,7 +147,14 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
               <QA icon={<Icon.Upload/>} label='Install APK / APKS' onClick={() =>
                 pickApkAndInstall(device.id)}/>
               <QA icon={<Icon.Wifi/>} label='Wi-Fi adb' onClick={async () => {
-                const ok = await confirmDialog({title: 'Enable Wi-Fi adb (tcpip 5555)?', body: `Runs adb -s ${device.id} tcpip 5555 on the host. Connect afterwards with adb connect ${device.ip || '<ip>'}:5555.`, confirmLabel: 'Enable'});
+                const ok = await confirmDialog({
+                  title: 'Enable Wi-Fi adb (tcpip 5555)?',
+                  body: <>
+                    Afterwards connect with <span className='mono'>adb connect {device.ip || '<ip>'}:5555</span>.
+                    <CommandPreview commands={cmds?.tcpip ?? []} defaultOpen/>
+                  </>,
+                  confirmLabel: 'Enable',
+                });
                 if (!ok) return;
                 try {
                   await API.TcpipMode(device.id, 5555);
@@ -132,11 +164,25 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
                 }
               }}/>
               <QA icon={<Icon.Refresh/>} label='Restart adbd' onClick={() =>
-                confirmDialog({title: 'Restart adbd?', body: 'Drops the current adb connection. Replug or reconnect afterwards.', danger: true, confirmLabel: 'Restart adbd'}).then(ok => {
+                confirmDialog({
+                  title: 'Restart adbd?',
+                  body: <>
+                    Drops the current adb connection. Replug or reconnect afterwards.
+                    <CommandPreview commands={cmds?.restartAdbd ?? []} defaultOpen/>
+                  </>,
+                  danger: true, confirmLabel: 'Restart adbd',
+                }).then(ok => {
                   if (!ok) return;
-                  API.RunCommandRoot(device.id, 'nohup sh -c "stop adbd; sleep 1; start adbd" >/dev/null 2>&1 &')
-                    .then(() => showToast({title: 'adbd restarting', body: 'reconnect in 2-3s', kind: 'info', mono: true}));
+                  API.RestartAdbd(device.id)
+                    .then(() => showToast({title: 'adbd restarting', body: 'reconnect in 2-3s', kind: 'info', mono: true}))
+                    .catch(e => showToast({title: 'Restart failed', body: String(e), kind: 'err'}));
                 })}/>
+            </div>
+            <div className='card-body' style={{borderTop: '1px solid var(--border)', display: 'grid', gap: 4}}>
+              <CommandPreview commands={cmds?.screenshot ?? []} label='Screenshot'/>
+              <CommandPreview commands={cmds?.screenRecord ?? []} label='Screen record'/>
+              <CommandPreview commands={cmds?.scrcpy ?? []} label='Mirror (scrcpy)'/>
+              <CommandPreview commands={cmds?.tcpip ?? []} label='Wi-Fi adb'/>
             </div>
           </div>
           <div className='card'>
@@ -147,11 +193,13 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
               <Kv k='Detected via' v={device.root ? 'su / magisk / id' : 'no su; no magisk dir'}/>
               <div style={{marginTop: 10, display: 'flex', gap: 6}}>
                 <button className='btn' onClick={() =>
-                  API.RunCommand(device.id, 'which su; ls -d /sbin/.magisk /data/adb/magisk 2>/dev/null; magisk -V 2>/dev/null')
-                    .then(o => showToast({title: 'Re-tested root', body: o || '(no signals)', kind: 'info', mono: true}))}>
+                  API.RootSignals(device.id)
+                    .then(o => showToast({title: 'Re-tested root', body: o || '(no signals)', kind: 'info', mono: true}))
+                    .catch(e => showToast({title: 'Re-test failed', body: String(e), kind: 'err'}))}>
                   <Icon.Refresh/>Re-test
                 </button>
               </div>
+              <CommandPreview commands={cmds?.rootProbe ?? []} label='Re-test'/>
             </div>
           </div>
         </div>

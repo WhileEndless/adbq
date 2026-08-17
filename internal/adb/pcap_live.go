@@ -192,6 +192,23 @@ func (o LiveCaptureOptions) normalize() (int, int64) {
 	return mp, mb
 }
 
+// liveCaptureErrFile is where tcpdump's stderr is redirected. exec-out folds
+// device stderr into the binary stdout, so the "listening on …" banner would
+// corrupt the pcap; the file is only read back when a capture fails to start.
+func liveCaptureErrFile(serial string) string {
+	return "/data/local/tmp/adbq-pcap-" + sanitizeSerial(serial) + ".err"
+}
+
+// liveTcpdumpInner is the remote command a live capture runs, before the root
+// wrapper. Shared with the preview so the panel shows the real invocation.
+func liveTcpdumpInner(tcpdumpPath, iface, bpf, errFile string) string {
+	inner := tcpdumpPath + " -i " + shellQuote(iface) + " -U -s 0 -w -"
+	if bpf != "" {
+		inner += " " + shellQuote(bpf)
+	}
+	return inner + " 2>" + errFile
+}
+
 // StartLiveCapture spawns a tcpdump on the device, mirrors the raw pcap stream
 // to a host-side file (so SaveLivePcap is byte-perfect), and decodes packets
 // for the UI. The link type is whatever the device picked (Ethernet for
@@ -238,12 +255,9 @@ func (c *Client) StartLiveCapture(ctx context.Context, serial, iface, bpf string
 	// Redirect tcpdump's stderr to a device file: exec-out folds device stderr
 	// into the binary stdout, so the "listening on …" banner would corrupt the
 	// pcap. We read this file back only if the capture fails to start.
-	errFile := "/data/local/tmp/adbq-pcap-" + sanitizeSerial(serial) + ".err"
-	inner := td + " -i " + shellQuote(iface) + " -U -s 0 -w -"
-	if bpf = strings.TrimSpace(bpf); bpf != "" {
-		inner += " " + shellQuote(bpf)
-	}
-	inner += " 2>" + errFile
+	errFile := liveCaptureErrFile(serial)
+	bpf = strings.TrimSpace(bpf)
+	inner := liveTcpdumpInner(td, iface, bpf, errFile)
 	// Wrap as root using whichever `su -c` form this device accepts, and pass
 	// the whole thing as ONE adb-shell arg so it isn't re-split (see rootWrap).
 	remote, err := c.rootWrap(ctx, serial, inner)

@@ -3,7 +3,7 @@ import {adb, main} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOff, EventsOn} from '../../wailsjs/runtime';
 import {Icon} from '../icons';
-import {Badge, IconBtn, SearchInput, showToast} from '../ui';
+import {Badge, CommandPreview, IconBtn, SearchInput, showToast} from '../ui';
 
 interface ProcRow {
   pid: number;
@@ -38,6 +38,18 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
   const [running, setRunning] = useState(false);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  // The procfs sweep behind this table, as the user it is being read by: the
+  // stream drops to the shell user when su is refused, which is also why a table
+  // can come back half-empty (CLAUDE.md §4.1 K3).
+  const [cmds, setCmds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!device?.id) return;
+    let live = true;
+    API.ProcessCommands(device.id)
+      .then(c => { if (live) setCmds(c || []); })
+      .catch(() => { if (live) setCmds([]); });
+    return () => { live = false; };
+  }, [device?.id, snap?.root]);
 
   useEffect(() => {
     if (!device?.id) return;
@@ -144,6 +156,10 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
             {labelFor(k)}{sortKey === k ? (sortDesc ? ' ▼' : ' ▲') : ''}
           </button>
         ))}
+      </div>
+
+      <div style={{padding: '0 14px 8px'}}>
+        <CommandPreview commands={cmds} label='Sampling'/>
       </div>
 
       <div style={{flex: 1, minHeight: 0, overflow: 'auto'}}>

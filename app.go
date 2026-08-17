@@ -498,12 +498,13 @@ func boolString(b bool) string {
 func (a *App) ScrcpyAvailable() bool           { return a.scrcpy.Available() }
 func (a *App) ScrcpyActive(serial string) bool { return a.scrcpy.IsActive(serial) }
 func (a *App) StartScrcpy(serial string) error {
-	// Reasonable defaults: cap framerate, prefer h264 to avoid codec issues, USB if multiple.
-	return a.scrcpy.Start(a.ctx, serial, []string{
-		"--max-fps", "30",
-		"--video-codec", "h264",
-		"--window-title", "adbq · " + serial,
-	})
+	return a.scrcpy.Start(a.ctx, serial, adb.ScrcpyDefaultArgs(serial))
+}
+
+// ScrcpyCommand renders the command StartScrcpy would run, so the mirror button
+// can show it. Empty when scrcpy is not installed — there is no command then.
+func (a *App) ScrcpyCommand(serial string) string {
+	return a.scrcpy.Command(serial, adb.ScrcpyDefaultArgs(serial))
 }
 func (a *App) StopScrcpy(serial string) error { return a.scrcpy.Stop(serial) }
 
@@ -716,6 +717,13 @@ func (a *App) StartLiveCapture(serial, iface, bpf string, opts adb.LiveCaptureOp
 
 // StopLiveCapture ends the in-process capture for serial. Safe to call when
 // no capture is running.
+// LiveCaptureCommand renders the tcpdump invocation a live capture runs for the
+// interface and filter currently selected, so the panel can keep it on screen
+// while packets arrive. Empty when tcpdump is not on the device.
+func (a *App) LiveCaptureCommand(serial, iface, bpf string) []string {
+	return a.client.CaptureCommandFor(a.ctx, serial, iface, bpf)
+}
+
 func (a *App) StopLiveCapture(serial string) error {
 	if a.client.Live == nil {
 		return nil
@@ -989,6 +997,21 @@ func (a *App) EnsureLogcat(serial, pkgFilter string, showSystem bool) (bool, err
 	return true, a.restartLogcatLocked(serial, pkgFilter, showSystem)
 }
 
+// LogcatCommands renders the logcat invocation feeding this screen right now,
+// pid filter included, plus the clear that empties the device buffer. The
+// command stays visible while the stream runs (CLAUDE.md §4.1 K3).
+func (a *App) LogcatCommands(serial string) adb.StreamCommands {
+	a.mu.Lock()
+	f := a.logcats[serial]
+	a.mu.Unlock()
+	pid := 0
+	if f != nil {
+		pid = f.pid()
+	}
+	stream, clear := adb.LogcatCommandsFor(serial, pid, logcatTailLines, a.client.Renderer(a.ctx, serial))
+	return adb.StreamCommands{Stream: stream, Clear: clear}
+}
+
 // SetLogcatSystem toggles OS-line visibility on the running feed without
 // restarting adb, so flipping the switch is instant and loses nothing that is
 // already on screen.
@@ -1116,6 +1139,21 @@ func (a *App) StartProcStream(serial string, intervalSec int) (*ProcStreamStatus
 		runtime.EventsEmit(a.ctx, eventName+":done", nil)
 	}()
 	return &ProcStreamStatus{Running: true, IntervalSec: intervalSec}, nil
+}
+
+// ProcessCommands renders the procfs sweep the process table polls, as the user
+// it is actually being read by: the stream drops to the shell user when su is
+// denied, and a preview that always claimed root would explain nothing about a
+// half-empty table.
+func (a *App) ProcessCommands(serial string) []string {
+	a.procMu.Lock()
+	s := a.procStreams[serial]
+	a.procMu.Unlock()
+	asRoot := true
+	if s != nil {
+		asRoot = s.UsesRoot()
+	}
+	return adb.ProcessCommands(serial, asRoot, a.client.Renderer(a.ctx, serial))
 }
 
 func (a *App) StopProcStream(serial string) {
@@ -2331,11 +2369,34 @@ func (a *App) NetCommands(serial, hostPort string) adb.NetCommands {
 	return a.client.NetCommandsFor(a.ctx, serial, hostPort)
 }
 
+// DeviceCommands renders the Overview screen's actions: reboots, tcpip,
+// screenshot, recording, clipboard and mirroring.
+func (a *App) DeviceCommands(serial string, recordSeconds int) adb.DeviceCommands {
+	return a.client.DeviceCommandsFor(a.ctx, serial, 5555, recordSeconds, a.ScrcpyCommand(serial))
+}
+
 // ─── System ──────────────────────────────────────────────────────────────
 
 func (a *App) Reboot(serial, mode string) (string, error) {
 	return a.client.Reboot(a.ctx, serial, mode)
 }
+
+// PowerOffDevice halts the device. Separate from Reboot because it is the one
+// action here that needs a person to press a physical button afterwards.
+func (a *App) PowerOffDevice(serial string) (string, error) {
+	return a.client.PowerOff(a.ctx, serial)
+}
+
+// RestartAdbd bounces the device-side adb daemon, dropping this connection.
+func (a *App) RestartAdbd(serial string) (string, error) {
+	return a.client.RestartAdbd(a.ctx, serial)
+}
+
+// RootSignals re-reads what the root badge is based on.
+func (a *App) RootSignals(serial string) (string, error) {
+	return a.client.RootSignals(a.ctx, serial)
+}
+
 func (a *App) ListConnections(serial string) ([]adb.Connection, error) {
 	return a.client.ListConnections(a.ctx, serial)
 }

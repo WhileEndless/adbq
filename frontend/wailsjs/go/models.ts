@@ -755,6 +755,38 @@ export namespace adb {
 	        this.hardwareSerial = source["hardwareSerial"];
 	    }
 	}
+	export class DeviceCommands {
+	    reboot: string[] | null;
+	    rebootRecovery: string[] | null;
+	    rebootBootloader: string[] | null;
+	    tcpip: string[] | null;
+	    screenshot: string[] | null;
+	    screenRecord: string[] | null;
+	    powerOff: string[] | null;
+	    restartAdbd: string[] | null;
+	    rootProbe: string[] | null;
+	    clipboard: string[] | null;
+	    scrcpy: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeviceCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.reboot = source["reboot"];
+	        this.rebootRecovery = source["rebootRecovery"];
+	        this.rebootBootloader = source["rebootBootloader"];
+	        this.tcpip = source["tcpip"];
+	        this.screenshot = source["screenshot"];
+	        this.screenRecord = source["screenRecord"];
+	        this.powerOff = source["powerOff"];
+	        this.restartAdbd = source["restartAdbd"];
+	        this.rootProbe = source["rootProbe"];
+	        this.clipboard = source["clipboard"];
+	        this.scrcpy = source["scrcpy"];
+	    }
+	}
 	export class DeviceProfile {
 	    id: string;
 	    name: string;
@@ -2083,6 +2115,20 @@ export namespace adb {
 	    }
 	}
 	
+	export class StreamCommands {
+	    stream: string[] | null;
+	    clear: string[] | null;
+	
+	    static createFrom(source: any = {}) {
+	        return new StreamCommands(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stream = source["stream"];
+	        this.clear = source["clear"];
+	    }
+	}
 	export class SystemImage {
 	    pkg: string;
 	    level: string;

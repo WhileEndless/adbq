@@ -194,6 +194,10 @@ export function DetectRunningFridaVersion(arg1) {
   return window['go']['main']['App']['DetectRunningFridaVersion'](arg1);
 }
 
+export function DeviceCommands(arg1, arg2) {
+  return window['go']['main']['App']['DeviceCommands'](arg1, arg2);
+}
+
 export function DeviceDetails(arg1) {
   return window['go']['main']['App']['DeviceDetails'](arg1);
 }
@@ -494,12 +498,20 @@ export function ListTasks() {
   return window['go']['main']['App']['ListTasks']();
 }
 
+export function LiveCaptureCommand(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LiveCaptureCommand'](arg1, arg2, arg3);
+}
+
 export function LiveCaptureStatus(arg1) {
   return window['go']['main']['App']['LiveCaptureStatus'](arg1);
 }
 
 export function LoadHostsConfig(arg1) {
   return window['go']['main']['App']['LoadHostsConfig'](arg1);
+}
+
+export function LogcatCommands(arg1) {
+  return window['go']['main']['App']['LogcatCommands'](arg1);
 }
 
 export function LookupDeviceProfile(arg1) {
@@ -582,6 +594,10 @@ export function PlanTcpdumpAutoInstall(arg1) {
   return window['go']['main']['App']['PlanTcpdumpAutoInstall'](arg1);
 }
 
+export function PowerOffDevice(arg1) {
+  return window['go']['main']['App']['PowerOffDevice'](arg1);
+}
+
 export function PreviewProfile(arg1, arg2) {
   return window['go']['main']['App']['PreviewProfile'](arg1, arg2);
 }
@@ -592,6 +608,10 @@ export function ProbeIptables(arg1, arg2) {
 
 export function ProbeTcpdump(arg1) {
   return window['go']['main']['App']['ProbeTcpdump'](arg1);
+}
+
+export function ProcessCommands(arg1) {
+  return window['go']['main']['App']['ProcessCommands'](arg1);
 }
 
 export function ProxyCommand(arg1, arg2) {
@@ -678,6 +698,10 @@ export function ResizeShell(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResizeShell'](arg1, arg2, arg3);
 }
 
+export function RestartAdbd(arg1) {
+  return window['go']['main']['App']['RestartAdbd'](arg1);
+}
+
 export function RestoreAVDRamdisk(arg1) {
   return window['go']['main']['App']['RestoreAVDRamdisk'](arg1);
 }
@@ -700,6 +724,10 @@ export function RootAVDCommand(arg1, arg2) {
 
 export function RootAVDInfo() {
   return window['go']['main']['App']['RootAVDInfo']();
+}
+
+export function RootSignals(arg1) {
+  return window['go']['main']['App']['RootSignals'](arg1);
 }
 
 export function RunCommand(arg1, arg2) {
@@ -736,6 +764,10 @@ export function ScrcpyActive(arg1) {
 
 export function ScrcpyAvailable() {
   return window['go']['main']['App']['ScrcpyAvailable']();
+}
+
+export function ScrcpyCommand(arg1) {
+  return window['go']['main']['App']['ScrcpyCommand'](arg1);
 }
 
 export function ScreenRecord(arg1, arg2) {
