@@ -6,7 +6,7 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {EventsOn} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
-import {Badge, CodeBlock, FeatureNotice, IconBtn, Modal, SearchInput, Switch, confirmDialog, showToast} from '../ui';
+import {Badge, CodeBlock, CommandPreview, FeatureNotice, IconBtn, Modal, SearchInput, Switch, confirmDialog, showToast} from '../ui';
 
 type Tab = 'avds' | 'images' | 'root' | 'host';
 
@@ -259,10 +259,10 @@ function AVDRow({avd, sdk, selected, onSelect, onChanged}: {
         {showOpts && (
           <div style={{marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)'}}>
             <BootOptions opts={opts} onChange={setOpts} snapshots={avd.snapshots ?? []}/>
-            <div style={{marginTop: 8}}>
-              <span className='muted' style={{fontSize: 11}}>Command (click to copy):</span>{' '}
-              <CodeBlock multiline>{launchCmd || `${sdk?.emulator || 'emulator'} -avd ${avd.name}`}</CodeBlock>
-            </div>
+            {/* No locally assembled fallback: until Go answers there is no
+                command to show, and inventing one risks showing a line that is
+                not what would run (CLAUDE.md §4.1). */}
+            <CommandPreview commands={launchCmd ? [launchCmd] : []} defaultOpen/>
             <div style={{marginTop: 8, display: 'flex', gap: 6}}>
               <button className='btn sm danger' disabled={busy} onClick={wipe}><Icon.Trash/>Wipe data</button>
             </div>
@@ -614,7 +614,12 @@ function DangerZone({avd, onChanged}: {avd: adb.AVD; onChanged: () => void}) {
     const cmd = await API.DeleteAVDCommand(avd.name).catch(() => '');
     const ok = await confirmDialog({
       title: `Delete ${avd.name}?`,
-      body: `The AVD and everything in it — ${humanBytes(avd.diskBytes)} of data, apps and snapshots — are removed permanently.\n\n${cmd}`,
+      body: (
+        <div style={{fontSize: 12}}>
+          <div>The AVD and everything in it — {humanBytes(avd.diskBytes)} of data, apps and snapshots — are removed permanently.</div>
+          <CommandPreview commands={cmd ? [cmd] : []} defaultOpen/>
+        </div>
+      ),
       confirmLabel: 'Delete AVD', danger: true,
     });
     if (!ok) return;
@@ -778,8 +783,7 @@ function CreateAVDModal({onClose, onCreated}: {onClose: () => void; onCreated: (
 
       {!!cmd && (
         <div style={{marginTop: 12}}>
-          <span className='muted' style={{fontSize: 11}}>Command (click to copy):</span>{' '}
-          <CodeBlock multiline>{cmd}</CodeBlock>
+          <CommandPreview commands={cmd ? [cmd] : []} defaultOpen/>
           <div className='muted' style={{fontSize: 11, marginTop: 4}}>
             RAM, cores, data size, GPU and keyboard have no avdmanager flags — adbq writes them
             into <span className='mono'>config.ini</span> right after creation, as Android Studio does.
@@ -978,9 +982,15 @@ function RootTab() {
     const cmd = await API.RootAVDCommand(avd.name, false).catch(() => '');
     const ok = await confirmDialog({
       title: `Root ${avd.name}?`,
-      body: `This patches the shared system image, not just this AVD:\n${avd.sysImgDir}\n\n`
-        + `Every AVD using that image is affected. A ramdisk backup is written next to it and Restore undoes the change.\n\n`
-        + `${avd.name} is shut down and cold-booted at the end.\n\n${cmd}`,
+      body: (
+        <div style={{fontSize: 12}}>
+          <div>This patches the shared system image, not just this AVD:</div>
+          <div className='mono' style={{margin: '4px 0'}}>{avd.sysImgDir}</div>
+          <div>Every AVD using that image is affected. A ramdisk backup is written next to it and Restore undoes the change.</div>
+          <div style={{marginTop: 6}}>{avd.name} is shut down and cold-booted at the end.</div>
+          <CommandPreview commands={cmd ? [cmd] : []} defaultOpen/>
+        </div>
+      ),
       confirmLabel: 'Root this AVD', danger: true,
     });
     if (!ok) return;
@@ -994,7 +1004,12 @@ function RootTab() {
     const cmd = await API.RootAVDCommand(avd.name, true).catch(() => '');
     const ok = await confirmDialog({
       title: `Restore ${avd.name}'s system image?`,
-      body: `The original ramdisk is put back from the backup, removing Magisk from every AVD using this image.\n\n${cmd}`,
+      body: (
+        <div style={{fontSize: 12}}>
+          <div>The original ramdisk is put back from the backup, removing Magisk from every AVD using this image.</div>
+          <CommandPreview commands={cmd ? [cmd] : []} defaultOpen/>
+        </div>
+      ),
       confirmLabel: 'Restore', danger: true,
     });
     if (!ok) return;

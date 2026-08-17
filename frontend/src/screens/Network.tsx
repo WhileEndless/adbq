@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {adb, main} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CodeBlock, SearchInput, Switch, confirmDialog, showToast} from '../ui';
+import {Badge, CommandPreview, SearchInput, Switch, confirmDialog, showToast} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
 import {useDeviceData} from '../cache';
 
@@ -117,6 +117,16 @@ function NetProxy({device, info, reload}: {device: adb.Device; info: adb.Network
     if (i > 0) { setHost(v.slice(0, i)); setPort(v.slice(i + 1)); }
     else { setHost(v); setPort(''); }
   }, [info?.proxy]);
+  // The command comes from Go, and follows the fields as they are typed, so
+  // what is shown is what Apply would run (CLAUDE.md §4.1).
+  const [proxyCmd, setProxyCmd] = useState('');
+  useEffect(() => {
+    let live = true;
+    API.ProxyCommand(device.id, host && port ? `${host}:${port}` : '')
+      .then(c => { if (live) setProxyCmd(c); })
+      .catch(() => { if (live) setProxyCmd(''); });
+    return () => { live = false; };
+  }, [device.id, host, port]);
   const PRESETS = [
     {label: 'Burp Suite',  port: 8080},
     {label: 'mitmproxy',   port: 8080},
@@ -174,10 +184,7 @@ function NetProxy({device, info, reload}: {device: adb.Device; info: adb.Network
               </button>
             ))}
           </div>
-          <div style={{marginTop: 12, fontSize: 11}}>
-            <span className='muted'>Underlying command (click to copy):</span>{' '}
-            <CodeBlock>{`adb -s ${device.id} shell settings put global http_proxy ${host && port ? `${host}:${port}` : ':0'}`}</CodeBlock>
-          </div>
+          <CommandPreview commands={proxyCmd ? [proxyCmd] : []}/>
         </div>
       </div>
       <div className='muted' style={{fontSize: 11, marginTop: 6}}>
@@ -673,9 +680,9 @@ function NetCapture({device}: {device: adb.Device}) {
           <div style={{flex: 1}}/>
           <button className='btn sm' onClick={poll}><Icon.Refresh/>Refresh</button>
         </div>
-        <div style={{padding: '8px 14px 14px'}}>
-          <span className='muted' style={{fontSize: 11}}>Underlying command (click to copy):</span>{' '}
-          <CodeBlock multiline>{cmd}</CodeBlock>
+        <div style={{padding: '0 14px 14px'}}>
+          {/* A running capture keeps its command in view (CLAUDE.md §4.1). */}
+          <CommandPreview commands={cmd ? [cmd] : []} defaultOpen/>
         </div>
       </div>
     </>

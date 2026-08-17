@@ -415,8 +415,13 @@ export function CodeBlock({children, multiline}: {children: string; multiline?: 
 // runs, and how many steps there are. Expanding shows all of it, and copying
 // takes the whole thing either way — the rule is that the command is always
 // reachable, not that it is always in the way.
-export function CommandPreview({commands, label = 'Command'}: {commands: string[]; label?: string}) {
-  const [open, setOpen] = useState(false);
+// defaultOpen is for the panels CLAUDE.md §4.1 requires to keep the command
+// live — a running capture, a stream, a confirm dialog for something
+// irreversible. Those start expanded and can be collapsed; everything else
+// starts collapsed and can be expanded. The control is the same either way, so
+// copying works identically wherever a command appears.
+export function CommandPreview({commands, label = 'Command', defaultOpen}: {commands: string[]; label?: string; defaultOpen?: boolean}) {
+  const [open, setOpen] = useState(!!defaultOpen);
   const [copied, setCopied] = useState(false);
   const lines = (commands ?? []).filter(c => c.trim() !== '');
   if (lines.length === 0) return null;
