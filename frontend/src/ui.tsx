@@ -556,12 +556,15 @@ export function CommandChip({commands, groups, label = 'Command', text}: {
   const list: CommandGroup[] = groups ?? [{label, commands}];
   const lines = list.flatMap(g => (g.commands ?? []).filter(c => c.trim() !== ''));
   if (lines.length === 0) return null;
+  // Icon-only uses the app's icon-button shape rather than a squashed text
+  // button, so it sits in a toolbar or a table row like every other glyph does.
   return (
     <>
-      <button className='btn sm' onClick={e => { e.stopPropagation(); setOpen(true); }}
-              title={`${label} — click to see or copy\n\n${lines.join('\n')}`}
-              style={{padding: text ? undefined : '0 6px'}}>
-        <Icon.Terminal width={12} height={12}/>{text}
+      <button className={text ? 'btn sm' : 'iconbtn'}
+              onClick={e => { e.stopPropagation(); setOpen(true); }}
+              aria-label={`Show the command for ${label}`}
+              title={`${label} — the command adbq runs. Click to see or copy.\n\n${lines.join('\n')}`}>
+        <Icon.Terminal width={13} height={13}/>{text}
       </button>
       <CommandSheet open={open} onClose={() => setOpen(false)} title={label} groups={list}/>
     </>
