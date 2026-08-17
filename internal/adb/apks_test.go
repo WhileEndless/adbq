@@ -139,14 +139,14 @@ func TestApkSetFromPathsFindsBaseAndBuildsCommands(t *testing.T) {
 	set := apkSetFromPaths("SER", "com.x", []string{
 		"/data/app/~~a/com.x-1/split_config.arm64_v8a.apk",
 		"/data/app/~~a/com.x-1/base.apk",
-	})
+	}, AppVersion{Name: "1.2.3", Code: "10203"})
 	if !strings.HasSuffix(set.Base, "base.apk") {
 		t.Errorf("base misdetected: %q", set.Base)
 	}
 	if !set.Split || len(set.Splits) != 1 {
 		t.Errorf("split app not recognised: %+v", set)
 	}
-	if set.Suggested != "com.x.apks" {
+	if set.Suggested != "com.x-1.2.3-10203.apks" {
 		t.Errorf("suggested name %q", set.Suggested)
 	}
 	joined := strings.Join(set.Commands, "\n")
@@ -163,7 +163,7 @@ func TestApkSetFromPathsFindsBaseAndBuildsCommands(t *testing.T) {
 }
 
 func TestApkSetFromPathsSingleApk(t *testing.T) {
-	set := apkSetFromPaths("SER", "com.x", []string{"/data/app/com.x-1/base.apk"})
+	set := apkSetFromPaths("SER", "com.x", []string{"/data/app/com.x-1/base.apk"}, AppVersion{})
 	if set.Split || len(set.Splits) != 0 || set.Suggested != "com.x.apk" {
 		t.Errorf("non-split app misreported: %+v", set)
 	}
@@ -272,7 +272,7 @@ func TestApkSetMarshalsEmptySlicesNotNull(t *testing.T) {
 	// A nil Go slice marshals as JSON null while the generated TS type says
 	// string[], so the UI crashed reading .length off it. Non-split apps are
 	// the case that produced no splits at all.
-	b, err := json.Marshal(apkSetFromPaths("SER", "com.x", []string{"/data/app/com.x-1/base.apk"}))
+	b, err := json.Marshal(apkSetFromPaths("SER", "com.x", []string{"/data/app/com.x-1/base.apk"}, AppVersion{}))
 	if err != nil {
 		t.Fatal(err)
 	}

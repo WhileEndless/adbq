@@ -27,6 +27,9 @@ type ApkSet struct {
 	Split     bool     `json:"split"`     // true when the app is an App Bundle install
 	Suggested string   `json:"suggested"` // suggested local file name
 	Commands  []string `json:"commands"`
+	// Version is what Suggested is named after, carried along so callers that
+	// need another file name for the same app do not read the device again.
+	Version AppVersion `json:"version"`
 }
 
 // ApkInstallPlan is what InstallApkBundle would do with a local file: which
@@ -88,22 +91,25 @@ func (c *Client) ApkSetOf(ctx context.Context, serial, pkg string) (*ApkSet, err
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no APK path found for %s", pkg)
 	}
-	return apkSetFromPaths(serial, pkg, paths), nil
+	// A second read, and a cheap one, so the suggested file name can carry the
+	// version. It is best-effort by design — see AppVersionOf.
+	return apkSetFromPaths(serial, pkg, paths, c.AppVersionOf(ctx, serial, pkg)), nil
 }
 
 // apkSetFromPaths is the pure half of ApkSetOf so the command preview can be
 // unit-tested without a device.
-func apkSetFromPaths(serial, pkg string, paths []string) *ApkSet {
+func apkSetFromPaths(serial, pkg string, paths []string, ver AppVersion) *ApkSet {
 	base, splits := baseAndSplits(paths)
 	// A nil slice marshals to JSON null, and the UI reads .length off these —
 	// keep every slice field empty-but-present.
 	if splits == nil {
 		splits = []string{}
 	}
-	s := &ApkSet{Pkg: pkg, Base: base, Splits: splits, Split: len(splits) > 0}
-	s.Suggested = pkg + ".apk"
+	s := &ApkSet{Pkg: pkg, Base: base, Splits: splits, Split: len(splits) > 0, Version: ver}
+	stem := ExportBaseName(pkg, ver)
+	s.Suggested = stem + ".apk"
 	if s.Split {
-		s.Suggested = pkg + ".apks"
+		s.Suggested = stem + ".apks"
 	}
 	s.Commands = append(s.Commands, "adb -s "+serial+" shell pm path "+pkg)
 	for _, p := range append([]string{base}, splits...) {
