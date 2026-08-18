@@ -1,32 +1,37 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandChip, CommandPreview, Modal, SearchInput, commandToast, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, commandToast, confirmDialog, DataAge, Modal, SearchInput, showToast} from '../ui';
 import {useStore} from '../store';
 import {pickApkAndInstall} from '../lib/apk';
 import {ensureJadx, jadxInfo, jadxLabel} from '../lib/jadx';
 import {sdkLabel, rootUnavailableReason} from '../lib/android';
+import {deviceKey as cacheKey, getOrFetch, useDeviceData} from '../cache';
+import {APPS_STALE_MS} from '../App';
+import {usePoll} from '../lib/poll';
+import {SEARCH_DEBOUNCE_MS} from '../lib/logSearch';
+
+// App details (permissions, version, sizes) move only when the app itself is
+// installed, updated or cleared — all of which invalidate the apps domain from
+// the backend, so this TTL is only a backstop for changes made outside adbq.
+const APP_DETAIL_STALE_MS = 10 * 60_000;
 
 export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
-  const [apps, setApps] = useState<adb.App[]>([]);
-  const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
   const [onlyUser, setOnlyUser] = useState(true);
   const [sel, setSel] = useState<adb.App | null>(null);
   const [detail, setDetail] = useState<adb.AppDetail | null>(null);
 
   const store = useStore();
-  const load = (force = false) => {
-    if (!device?.id) return;
-    setLoading(true);
-    const key = `apps:${device.id}:${onlyUser ? 'user' : 'all'}`;
-    if (force) store.invalidate(key);
-    store.cached(key, 60_000, () => API.ListApps(device.id, onlyUser))
-      .then(a => { setApps(a || []); setLoading(false); })
-      .catch(e => { setLoading(false); showToast({title: 'List apps failed', body: String(e), kind: 'err'}); });
-  };
-  useEffect(() => { load(); }, [device?.id, onlyUser]);
+  // One cache, one key shape. This list used to be fetched three ways — here at
+  // 60s, by Logcat at 30s under the SAME key (so whichever screen loaded first
+  // decided the TTL), and uncached by the sidebar badge on every screen change.
+  const listKey = device?.id ? cacheKey('apps', device.id, onlyUser ? 'user' : 'all') : null;
+  const {data: appsData, loading, refreshing, refresh, fetchedAt} = useDeviceData(
+    listKey, () => API.ListApps(device.id, onlyUser), {staleMs: APPS_STALE_MS},
+  );
+  const apps = appsData ?? [];
 
   // Use an epoch counter so a stale DescribeApp resolve doesn't overwrite
   // detail for a newly-selected app.
@@ -34,8 +39,10 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
   useEffect(() => {
     if (!sel) { setDetail(null); return; }
     const my = ++reqId.current;
-    store.cached(`describe:${device.id}:${sel.pkg}`, 120_000, () => API.DescribeApp(device.id, sel.pkg))
-      .then(d => { if (my === reqId.current) setDetail(d); })
+    // Namespaced under the apps domain so an install/uninstall/clear drops the
+    // per-app detail too, not just the list it came from.
+    getOrFetch(cacheKey('apps', device.id, 'describe', sel.pkg), () => API.DescribeApp(device.id, sel.pkg), APP_DETAIL_STALE_MS)
+      .then(d => { if (my === reqId.current) setDetail(d ?? null); })
       .catch(() => { if (my === reqId.current) setDetail(null); });
   }, [sel?.pkg, device?.id]);
 
@@ -43,16 +50,21 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
   // panel is open so the Launch/Kill button reflects reality without the
   // user having to refresh by hand.
   const [running, setRunning] = useState<adb.AppRunning | null>(null);
+  const probe = useCallback(() => {
+    if (!sel || !device?.id) return;
+    API.IsAppRunning(device.id, sel.pkg).then(setRunning).catch(() => setRunning(null));
+  }, [sel?.pkg, device?.id]);
   useEffect(() => {
     if (!sel) { setRunning(null); return; }
     let cancelled = false;
-    const probe = () => API.IsAppRunning(device.id, sel.pkg)
-      .then(r => { if (!cancelled) setRunning(r); })
-      .catch(() => { if (!cancelled) setRunning(null); });
     probe();
-    const t = setInterval(probe, 3000);
-    return () => { cancelled = true; clearInterval(t); };
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.pkg, device?.id]);
+  // Only while a detail panel is open, and only while the window is visible —
+  // this exists so the Launch/Kill button matches reality, and neither is true
+  // of a hidden window with nothing selected.
+  usePoll(probe, 5000, !!sel && !!device?.id);
   // What each action in this panel will run. Fetched per selection because the
   // export step is named after the app's version and the root steps carry the
   // `su` form this device accepts — neither is guessable in the frontend.
@@ -71,10 +83,21 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
     API.IsAppRunning(device.id, sel.pkg).then(setRunning).catch(() => setRunning(null));
   }
 
+  // The search box is debounced like the ones on Logcat and Frida. With system
+  // apps shown this list runs to several hundred entries, all of them rendered,
+  // so filtering on every keystroke meant a full re-filter and a full re-render
+  // per character — the lag landed on typing, which is the worst place for it.
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(q), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const filtered = useMemo(() => {
-    const Q = q.toLowerCase();
-    return apps.filter(a => !Q || a.pkg.toLowerCase().includes(Q) || (a.name||'').toLowerCase().includes(Q));
-  }, [apps, q]);
+    const Q = query.toLowerCase();
+    if (!Q) return apps;
+    return apps.filter(a => a.pkg.toLowerCase().includes(Q) || (a.name || '').toLowerCase().includes(Q));
+  }, [apps, query]);
 
   function doAction(action: (s: string, p: string) => Promise<string>, label: string) {
     if (!sel) return;
@@ -91,9 +114,10 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
         <button className={`btn sm${onlyUser ? ' primary' : ''}`} onClick={() => setOnlyUser(true)}>User</button>
         <button className={`btn sm${!onlyUser ? ' primary' : ''}`} onClick={() => setOnlyUser(false)}>All</button>
         <div className='spacer' style={{flex: 1}}/>
-        <button className='btn' onClick={() => load(true)}><Icon.Refresh/>Reload</button>
+        <DataAge fetchedAt={fetchedAt}/>
+        <button className='btn' onClick={refresh}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
         <button className='btn primary' title='Single .apk, or a split bundle as .apks / .xapk'
-                onClick={() => pickApkAndInstall(device.id).then(done => { if (done) setTimeout(() => load(true), 2500); })}>
+                onClick={() => pickApkAndInstall(device.id)}>
           <Icon.Upload/>Install APK / APKS
         </button>
       </div>

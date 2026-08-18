@@ -32,6 +32,20 @@ interface TermSlot {
 
 const terminals = new Map<string, TermSlot>();
 
+// On the renderer: xterm 5.x defaults to its DOM renderer, and a WebGL addon
+// exists that is usually faster for high-throughput output. It is not used
+// here, deliberately.
+//
+// The cost that actually showed up on this path was the transport, not the
+// paint: the backend emitted one Wails event per 4KB PTY read, so `top` or a
+// large `cat` produced hundreds of JSON encodes, bridge crossings and separate
+// term.write calls per second. That is fixed (see pumpShellOutput). Whether the
+// DOM renderer is then a bottleneck has not been measured, and adding a
+// dependency — with a GPU context to lose and a fallback path to maintain — on
+// an unmeasured hypothesis is not a trade worth making blind. Measure first; if
+// the paint is the limit, @xterm/addon-webgl is same-publisher and MIT, so it
+// clears the dependency rules in CLAUDE.md §1.1.
+
 const defaultOpts: ITerminalOptions = {
   fontFamily: '"JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace',
   fontSize: 12.5,

@@ -10,5 +10,6 @@ Bu klasör projenin geliştirme rehberlerini içerir.
 - [command-visibility.md](command-visibility.md) — Çalıştırılan adb komutunun UI'da gösterilmesi: kural, desen, envanter, fazlı plan.
 - [apk-export-install.md](apk-export-install.md) — Split APK (App Bundle) dışa aktarma (`.apks`) ve geri kurma.
 - [emulator-manager.md](emulator-manager.md) — AVD/system-image yönetimi, emülatör yaşam döngüsü, rootAVD ile rootlama ve sertifika zinciri.
+- [performance.md](performance.md) — adb süreç maliyeti: nasıl ölçülür, veri volatilite sınıfları, invalidation matrisi, poll envanteri, bütçeler.
 
 Bağlayıcı kurallar için: [`../CLAUDE.md`](../CLAUDE.md).

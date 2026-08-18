@@ -240,7 +240,7 @@ func TestSSIDStaysOffPollingPath_Integration(t *testing.T) {
 	// time when no expensive path is in play on this device.
 	readAt := func() time.Time { return costlySSIDReadAt(c, serial) }
 
-	_, link := c.detectIP(ctx, serial)
+	_, link := ipFrom(c.probeDynamic(ctx, serial))
 	first, err := c.SSID(ctx, serial, link)
 	if err != nil {
 		t.Skipf("no SSID strategy applies to this device: %v", err)
@@ -294,7 +294,7 @@ func TestSSIDStaysOffPollingPath_Integration(t *testing.T) {
 func costlySSIDReadAt(c *Client, serial string) time.Time {
 	c.factMu.Lock()
 	defer c.factMu.Unlock()
-	if st := c.facts[factKey("wifi.ssid", serial)]; st != nil && st.cached {
+	if st := c.facts[factKey("net.ssid", serial)]; st != nil && st.cached {
 		return st.at
 	}
 	return time.Time{}
@@ -312,7 +312,7 @@ func TestNetworkSnapshotReadsSSIDFresh_Integration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	_, link := c.detectIP(ctx, serial)
+	_, link := ipFrom(c.probeDynamic(ctx, serial))
 	primed, err := c.SSID(ctx, serial, link)
 	if err != nil {
 		t.Skipf("no SSID strategy applies to this device: %v", err)

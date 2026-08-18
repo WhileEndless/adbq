@@ -64,6 +64,16 @@ type logcatFeed struct {
 	// healthy subscription from a hollow one.
 	dead atomic.Bool
 
+	// quiet suppresses event delivery while nothing is displaying the log.
+	//
+	// The feed used to run at full volume for the rest of the session after the
+	// user visited the Logcat screen once: the adb stream, a proc-table refresh
+	// every few seconds, and ten events a second crossing the webview bridge to
+	// a component that had unmounted. The stream stays up — a log people come
+	// back to should not have a hole in it — but nothing is delivered until
+	// somebody is looking.
+	quiet atomic.Bool
+
 	lines  chan adb.LogEntry
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -173,13 +183,25 @@ func (f *logcatFeed) attach(ctx context.Context, pid, tailLines int) error {
 	if old != nil {
 		old.Stop()
 	}
-	go f.forward(s)
+	go f.forward(ctx, s)
 	return nil
 }
 
 // SetShowSystem flips the OS-line filter on a running feed. Lines already
 // dropped are not recovered — only what arrives from here on is affected.
 func (f *logcatFeed) SetShowSystem(v bool) { f.sys.Store(v) }
+
+// SetQuiet stops or resumes delivery to the UI. The device stream keeps running
+// either way; only the events stop.
+func (f *logcatFeed) SetQuiet(v bool) { f.quiet.Store(v) }
+
+// send delivers a batch unless the feed is quiet.
+func (f *logcatFeed) send(entries []adb.LogEntry) {
+	if f.quiet.Load() || len(entries) == 0 {
+		return
+	}
+	f.emit(f.ev, entries)
+}
 
 func (f *logcatFeed) Stop() {
 	f.cancel()
@@ -197,7 +219,7 @@ func (f *logcatFeed) Stop() {
 // stream swap (app restarted under a package filter) is invisible to the
 // batcher. Entries are dropped rather than blocking the reader when the buffer
 // is full: falling behind must not stall the adb pipe and back up logd.
-func (f *logcatFeed) forward(s *adb.LogcatStream) {
+func (f *logcatFeed) forward(ctx context.Context, s *adb.LogcatStream) {
 	for e := range s.Lines() {
 		select {
 		case f.lines <- e:
@@ -205,16 +227,89 @@ func (f *logcatFeed) forward(s *adb.LogcatStream) {
 			f.dropped.Add(1)
 		}
 	}
-	// The stream ended. If it is still the feed's current one this was not a
-	// deliberate swap, so the feed is finished — mark it so a later
-	// EnsureLogcat revives it instead of trusting a subscription that can
-	// never produce another line.
+	// The stream ended. If it is no longer the feed's current one, this was a
+	// deliberate swap (the filtered app restarted under a new pid) and there is
+	// nothing to do.
 	f.mu.Lock()
 	current := f.stream == s
+	pid := f.lastPID
 	f.mu.Unlock()
-	if current {
-		f.dead.Store(true)
+	if !current || ctx.Err() != nil {
+		return
 	}
+	go f.recover(ctx, s.ExitReason(), pid)
+}
+
+// reconnectDelays is the backoff schedule for reviving a dropped stream. It
+// starts fast because the common case — a USB link renegotiating, or the adb
+// server dropping a transport while it is busy serving other commands — clears
+// within a second, and ends slow enough that a genuinely absent device is not
+// hammered.
+var reconnectDelays = []time.Duration{
+	400 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+	4 * time.Second,
+}
+
+// recover puts the feed back on the air after its adb process exited on its own.
+//
+// Without this the pane simply stopped: the feed was marked dead and only a
+// remount or a filter change would rebuild it, so a user watching a log would
+// see it freeze — with, at best, a cryptic "read: unexpected EOF" as the last
+// line — and have no way to tell a quiet app from a broken stream. Streaming
+// logs from a phone over USB drops routinely; treating every drop as fatal made
+// the feature unreliable in exactly the situation it exists for.
+//
+// A permanent failure (a flag this logcat rejects, a missing buffer) is NOT
+// retried — that would spin forever on something a retry cannot fix — and is
+// reported to the user instead.
+func (f *logcatFeed) recover(ctx context.Context, reason string, pid int) {
+	if !adb.IsTransientStreamEnd(reason) {
+		f.fail(reason)
+		return
+	}
+	for _, delay := range reconnectDelays {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		// A package-filtered feed must re-resolve the pid: if the drop happened
+		// because the app died, the old pid is gone and reattaching to it would
+		// produce a stream that never emits. pollProcs picks it up from here.
+		next := pid
+		if f.pkg != "" {
+			next = f.pidForPackage(ctx, f.pkg)
+			if next == 0 {
+				continue
+			}
+		}
+		// `-T 1` rather than the usual backfill: the ring already holds
+		// everything from before the drop, and re-dumping the tail would
+		// duplicate it on screen.
+		if err := f.attach(ctx, next, 1); err != nil {
+			continue
+		}
+		f.emit(f.ev, []adb.LogEntry{{
+			Level: "I", Tag: "adbq",
+			Msg: "log stream reconnected",
+		}})
+		return
+	}
+	f.fail(reason)
+}
+
+// fail marks the feed unrecoverable and says why, in terms that name the next
+// step rather than quoting adb at the user.
+func (f *logcatFeed) fail(reason string) {
+	f.dead.Store(true)
+	msg := "log stream stopped and could not be reconnected"
+	if reason != "" {
+		msg += " (" + reason + ")"
+	}
+	msg += " — reopen this screen to try again"
+	f.emit(f.ev, []adb.LogEntry{{Level: "E", Tag: "adbq", Msg: msg}})
 }
 
 // Alive reports whether the feed can still deliver lines.
@@ -230,7 +325,7 @@ func (f *logcatFeed) batch(ctx context.Context) {
 		if len(buf) == 0 {
 			return
 		}
-		f.emit(f.ev, buf)
+		f.send(buf)
 		buf = make([]adb.LogEntry, 0, maxBatch)
 	}
 	for {
@@ -255,7 +350,7 @@ func (f *logcatFeed) batch(ctx context.Context) {
 			flush()
 			if n := f.dropped.Swap(0); n > 0 {
 				// Say so rather than leaving an unexplained gap in the log.
-				f.emit(f.ev, []adb.LogEntry{{
+				f.send([]adb.LogEntry{{
 					Level: "W", Tag: "adbq",
 					Msg: fmt.Sprintf("dropped %d line(s): the UI could not keep up with the device", n),
 				}})

@@ -2,9 +2,10 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {adb, main} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandChip, CommandPreview, SearchInput, Switch, commandToast, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, commandToast, confirmDialog, DataAge, SearchInput, showToast, Switch} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
-import {useDeviceData} from '../cache';
+import {deviceKey as cacheKey, useDeviceData} from '../cache';
+import {usePoll} from '../lib/poll';
 
 type Tab = 'overview' | 'proxy' | 'cert' | 'hosts' | 'dns' | 'capture' | 'connections';
 
@@ -12,8 +13,8 @@ export function NetworkScreen({device}: {device: adb.Device}) {
   const [tab, setTab] = useState<Tab>('overview');
 
   // Cached-first: show the last network snapshot instantly, revalidate quietly.
-  const {data: info, refreshing, error, refresh: reload} = useDeviceData(
-    device?.id ? `net-info:${device.id}` : null,
+  const {data: info, refreshing, error, refresh: reload, fetchedAt} = useDeviceData(
+    device?.id ? cacheKey('net', device.id, 'info') : null,
     () => API.GetNetworkInfo(device.id),
     {staleMs: 10000},
   );
@@ -35,6 +36,7 @@ export function NetworkScreen({device}: {device: adb.Device}) {
         <span className='subtitle mono'>{info?.wifiSsid || '—'} · {info?.ip || device.ip} · {info?.mac || device.mac}</span>
         {!!error && <span style={{color: 'var(--err)', fontSize: 11}}>load failed</span>}
         <div className='spacer' style={{flex: 1}}/>
+        <DataAge fetchedAt={fetchedAt}/>
         <button className='btn' onClick={reload}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Refresh</button>
       </div>
 
@@ -613,9 +615,15 @@ function NetCapture({device}: {device: adb.Device}) {
   useEffect(() => {
     poll();
     probeTd();
-    const t = setInterval(poll, 1500);
-    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device?.id]);
+  // This is the most expensive question adbq asks a device — finding the
+  // capture process means opening /proc/<pid>/comm for every process on the
+  // system. It used to run twice a second whether or not anything was
+  // capturing. Fast only while a capture of ours is live; otherwise it is
+  // watching for a tcpdump somebody else started, which is not a per-second
+  // concern. Gated on window visibility by usePoll.
+  usePoll(poll, state?.active ? 3000 : 15000, !!device?.id);
 
   function installTd() {
     API.InstallTcpdumpWithPicker(device.id)
@@ -812,10 +820,9 @@ function NetConnections({device}: {device: adb.Device}) {
   };
   useEffect(() => {
     reload();
-    if (paused) return;
-    const t = setInterval(reload, 3000);
-    return () => clearInterval(t);
-  }, [device?.id, paused]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device?.id]);
+  usePoll(reload, 3000, !!device?.id && !paused);
 
   // Sockets are read out of procfs; `ss` is missing on stripped ROMs, and the
   // preview should say what actually runs.

@@ -8,6 +8,12 @@ import {useStore} from '../store';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
 import {rootUnavailableReason} from '../lib/android';
 import {CodeEditor} from '../components/CodeEditor';
+import {fileStamp, saveTextAs} from '../lib/saveText';
+import {deviceKey as cacheKey, getOrFetch, invalidateData} from '../cache';
+
+// The frida release list comes from GitHub, not the device, and new versions
+// appear a few times a month. Reload re-fetches on demand.
+const FRIDA_RELEASES_STALE_MS = 15 * 60_000;
 
 export function FridaScreen({device}: {device: adb.Device}) {
   const store = useStore();
@@ -45,9 +51,9 @@ export function FridaScreen({device}: {device: adb.Device}) {
     if (!device?.id) return;
     setRelLoading(true);
     setRelError('');
-    const key = `frida-releases:${device.id}:${a}`;
-    if (force) store.invalidate(key);
-    store.cached(key, 15 * 60_000, () => API.ListFridaReleases(device.id, a))
+    const key = cacheKey('frida', device.id, 'releases', a);
+    if (force) invalidateData(key);
+    getOrFetch(key, () => API.ListFridaReleases(device.id, a), FRIDA_RELEASES_STALE_MS)
       .then(r => { setReleases(r || []); setRelLoading(false); })
       .catch(e => { setRelError(String(e)); setReleases([]); setRelLoading(false); });
   };
@@ -1099,6 +1105,22 @@ interface FridaRow {
  *
  * Returns null for messages that have nothing to display.
  */
+// Derived rows are cached per message.
+//
+// The console re-derives its row list whenever a batch arrives, and the
+// messages are append-only — so without this it rebuilt a row object for every
+// message in the buffer, up to five thousand of them, several times a second,
+// to discover that all but the newest few were unchanged. A WeakMap keyed on
+// the message means each is converted once and released with it.
+const rowCache = new WeakMap<adb.FridaMsg, FridaRow | null>();
+
+function fridaRowCached(m: adb.FridaMsg): FridaRow | null {
+  if (rowCache.has(m)) return rowCache.get(m) ?? null;
+  const r = fridaRow(m);
+  rowCache.set(m, r);
+  return r;
+}
+
 function fridaRow(m: adb.FridaMsg): FridaRow | null {
   const cat: FridaCat =
     m.kind === 'error' || m.kind === 'fatal' ? 'err'
@@ -1143,14 +1165,17 @@ function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
     const keep = new Set(cats);
     const out: FridaRow[] = [];
     for (const m of slice.messages) {
-      const r = fridaRow(m);
+      const r = fridaRowCached(m);
       if (!r) continue;
       if (!keep.has(r.cat)) continue;
       if (q && !r.text.toLowerCase().includes(q) && !r.tag.toLowerCase().includes(q)) continue;
       out.push(r);
     }
     return out;
-  }, [slice.messages, search, cats]);
+    // `slice.messages` is a ring mutated in place, so `rev` is what signals a
+    // change — the same arrangement the logcat and packet lists use.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slice.messages, slice.rev, search, cats]);
 
   // Keep the latest line in view while following. useLayoutEffect so the jump
   // lands in the same frame the rows paint, instead of flashing the old offset.
@@ -1241,7 +1266,17 @@ function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
   );
 }
 
-function FridaLogLine({row, q}: {row: FridaRow; q: string}) {
+// Memoized, which is what keeps the console usable once the buffer fills.
+//
+// Frida output is free-form and wraps, so the rows are not a fixed height and
+// cannot be windowed the way the logcat and packet lists are. What can be
+// avoided is re-rendering them: the list is append-only and each row's props
+// are stable, so with a stable key React reconciles only the rows that are
+// actually new instead of all five thousand on every batch.
+//
+// `q` changes only when the (debounced) search text does, which is exactly when
+// every row's highlighting genuinely has to be recomputed.
+const FridaLogLine = React.memo(function FridaLogLine({row, q}: {row: FridaRow; q: string}) {
   const t = new Date(row.m.time).toLocaleTimeString(undefined, {hour12: false});
   return (
     <div className={`frida-line ${row.cat}`}>
@@ -1250,18 +1285,17 @@ function FridaLogLine({row, q}: {row: FridaRow; q: string}) {
       <span className='msg'>{highlight(row.text, q)}</span>
     </div>
   );
-}
+});
 
 function exportFridaLog(rows: FridaRow[], info: adb.FridaSessionInfo) {
   const header = `# adbq frida session export — ${info.package} — ${new Date().toISOString()}\n`
     + `# mode=${info.mode} · frida ${info.runtime} · ${rows.length} lines\n\n`;
   const text = header + rows.map(r => `${new Date(r.m.time).toISOString()}  ${r.tag.padEnd(8)} ${r.text}`).join('\n');
-  const blob = new Blob([text], {type: 'text/plain'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `frida-${info.package}-${Date.now()}.txt`; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast({title: 'Session log exported', body: `${rows.length} lines`, kind: 'ok'});
+  void saveTextAs({
+    title: 'Export Frida session log',
+    suggestedName: `frida-${info.package}-${fileStamp()}.txt`,
+    content: text,
+  });
 }
 
 function fmtMB(n: number): string {

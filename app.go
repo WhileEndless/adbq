@@ -68,6 +68,10 @@ type App struct {
 
 	procMu      sync.Mutex
 	procStreams map[string]*adb.TopStream
+
+	// devices publishes the device list to the UI. It owns both the push
+	// subscription and the fallback poll — see device_watcher.go.
+	devices *deviceWatcher
 }
 
 func NewApp() *App {
@@ -117,6 +121,16 @@ func (a *App) startup(ctx context.Context) {
 		a.client.SetBinary(p)
 	}
 	_ = a.client.StartServer(ctx)
+	// Start tracking before anything else asks for a device: the watcher's first
+	// publish is what the UI paints, and it needs the server up.
+	a.devices = a.startDeviceWatcher(ctx)
+	// The mirror is a process adbq starts, so its state is something adbq
+	// witnesses rather than something it has to ask about. Announcing the exit
+	// is what lets the UI stop polling ScrcpyActive twice a second from two
+	// separate places.
+	a.scrcpy.OnExit(func(serial string) {
+		runtime.EventsEmit(a.ctx, scrcpyEvent, scrcpyStatus{Serial: serial, Active: false})
+	})
 	// Reconcile persisted sessions: anything we left running on a device when
 	// adbq crashed/closed comes back as a task entry the user can see.
 	go a.reconcileSessions()
@@ -217,7 +231,10 @@ func (a *App) AndroidSDK() adb.AndroidSDKInfo { return a.sdk.Info() }
 
 // RecheckAndroidSDK re-probes after the user installs something or changes the
 // SDK path, so they don't have to restart adbq.
-func (a *App) RecheckAndroidSDK() adb.AndroidSDKInfo { return a.sdk.Recheck() }
+func (a *App) RecheckAndroidSDK() adb.AndroidSDKInfo {
+	defer a.touch("", adb.DomSDK)
+	return a.sdk.Recheck()
+}
 
 // HostSettings returns the user's host-machine overrides.
 func (a *App) HostSettings() adb.HostSettings { return a.host.Get() }
@@ -225,6 +242,7 @@ func (a *App) HostSettings() adb.HostSettings { return a.host.Get() }
 // SetSDKRoot pins the Android SDK location. An empty string clears the override
 // and returns adbq to auto-detection.
 func (a *App) SetSDKRoot(path string) (adb.AndroidSDKInfo, error) {
+	defer a.touch("", adb.DomSDK, adb.DomAVD)
 	hs := a.host.Get()
 	hs.SDKRoot = strings.TrimSpace(path)
 	if err := a.host.Set(hs); err != nil {
@@ -235,6 +253,7 @@ func (a *App) SetSDKRoot(path string) (adb.AndroidSDKInfo, error) {
 
 // PickSDKRoot opens a folder chooser for the Android SDK root.
 func (a *App) PickSDKRoot() (string, error) {
+	defer a.touch("", adb.DomSDK, adb.DomAVD)
 	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Select the Android SDK folder",
 	})
@@ -268,6 +287,7 @@ func (a *App) EmulatorLaunchCommand(name string, opts adb.EmulatorOpts) string {
 
 // StartAVD boots an AVD and waits for it to come up, reporting progress as a task.
 func (a *App) StartAVD(name string, opts adb.EmulatorOpts) (string, error) {
+	defer a.touch("", adb.DomAVD)
 	id, ctx := a.tasks.Create("emulator-start", "Start "+name, "launching")
 	serial, err := a.emu.Start(ctx, name, opts)
 	if err != nil {
@@ -300,7 +320,10 @@ func (a *App) StartAVD(name string, opts adb.EmulatorOpts) (string, error) {
 }
 
 // StopAVD shuts an emulator down gracefully via the console.
-func (a *App) StopAVD(name string) error { return a.emu.Stop(a.ctx, name) }
+func (a *App) StopAVD(name string) error {
+	defer a.touch("", adb.DomAVD)
+	return a.emu.Stop(a.ctx, name)
+}
 
 // EmulatorLog returns emulator output newer than sinceSeq. The UI polls this
 // only while the log panel is open, so a closed panel costs nothing.
@@ -325,6 +348,7 @@ func (a *App) ListSystemImages(refresh bool) ([]adb.SystemImage, error) {
 
 // InstallSystemImage downloads a system image, reporting progress as a task.
 func (a *App) InstallSystemImage(pkg string) error {
+	defer a.touch("", adb.DomSDK)
 	id, ctx := a.tasks.Create("sdk-install", "Install "+pkg, "starting")
 	go func() {
 		err := a.pkgs.InstallSystemImage(ctx, pkg, func(stage string, pct int) {
@@ -345,6 +369,7 @@ func (a *App) InstallSystemImage(pkg string) error {
 // UninstallSystemImage removes an installed image. Destructive — the UI must
 // confirm first, showing the command.
 func (a *App) UninstallSystemImage(pkg string) error {
+	defer a.touch("", adb.DomSDK)
 	return a.pkgs.UninstallSystemImage(a.ctx, pkg)
 }
 
@@ -385,13 +410,20 @@ func (a *App) DeleteAVDCommand(name string) string {
 }
 
 // CreateAVD creates a new AVD and returns it.
-func (a *App) CreateAVD(spec adb.AVDSpec) (*adb.AVD, error) { return a.emu.CreateAVD(a.ctx, spec) }
+func (a *App) CreateAVD(spec adb.AVDSpec) (*adb.AVD, error) {
+	defer a.touch("", adb.DomAVD)
+	return a.emu.CreateAVD(a.ctx, spec)
+}
 
 // DeleteAVD removes an AVD and its data. Irreversible.
-func (a *App) DeleteAVD(name string) error { return a.emu.DeleteAVD(a.ctx, name) }
+func (a *App) DeleteAVD(name string) error {
+	defer a.touch("", adb.DomAVD)
+	return a.emu.DeleteAVD(a.ctx, name)
+}
 
 // DeleteAVDSnapshot removes one saved snapshot.
 func (a *App) DeleteAVDSnapshot(name, snapshot string) error {
+	defer a.touch("", adb.DomAVD)
 	return a.emu.DeleteSnapshot(name, snapshot)
 }
 
@@ -404,6 +436,7 @@ func (a *App) AVDHardwareChanges(hw adb.AVDHardware) (map[string]string, error) 
 // UpdateAVDHardware applies CPU/RAM/disk/display changes to an AVD. Changes
 // take effect the next time it boots.
 func (a *App) UpdateAVDHardware(name string, hw adb.AVDHardware) (*adb.AVD, error) {
+	defer a.touch("", adb.DomAVD)
 	return a.emu.UpdateAVDHardware(a.ctx, name, hw)
 }
 
@@ -458,12 +491,14 @@ func (a *App) RootAVDCommand(name string, restore bool) (string, error) {
 // RootAVD patches an AVD's system image with Magisk, cold-boots it and verifies
 // root. Reported as a task; the transcript lands in the AVD's own log.
 func (a *App) RootAVD(name string) error {
+	defer a.touch("", adb.DomAVD)
 	a.runRootAVDTask("avd-root", "Root "+name, name, false)
 	return nil
 }
 
 // RestoreAVDRamdisk reverts a rootAVD patch from the backup it left behind.
 func (a *App) RestoreAVDRamdisk(name string) error {
+	defer a.touch("", adb.DomAVD)
 	a.runRootAVDTask("avd-restore", "Restore "+name, name, true)
 	return nil
 }
@@ -495,10 +530,24 @@ func boolString(b bool) string {
 
 // ─── scrcpy ─────────────────────────────────────────────────────────────
 
-func (a *App) ScrcpyAvailable() bool           { return a.scrcpy.Available() }
+func (a *App) ScrcpyAvailable() bool { return a.scrcpy.Available() }
+
+// scrcpyEvent carries mirror start/stop to the UI, so it does not have to ask.
+const scrcpyEvent = "scrcpy:changed"
+
+// scrcpyStatus is the scrcpyEvent payload.
+type scrcpyStatus struct {
+	Serial string `json:"serial"`
+	Active bool   `json:"active"`
+}
+
 func (a *App) ScrcpyActive(serial string) bool { return a.scrcpy.IsActive(serial) }
 func (a *App) StartScrcpy(serial string) error {
-	return a.scrcpy.Start(a.ctx, serial, adb.ScrcpyDefaultArgs(serial))
+	if err := a.scrcpy.Start(a.ctx, serial, adb.ScrcpyDefaultArgs(serial)); err != nil {
+		return err
+	}
+	runtime.EventsEmit(a.ctx, scrcpyEvent, scrcpyStatus{Serial: serial, Active: true})
+	return nil
 }
 
 // ScrcpyCommand renders the command StartScrcpy would run, so the mirror button
@@ -506,11 +555,18 @@ func (a *App) StartScrcpy(serial string) error {
 func (a *App) ScrcpyCommand(serial string) string {
 	return a.scrcpy.Command(serial, adb.ScrcpyDefaultArgs(serial))
 }
-func (a *App) StopScrcpy(serial string) error { return a.scrcpy.Stop(serial) }
+func (a *App) StopScrcpy(serial string) error {
+	// The exit callback also fires, but only once Wait returns; emitting here
+	// too makes the button feel immediate rather than waiting on the process.
+	err := a.scrcpy.Stop(serial)
+	runtime.EventsEmit(a.ctx, scrcpyEvent, scrcpyStatus{Serial: serial, Active: false})
+	return err
+}
 
 // ─── Hosts persistence ─────────────────────────────────────────────────
 
 func (a *App) SaveHostsConfig(serial, content string) error {
+	defer a.touch(serial, adb.DomHosts)
 	return adb.SaveHostsConfig(serial, content)
 }
 func (a *App) LoadHostsConfig(serial string) (string, error) {
@@ -523,6 +579,7 @@ func (a *App) LoadHostsConfig(serial string) (string, error) {
 // verifying via md5 readback. Returns the full result so the UI can show
 // which strategy worked and whether a reboot is required.
 func (a *App) ApplyHostsConfig(serial string) (*adb.HostsApplyResult, error) {
+	defer a.touch(serial, adb.DomHosts, adb.DomNet)
 	content, err := adb.LoadHostsConfig(serial)
 	if err != nil {
 		return nil, err
@@ -544,6 +601,7 @@ func (a *App) PlanHostsApply(serial, content string) adb.HostsApplyPlan {
 // FlushDeviceDNS clears the netd resolver cache so a fresh /etc/hosts entry
 // takes effect on running connections.
 func (a *App) FlushDeviceDNS(serial string) (string, error) {
+	defer a.touch(serial, adb.DomNet)
 	return a.client.FlushDNS(a.ctx, serial)
 }
 
@@ -630,6 +688,7 @@ func (a *App) SuggestProxyHost(serial string, port int) (*ProxySuggestion, error
 // ─── Capture lifecycle ─────────────────────────────────────────────────
 
 func (a *App) StartCapture(serial, iface, bpf string) (*adb.CaptureState, error) {
+	defer a.touch(serial, adb.DomTcpdump)
 	st, err := a.client.StartCapture(a.ctx, serial, iface, bpf)
 	if err != nil {
 		return st, err
@@ -643,6 +702,7 @@ func (a *App) StartCapture(serial, iface, bpf string) (*adb.CaptureState, error)
 	return st, nil
 }
 func (a *App) StopCapture(serial string) (*adb.CaptureState, error) {
+	defer a.touch(serial, adb.DomTcpdump)
 	st, err := a.client.StopCapture(a.ctx, serial)
 	if a.sessions != nil {
 		a.sessions.Remove("cap:" + serial)
@@ -698,6 +758,7 @@ func (a *App) TcpdumpInstallCommands(serial string) []string {
 }
 
 func (a *App) InstallTcpdumpAuto(serial string, confirmed bool) (*adb.TcpdumpInfo, error) {
+	defer a.touch(serial, adb.DomTcpdump, adb.DomFiles, adb.DomStorage)
 	return a.client.InstallTcpdumpAuto(a.ctx, serial, confirmed)
 }
 
@@ -707,6 +768,7 @@ func (a *App) InstallTcpdumpAuto(serial string, confirmed bool) (*adb.TcpdumpInf
 // blobs from unverified sources, and the user picking the file keeps them in
 // the loop about provenance.
 func (a *App) InstallTcpdumpWithPicker(serial string) (*adb.TcpdumpInfo, error) {
+	defer a.touch(serial, adb.DomTcpdump, adb.DomFiles, adb.DomStorage)
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Select tcpdump binary (arm64/arm/x86_64 matching the device)",
 	})
@@ -772,6 +834,10 @@ func (a *App) SaveLivePcap(serial string) (string, error) {
 	if st == nil || st.PcapPath == "" {
 		return "", fmt.Errorf("no pcap mirror available for %s", serial)
 	}
+	// The mirror is written through a buffer, so the newest packets may not be
+	// on disk yet. Saving without this quietly drops the tail of the capture —
+	// the part the user most likely just watched arrive.
+	a.client.Live.FlushMirror(serial)
 	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Save live capture (.pcap)",
 		DefaultFilename: "adbq-live-" + serial + ".pcap",
@@ -808,24 +874,31 @@ func (a *App) ListIptables(serial, family, table string) (*adb.IPTSnapshot, erro
 	return a.client.ListIptables(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table))
 }
 func (a *App) AppendIptablesRule(serial, family, table, chain string, spec []string) (*adb.IPTSnapshot, error) {
+	defer a.touch(serial, adb.DomIptables)
 	return a.client.AppendIptablesRule(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table), chain, adb.IptablesSpec(spec))
 }
 func (a *App) InsertIptablesRule(serial, family, table, chain string, pos int, spec []string) (*adb.IPTSnapshot, error) {
+	defer a.touch(serial, adb.DomIptables)
 	return a.client.InsertIptablesRule(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table), chain, pos, adb.IptablesSpec(spec))
 }
 func (a *App) DeleteIptablesRule(serial, family, table, chain string, num int) (*adb.IPTSnapshot, error) {
+	defer a.touch(serial, adb.DomIptables)
 	return a.client.DeleteIptablesRule(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table), chain, num)
 }
 func (a *App) FlushIptables(serial, family, table, chain string) (*adb.IPTSnapshot, error) {
+	defer a.touch(serial, adb.DomIptables)
 	return a.client.FlushIptables(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table), chain)
 }
 func (a *App) SetIptablesPolicy(serial, family, table, chain, policy string) error {
+	defer a.touch(serial, adb.DomIptables)
 	return a.client.SetIptablesPolicy(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table), chain, policy)
 }
 func (a *App) CreateIptablesChain(serial, family, table, chain string) error {
+	defer a.touch(serial, adb.DomIptables)
 	return a.client.CreateIptablesChain(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table), chain)
 }
 func (a *App) DeleteIptablesChain(serial, family, table, chain string) error {
+	defer a.touch(serial, adb.DomIptables)
 	return a.client.DeleteIptablesChain(a.ctx, serial, adb.IPFamily(family), adb.IPTable(table), chain)
 }
 
@@ -840,9 +913,11 @@ func (a *App) ExportIptables(serial, family string) (string, error) {
 	return a.client.ExportIptables(a.ctx, serial, adb.IPFamily(family))
 }
 func (a *App) ImportIptables(serial, family, blob string) error {
+	defer a.touch(serial, adb.DomIptables)
 	return a.client.ImportIptables(a.ctx, serial, adb.IPFamily(family), blob)
 }
 func (a *App) UndoIptables(serial, family string) (*adb.IPTSnapshot, error) {
+	defer a.touch(serial, adb.DomIptables)
 	return a.client.UndoIptables(a.ctx, serial, adb.IPFamily(family))
 }
 
@@ -888,6 +963,11 @@ func (a *App) PullCapture(serial string) (string, error) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	// Stop publishing before tearing anything down, so a late device event
+	// cannot arrive after the UI has gone.
+	if a.devices != nil {
+		a.devices.Stop()
+	}
 	a.scrcpy.StopAll()
 	// Only emulators adbq launched are killed; one the user started from
 	// Android Studio is theirs and must survive adbq closing.
@@ -924,7 +1004,21 @@ func (a *App) shutdown(ctx context.Context) {
 
 // ─── Devices ─────────────────────────────────────────────────────────────
 
+// ListDevices returns the current device list.
+//
+// It reads the watcher's published list rather than shelling out: the watcher
+// is already tracking, so asking adb again would spawn a process to learn
+// something this app was told the moment it happened. The UI calls this once on
+// mount and then follows the `devices:changed` event.
+//
+// The direct read remains as a cold path for the window between startup and the
+// watcher's first publish.
 func (a *App) ListDevices() ([]adb.Device, error) {
+	if a.devices != nil {
+		if list := a.devices.Devices(); len(list) > 0 {
+			return list, nil
+		}
+	}
 	devs, err := a.client.ListDevices(a.ctx)
 	if err != nil {
 		return nil, err
@@ -950,11 +1044,22 @@ func (a *App) DeviceDetails(serial string) (*adb.Device, error) {
 }
 
 func (a *App) ConnectTCP(addr string) (string, error) {
+	// The address is the serial for a Wi-Fi transport. Whatever we remember
+	// about it predates this connection — the same IP can be a different phone
+	// after a DHCP lease change — so none of it carries over.
+	defer a.touchAll(addr)
 	ctx, cancel := context.WithTimeout(a.ctx, 6*time.Second)
 	defer cancel()
 	return a.client.Connect(ctx, addr)
 }
-func (a *App) DisconnectDevice(addr string) (string, error) { return a.client.Disconnect(a.ctx, addr) }
+
+// DisconnectDevice detaches a TCP device. Client.Disconnect already drops the
+// per-device probes it owns; touchAll additionally tells the frontend cache,
+// which the client cannot reach.
+func (a *App) DisconnectDevice(addr string) (string, error) {
+	defer a.touchAll(addr)
+	return a.client.Disconnect(a.ctx, addr)
+}
 
 // ConnectCommands renders the connect/disconnect pair for a Wi-Fi address.
 func (a *App) ConnectCommands(addr string) adb.ConnectCommands {
@@ -962,6 +1067,52 @@ func (a *App) ConnectCommands(addr string) adb.ConnectCommands {
 }
 func (a *App) GetStats(serial string) (*adb.Stats, error) { return a.client.GetStats(a.ctx, serial) }
 func (a *App) ADBVersion() (string, error)                { return a.client.ServerVersion(a.ctx) }
+
+// SaveTextAs writes text the UI already holds to a file the user picks.
+//
+// The Logcat, Shell and Frida panes used to "export" by building a Blob URL and
+// clicking a synthetic <a download>. That is a browser idiom, and the webview
+// adbq runs in is not a browser: WKWebView ignores the download attribute, so
+// the button did nothing at all — no file, no error, and a success toast on top.
+// Saving is the backend's job here, the same way every other export in this app
+// already does it (ExportAPK, SaveLivePcap, …).
+//
+// Returns the chosen path, or "" when the user cancelled — a cancel is not an
+// error and must not raise one, or every dismissed dialog becomes a red toast.
+func (a *App) SaveTextAs(title, suggestedName, content string) (string, error) {
+	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           title,
+		DefaultFilename: suggestedName,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Text file (*.txt)", Pattern: "*.txt"},
+			{DisplayName: "All files", Pattern: "*"},
+		},
+	})
+	if err != nil || dst == "" {
+		return "", err
+	}
+	// The dialog returns the typed name verbatim on every platform, so a name
+	// with no extension stays extensionless and opens in nothing. Only fill one
+	// in when there is none — a deliberate `.log` or `.csv` is the user's call.
+	if filepath.Ext(dst) == "" {
+		dst += ".txt"
+	}
+	if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", dst, err)
+	}
+	return dst, nil
+}
+
+// ADBStats reports how many adb processes adbq has started and which command
+// shapes dominate. adbq is a wrapper around a CLI, so its cost is overwhelmingly
+// process creation rather than anything it computes; this is the number that
+// says whether a change actually helped. Surfaced in Settings so the answer is
+// available on a real device with a real ROM, not only under a profiler.
+func (a *App) ADBStats() adb.ADBStats { return adb.ADBStatsSnapshot(15) }
+
+// ResetADBStats reopens the measurement window so a before/after comparison can
+// be made without restarting the app.
+func (a *App) ResetADBStats() { adb.ResetADBStats() }
 
 // ─── Logcat streaming via events ────────────────────────────────────────
 
@@ -1029,6 +1180,21 @@ func (a *App) LogcatCommands(serial string) adb.StreamCommands {
 	}
 	stream, clear := adb.LogcatCommandsFor(serial, pid, logcatTailLines, a.client.Renderer(a.ctx, serial))
 	return adb.StreamCommands{Stream: stream, Clear: clear}
+}
+
+// SetLogcatQuiet stops or resumes logcat event delivery for a device.
+//
+// Called when the Logcat screen mounts and unmounts. The stream keeps running
+// while quiet — the ring behind it is what makes coming back to the screen
+// useful — but the events stop, and with them the JSON encoding, the bridge
+// crossings and the React work for a component that is not on screen.
+func (a *App) SetLogcatQuiet(serial string, quiet bool) {
+	a.mu.Lock()
+	f := a.logcats[serial]
+	a.mu.Unlock()
+	if f != nil {
+		f.SetQuiet(quiet)
+	}
 }
 
 // SetLogcatSystem toggles OS-line visibility on the running feed without
@@ -1210,24 +1376,89 @@ func (a *App) OpenShell(serial string, root bool) (string, error) {
 	a.shellMu.Lock()
 	a.shells[id] = s
 	a.shellMu.Unlock()
-	eventName := "shell:" + id
-	go func() {
-		for chunk := range s.Output() {
-			runtime.EventsEmit(a.ctx, eventName, string(chunk))
-		}
-		runtime.EventsEmit(a.ctx, eventName+":done", nil)
-	}()
+	go a.pumpShellOutput("shell:"+id, s.Output())
 	return id, nil
+}
+
+// shellFlushEvery bounds how long a keystroke's echo waits to be coalesced.
+// Roughly one display frame: short enough that typing feels immediate, long
+// enough that a burst of output becomes one event instead of hundreds.
+const shellFlushEvery = 16 * time.Millisecond
+
+// shellMaxBatch flushes early once a batch is large, so a fast producer does
+// not build an unbounded string between ticks.
+const shellMaxBatch = 64 << 10
+
+// pumpShellOutput forwards a PTY's output to the UI, coalescing it.
+//
+// It used to emit one Wails event per read from the pty — 4KB at a time, so
+// running `top` or `cat` on a large file produced hundreds of events a second,
+// each one a JSON encode, a trip across the webview bridge and a separate
+// xterm write. logcat_feed.go had already learned this lesson and says so in
+// its header; the shell path never got the same treatment.
+//
+// The terminal is a stream, so batching is invisible: bytes arrive in the same
+// order, just fewer times.
+func (a *App) pumpShellOutput(eventName string, out <-chan []byte) {
+	tick := time.NewTicker(shellFlushEvery)
+	defer tick.Stop()
+
+	var buf []byte
+	flush := func() {
+		if len(buf) == 0 {
+			return
+		}
+		runtime.EventsEmit(a.ctx, eventName, string(buf))
+		buf = buf[:0]
+	}
+	for {
+		select {
+		case chunk, ok := <-out:
+			if !ok {
+				// Flush before the done signal: the last thing a shell prints is
+				// often the reason it exited, and dropping it would leave the
+				// terminal ending mid-sentence.
+				flush()
+				runtime.EventsEmit(a.ctx, eventName+":done", nil)
+				return
+			}
+			buf = append(buf, chunk...)
+			if len(buf) >= shellMaxBatch {
+				flush()
+			}
+		case <-tick.C:
+			flush()
+		}
+	}
 }
 
 // ListShellHistory returns persisted scrollback entries from previous adbq
 // runs, newest first. The frontend can replay these into a fresh terminal.
 func (a *App) ListShellHistory() ([]adb.ScrollbackEntry, error) {
+	a.flushShellLogs()
 	return adb.ListScrollbacks()
+}
+
+// flushShellLogs pushes every live session's buffered scrollback to disk.
+//
+// The logs are written through a buffer, and the history list and reader both
+// go to the filesystem — so without this, a session that is still open reads
+// back missing its most recent output.
+func (a *App) flushShellLogs() {
+	a.shellMu.Lock()
+	sessions := make([]*adb.ShellSession, 0, len(a.shells))
+	for _, sh := range a.shells {
+		sessions = append(sessions, sh)
+	}
+	a.shellMu.Unlock()
+	for _, sh := range sessions {
+		sh.FlushTee()
+	}
 }
 
 // ReadShellHistory returns the saved log content for a given session label.
 func (a *App) ReadShellHistory(serial, label string) (string, error) {
+	a.flushShellLogs()
 	return adb.ReadScrollback(serial, label)
 }
 
@@ -1313,6 +1544,7 @@ func (a *App) IsAppRunning(serial, pkg string) (*adb.AppRunning, error) {
 	return a.client.IsAppRunning(a.ctx, serial, pkg)
 }
 func (a *App) UninstallApp(serial, pkg string) (string, error) {
+	defer a.touch(serial, adb.DomApps, adb.DomStorage)
 	id, _ := a.tasks.Create("uninstall", "Uninstalling "+pkg, pkg)
 	go func() {
 		out, err := a.client.UninstallApp(a.ctx, serial, pkg)
@@ -1328,6 +1560,7 @@ func (a *App) UninstallApp(serial, pkg string) (string, error) {
 // PushFileWithOptions pushes a local file and optionally chmod/chown's the
 // remote target. owner is "user[:group]" or empty; mode is chmod-compat or empty.
 func (a *App) PushFileWithOptions(serial, remoteDir, mode, owner string, asRoot bool) (string, error) {
+	defer a.touch(serial, adb.DomFiles, adb.DomStorage)
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select file to push"})
 	if err != nil || path == "" {
 		return "", err
@@ -1361,15 +1594,19 @@ func (a *App) PushFileWithOptions(serial, remoteDir, mode, owner string, asRoot 
 	return id, nil
 }
 func (a *App) ForceStopApp(serial, pkg string) (string, error) {
+	defer a.touch(serial, adb.DomApps)
 	return a.client.ForceStopApp(a.ctx, serial, pkg)
 }
 func (a *App) ClearApp(serial, pkg string) (string, error) {
+	defer a.touch(serial, adb.DomApps, adb.DomStorage)
 	return a.client.ClearApp(a.ctx, serial, pkg)
 }
 func (a *App) LaunchApp(serial, pkg string) (string, error) {
+	defer a.touch(serial, adb.DomApps)
 	return a.client.LaunchApp(a.ctx, serial, pkg)
 }
 func (a *App) InstallAPKFromPath(serial, localPath string) (string, error) {
+	defer a.touch(serial, adb.DomApps, adb.DomStorage)
 	return a.client.InstallAPK(a.ctx, serial, localPath)
 }
 
@@ -1402,6 +1639,7 @@ func (a *App) PlanApkInstall(serial, localPath string) (*adb.ApkInstallPlan, err
 // InstallApkBundleFromPath installs a single APK or a multi-APK container
 // (.apks/.xapk/.zip) as one pm session.
 func (a *App) InstallApkBundleFromPath(serial, localPath string) (string, error) {
+	defer a.touch(serial, adb.DomApps, adb.DomStorage)
 	if localPath == "" {
 		return "", fmt.Errorf("no file selected")
 	}
@@ -1538,6 +1776,7 @@ func (a *App) JadxInfo() adb.JadxInfo {
 // DownloadJadx fetches and verifies the pinned release. The caller must have
 // shown JadxInfo.Disclosures and obtained consent first.
 func (a *App) DownloadJadx() (adb.JadxInfo, error) {
+	defer a.touch("", adb.DomJadx)
 	id, ctx := a.tasks.Create("jadx-download", "Download jadx", "starting")
 	err := adb.InstallJadx(ctx, func(stage string) {
 		a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
@@ -1562,6 +1801,7 @@ func (a *App) JadxLatest() (adb.JadxRelease, error) {
 // UpdateJadx installs a release the user picked from JadxLatest. The caller must
 // have shown its version and digest first.
 func (a *App) UpdateJadx(rel adb.JadxRelease) (adb.JadxInfo, error) {
+	defer a.touch("", adb.DomJadx)
 	id, ctx := a.tasks.Create("jadx-download", "Update jadx to "+rel.Version, "starting")
 	err := adb.InstallJadxRelease(ctx, rel, func(stage string) {
 		a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage })
@@ -1580,6 +1820,7 @@ func (a *App) UpdateJadx(rel adb.JadxRelease) (adb.JadxInfo, error) {
 // RemoveJadx deletes the downloaded copy. A jadx the user manages themselves is
 // untouched — adbq only owns what it downloaded.
 func (a *App) RemoveJadx() (adb.JadxInfo, error) {
+	defer a.touch("", adb.DomJadx)
 	if err := adb.RemoveJadx(); err != nil {
 		return adb.JadxInfo{}, err
 	}
@@ -1588,12 +1829,14 @@ func (a *App) RemoveJadx() (adb.JadxInfo, error) {
 
 // PickJadxPath opens a file dialog for a jadx installation the user manages.
 func (a *App) PickJadxPath() (string, error) {
+	defer a.touch("", adb.DomJadx)
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select the jadx-gui launcher"})
 }
 
 // SetJadxPath records a jadx installation of the user's own. An empty path
 // clears it and returns to auto-detection.
 func (a *App) SetJadxPath(path string) (adb.JadxInfo, error) {
+	defer a.touch("", adb.DomJadx)
 	hs := a.host.Get()
 	hs.JadxPath = strings.TrimSpace(path)
 	if err := a.host.Set(hs); err != nil {
@@ -1654,9 +1897,11 @@ func (a *App) ListDir(serial, path string, asRoot bool) ([]adb.FileEntry, error)
 	return a.client.ListDir(a.ctx, serial, path, asRoot)
 }
 func (a *App) DeleteFile(serial, path string, recursive, asRoot bool) (string, error) {
+	defer a.touch(serial, adb.DomFiles, adb.DomStorage)
 	return a.client.RemoveFile(a.ctx, serial, path, recursive, asRoot)
 }
 func (a *App) Mkdir(serial, path string, asRoot bool) (string, error) {
+	defer a.touch(serial, adb.DomFiles)
 	return a.client.Mkdir(a.ctx, serial, path, asRoot)
 }
 
@@ -1668,6 +1913,7 @@ func (a *App) FileCommands(serial string, req adb.FileCommandRequest) adb.FileCo
 }
 
 func (a *App) PushFileWithPicker(serial, remoteDir string) (string, error) {
+	defer a.touch(serial, adb.DomFiles, adb.DomStorage)
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select file to push"})
 	if err != nil || path == "" {
 		return "", err
@@ -1702,15 +1948,19 @@ func (a *App) ListReverses(serial string) ([]adb.Forward, error) {
 	return a.client.ListReverses(a.ctx, serial)
 }
 func (a *App) AddForward(serial, local, remote string) (string, error) {
+	defer a.touch(serial, adb.DomForwards)
 	return a.client.AddForward(a.ctx, serial, local, remote)
 }
 func (a *App) AddReverse(serial, remote, local string) (string, error) {
+	defer a.touch(serial, adb.DomForwards)
 	return a.client.AddReverse(a.ctx, serial, remote, local)
 }
 func (a *App) RemoveForward(serial, local string) (string, error) {
+	defer a.touch(serial, adb.DomForwards)
 	return a.client.RemoveForward(a.ctx, serial, local)
 }
 func (a *App) RemoveReverse(serial, remote string) (string, error) {
+	defer a.touch(serial, adb.DomForwards)
 	return a.client.RemoveReverse(a.ctx, serial, remote)
 }
 
@@ -1746,6 +1996,7 @@ func (a *App) ListFridaReleases(serial, arch string) ([]adb.FridaRelease, error)
 // frida-server version for the given arch (empty = auto-detect). Progress is
 // surfaced through the task tray.
 func (a *App) InstallFridaServer(serial, version, arch string) (string, error) {
+	defer a.touch(serial, adb.DomFrida, adb.DomFiles, adb.DomStorage)
 	id, _ := a.tasks.Create("frida-install", "Install frida-server "+version, serial)
 	remote, err := a.client.InstallFridaServer(a.ctx, serial, version, arch, func(stage string) {
 		a.tasks.Update(id, func(t *adb.TaskState) { t.Detail = stage + " · " + serial })
@@ -1758,6 +2009,7 @@ func (a *App) InstallFridaServer(serial, version, arch string) (string, error) {
 	return remote, nil
 }
 func (a *App) StartFrida(serial, path, iface string, port int) (string, error) {
+	defer a.touch(serial, adb.DomFrida)
 	out, err := a.client.StartFrida(a.ctx, serial, path, iface, port)
 	if err == nil && a.sessions != nil {
 		a.sessions.Put(adb.Session{
@@ -1786,15 +2038,19 @@ func (a *App) ListPackageUIDs(serial string) (map[int]string, error) {
 	return a.client.ListPackageUIDs(a.ctx, serial)
 }
 func (a *App) ChmodFile(serial, path, mode string, asRoot bool) (string, error) {
+	defer a.touch(serial, adb.DomFiles)
 	return a.client.Chmod(a.ctx, serial, path, mode, asRoot)
 }
 func (a *App) ChownFile(serial, path, owner string, asRoot bool) (string, error) {
+	defer a.touch(serial, adb.DomFiles)
 	return a.client.Chown(a.ctx, serial, path, owner, asRoot)
 }
 func (a *App) MoveFile(serial, src, dst string, asRoot bool) (string, error) {
+	defer a.touch(serial, adb.DomFiles)
 	return a.client.MoveFileOnDevice(a.ctx, serial, src, dst, asRoot)
 }
 func (a *App) TcpipMode(serial string, port int) (string, error) {
+	defer a.touch(serial, adb.DomNet)
 	return a.client.TcpipMode(a.ctx, serial, port)
 }
 func (a *App) ScreenRecord(serial string, seconds int) (string, error) {
@@ -1844,6 +2100,7 @@ func (a *App) OpenPath(path string) error {
 	return cmd.Start()
 }
 func (a *App) StopFrida(serial string) (string, error) {
+	defer a.touch(serial, adb.DomFrida)
 	out, err := a.client.StopFrida(a.ctx, serial)
 	if a.sessions != nil {
 		a.sessions.Remove("frida:" + serial)
@@ -2375,6 +2632,7 @@ func (a *App) GetNetworkInfo(serial string) (*adb.NetworkInfo, error) {
 }
 func (a *App) GetProxy(serial string) (string, error) { return a.client.GetProxy(a.ctx, serial) }
 func (a *App) SetProxy(serial, hostPort string) (string, error) {
+	defer a.touch(serial, adb.DomProxy, adb.DomNet)
 	return a.client.SetProxy(a.ctx, serial, hostPort)
 }
 
@@ -2404,17 +2662,23 @@ func (a *App) DeviceCommands(serial string, recordSeconds int) adb.DeviceCommand
 // ─── System ──────────────────────────────────────────────────────────────
 
 func (a *App) Reboot(serial, mode string) (string, error) {
+	// Everything goes, including the properties treated as fixed for a connected
+	// lifetime: a device can come back on a different build, newly rooted, or on
+	// another network, and a survivor from before the reboot would be a lie.
+	defer a.touchAll(serial)
 	return a.client.Reboot(a.ctx, serial, mode)
 }
 
 // PowerOffDevice halts the device. Separate from Reboot because it is the one
 // action here that needs a person to press a physical button afterwards.
 func (a *App) PowerOffDevice(serial string) (string, error) {
+	defer a.touchAll(serial)
 	return a.client.PowerOff(a.ctx, serial)
 }
 
 // RestartAdbd bounces the device-side adb daemon, dropping this connection.
 func (a *App) RestartAdbd(serial string) (string, error) {
+	defer a.touchAll(serial)
 	return a.client.RestartAdbd(a.ctx, serial)
 }
 
@@ -2434,6 +2698,7 @@ func (a *App) ClipboardSet(serial, text string) (string, error) {
 // into the device trust store (system store on rooted devices, with a guided
 // user-store fallback otherwise). Used by Network → Cert.
 func (a *App) InstallSystemCertWithPicker(serial string) (*adb.CertInstallResult, error) {
+	defer a.touch(serial, adb.DomCerts)
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Select CA certificate (.der / .pem / .crt)",
 		Filters: []runtime.FileFilter{
@@ -2470,6 +2735,7 @@ func (a *App) ListCACerts(serial string) ([]adb.CACert, error) {
 
 // PushFridaBinaryWithPicker prompts for a host file and pushes it.
 func (a *App) PushFridaBinaryWithPicker(serial string) (string, error) {
+	defer a.touch(serial, adb.DomFrida, adb.DomFiles, adb.DomStorage)
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select frida-server binary"})
 	if err != nil || path == "" {
 		return "", err

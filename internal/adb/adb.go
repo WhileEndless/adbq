@@ -141,7 +141,14 @@ func (c *Client) DeviceCommand(ctx context.Context, serial string, args ...strin
 }
 
 // Run executes the command and returns trimmed stdout, or an error containing stderr.
+//
+// This is the single funnel for one-shot adb invocations — every Shell/ShellSU
+// call lands here — which is why the spawn metrics are recorded at this point
+// and nowhere else (see metrics.go). Long-lived streams start their processes
+// directly and count themselves via countStreamSpawn.
 func Run(cmd *exec.Cmd) (string, error) {
+	started := time.Now()
+	defer func() { adbMetrics.recordSpawn(spawnOneShot, cmd.Args, time.Since(started)) }()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -193,9 +200,15 @@ func (c *Client) rootWrap(ctx context.Context, serial, inner string) (string, er
 // suRetryAfter bounds how long a failed root probe is remembered. The probe
 // costs five round trips (`id` plus four `su` forms) and callers like the
 // frida-server listing run it on every refresh, so re-probing each time made
-// unrooted devices crawl. Keeping it short means a Magisk grant the user just
-// approved is still picked up within seconds.
-const suRetryAfter = 30 * time.Second
+// unrooted devices crawl.
+//
+// It used to be 30s, which on an unrooted device meant paying those five round
+// trips twice a minute forever. A longer window is safe now that the cache
+// heals on demand instead of on a timer: any privileged call still really tries
+// su, and ShellSU forgets the probe the moment one is refused, so a Magisk
+// grant the user has just approved is picked up by the action that needs it
+// rather than by waiting for an expiry.
+const suRetryAfter = 5 * time.Minute
 
 // suStyleFor probes which `su -c` form works on the device and caches the
 // answer. A negative result is only cached for suRetryAfter, so a later Magisk
@@ -309,6 +322,16 @@ func (c *Client) ShellSU(ctx context.Context, serial, command string) (string, b
 	if err != nil {
 		low := strings.ToLower(err.Error() + " " + out)
 		if strings.Contains(low, "not found") || strings.Contains(low, "permission denied") || strings.Contains(low, "no such file") {
+			// Root just stopped working through a form we had cached as good —
+			// a revoked Magisk grant, a `su` that vanished with a module, an
+			// adbd that dropped back to shell. Forget the probe so the next
+			// caller re-derives it instead of failing the same way forever.
+			//
+			// This is what keeps a long-lived root cache honest: rather than
+			// bounding staleness with a short TTL and paying for a re-probe on
+			// a timer, the failure itself is the signal. Cached facts describe
+			// the device for display; the privileged call always really tries.
+			c.ForgetRootProbe(serial)
 			return out, true, err
 		}
 		return out, false, err

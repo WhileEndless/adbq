@@ -1,6 +1,7 @@
 package adb
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -76,7 +77,13 @@ type LiveCaptureState struct {
 
 // Defaults — also enforced as floors/ceilings on user-supplied values.
 const (
-	liveRingDefault   = 10000
+	liveRingDefault = 10000
+	// pcapReadBuffer and pcapWriteBuffer size the buffered reader over the adb
+	// pipe and the buffered writer over the mirror file. Large enough that a
+	// burst of small packets is one syscall rather than dozens; small enough
+	// that a quiet capture is not holding a megabyte per device.
+	pcapReadBuffer    = 256 << 10
+	pcapWriteBuffer   = 256 << 10
 	liveRingMin       = 1000
 	liveRingMax       = 200000
 	liveMirrorDefault = 100 * 1024 * 1024      // 100 MB
@@ -88,12 +95,14 @@ type liveSession struct {
 	mu       sync.Mutex
 	state    LiveCaptureState
 	cmd      *exec.Cmd
-	ring     []*LivePacket
 	pcapFile *os.File
 	// pcapHeader is the first 24 bytes of the live stream — kept verbatim so
 	// we can prepend it after a rotation and the mirror file stays a valid
 	// pcap. Captured before we even hand bytes to the decoder.
 	pcapHeader []byte
+	// mirror buffers writes to pcapFile. Guarded by mu, and flushed before
+	// anything reads or truncates the file.
+	mirror *bufio.Writer
 	// stderr collects the adb client's stderr (bounded). On exec-out the device
 	// stderr is folded into stdout, so this mostly catches adb/su-level errors.
 	stderr *capBuffer
@@ -105,11 +114,13 @@ type liveSession struct {
 	readErr   func() string
 	pcapBytes int64
 	counter   uint64
-	rawIdx    map[uint64][]byte
-	linkType  uint32
-	emit      func(batch []*LivePacket)
-	stopOnce  sync.Once
-	done      chan struct{}
+	// ring holds the recent packets and the bytes each was decoded from, in
+	// fixed memory and O(1) per packet — see packetring.go for what it replaced.
+	ring     *packetRing
+	linkType uint32
+	emit     func(batch []*LivePacket)
+	stopOnce sync.Once
+	done     chan struct{}
 }
 
 // LiveCapture is the per-Client registry of running streams. Keyed by serial.
@@ -149,15 +160,42 @@ func (l *LiveCapture) Stop(serial string) error {
 		}
 	})
 	<-s.done
-	// Don't close pcapFile — SaveLivePcap re-opens it. We only ensure the
-	// pending writes are flushed by syncing.
-	if s.pcapFile != nil {
-		_ = s.pcapFile.Sync()
-	}
+	// Don't close pcapFile — SaveLivePcap re-opens it. Flush the buffer and
+	// sync so what is on disk is everything that was captured.
+	s.FlushMirror()
 	s.mu.Lock()
 	s.state.Active = false
 	s.mu.Unlock()
 	return nil
+}
+
+// FlushMirror pushes buffered packets to disk.
+//
+// The mirror is buffered (see pump), so anything that reads the file from
+// outside this session — SaveLivePcap copying it, a user opening it in
+// Wireshark mid-capture — has to ask for this first, or it sees a file missing
+// its most recent packets. Buffering the writes is what removed two syscalls
+// per packet; this is the price, and it is a method rather than a comment so
+// the requirement is callable.
+func (s *liveSession) FlushMirror() {
+	s.mu.Lock()
+	if s.mirror != nil {
+		_ = s.mirror.Flush()
+	}
+	s.mu.Unlock()
+	if s.pcapFile != nil {
+		_ = s.pcapFile.Sync()
+	}
+}
+
+// FlushMirror flushes the named session's buffered pcap writes, if it exists.
+func (l *LiveCapture) FlushMirror(serial string) {
+	l.mu.Lock()
+	s, ok := l.sessions[serial]
+	l.mu.Unlock()
+	if ok {
+		s.FlushMirror()
+	}
 }
 
 // LiveCaptureOptions tunes the per-session resource limits. Zero values fall
@@ -293,6 +331,7 @@ func (c *Client) StartLiveCapture(ctx context.Context, serial, iface, bpf string
 		_ = pf.Close()
 		return nil, fmt.Errorf("tcpdump spawn: %w", err)
 	}
+	countStreamSpawn(cmd.Args)
 
 	maxPkts, maxPcap := opts.normalize()
 	s := &liveSession{
@@ -308,9 +347,9 @@ func (c *Client) StartLiveCapture(ctx context.Context, serial, iface, bpf string
 			out, _, _ := c.ShellSU(ctx, serial, "cat "+errFile+" 2>/dev/null")
 			return strings.TrimSpace(out)
 		},
-		rawIdx: map[uint64][]byte{},
-		emit:   emit,
-		done:   make(chan struct{}),
+
+		emit: emit,
+		done: make(chan struct{}),
 	}
 
 	c.Live.mu.Lock()
@@ -508,12 +547,32 @@ func (s *liveSession) pump(stdout io.ReadCloser) {
 	defer close(s.done)
 	defer stdout.Close()
 
+	// Buffer both ends of the pipeline.
+	//
+	// Unbuffered, this loop cost four syscalls per packet: two reads (a 16-byte
+	// record header, then the body) and, through the tee, two writes of the same
+	// two fragments to the mirror file. At a few thousand packets a second that
+	// is tens of thousands of syscalls a second to move a few megabytes — the
+	// work was in the crossings, not the bytes.
+	src := bufio.NewReaderSize(stdout, pcapReadBuffer)
+	mirror := bufio.NewWriterSize(s.pcapFile, pcapWriteBuffer)
+	// The mirror must be flushed before anyone reads the file: SaveLivePcap
+	// copies it, and a rotation truncates it.
+	s.mu.Lock()
+	s.mirror = mirror
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		_ = mirror.Flush()
+		s.mu.Unlock()
+	}()
+
 	// Capture the 24-byte pcap header up-front. We keep it verbatim so a
 	// rotation can rewrite it at the start of the freshly-truncated mirror
 	// file — without it the on-disk pcap would be invalid after the first
 	// wrap.
 	hdr := make([]byte, 24)
-	if _, err := io.ReadFull(stdout, hdr); err != nil {
+	if _, err := io.ReadFull(src, hdr); err != nil {
 		// No pcap stream arrived. Drain the child so its stderr flushes, then
 		// surface the real cause (su denial, missing/incompatible tcpdump,
 		// SELinux, bad iface) instead of a silent inactive session.
@@ -521,7 +580,7 @@ func (s *liveSession) pump(stdout io.ReadCloser) {
 		s.failWith(err)
 		return
 	}
-	if _, err := s.pcapFile.Write(hdr); err != nil {
+	if _, err := mirror.Write(hdr); err != nil {
 		s.markInactive()
 		return
 	}
@@ -538,27 +597,30 @@ func (s *liveSession) pump(stdout io.ReadCloser) {
 	s.state.PcapBytes = s.pcapBytes
 	s.mu.Unlock()
 
-	tee := io.TeeReader(stdout, &mirrorWriter{s: s})
+	tee := io.TeeReader(src, &mirrorWriter{s: s})
 
 	batch := make([]*LivePacket, 0, 64)
-	flushTimer := time.NewTicker(200 * time.Millisecond)
-	defer flushTimer.Stop()
-	flush := func() {
+	// takeBatch detaches what has accumulated so far. Callers must hold s.mu;
+	// they must NOT hold it while emitting the result.
+	takeBatch := func() []*LivePacket {
 		if len(batch) == 0 {
-			return
+			return nil
 		}
 		out := make([]*LivePacket, len(batch))
 		copy(out, batch)
 		batch = batch[:0]
-		if s.emit != nil {
-			s.emit(out)
-		}
+		return out
 	}
+	flushTimer := time.NewTicker(200 * time.Millisecond)
+	defer flushTimer.Stop()
 	go func() {
 		for range flushTimer.C {
 			s.mu.Lock()
-			flush()
+			out := takeBatch()
 			s.mu.Unlock()
+			if len(out) > 0 && s.emit != nil {
+				s.emit(out)
+			}
 		}
 	}()
 
@@ -568,39 +630,39 @@ func (s *liveSession) pump(stdout io.ReadCloser) {
 			break
 		}
 		s.counter++
+		// Decode outside the lock: it is the expensive part of the loop, and
+		// holding the session mutex through it blocks Status() and the mirror
+		// writer for every packet.
 		lp := decodeLivePacket(data, ts, s.counter, linkType)
+
 		s.mu.Lock()
-		s.rawIdx[s.counter] = data
-		ringCap := s.state.MaxPackets
-		if ringCap <= 0 {
-			ringCap = liveRingDefault
+		if s.ring == nil {
+			s.ring = newPacketRing(s.state.MaxPackets)
 		}
-		s.ring = append(s.ring, lp)
-		if len(s.ring) > ringCap {
-			s.ring = s.ring[len(s.ring)-ringCap:]
-		}
-		// Mirror the ring policy for rawIdx so detail lookups for evicted
-		// rows return nil instead of leaking memory.
-		if uint64(len(s.rawIdx)) > uint64(ringCap) {
-			cutoff := s.counter - uint64(ringCap)
-			for k := range s.rawIdx {
-				if k < cutoff {
-					delete(s.rawIdx, k)
-				}
-			}
-		}
+		s.ring.Add(lp, data)
 		s.state.Packets = s.counter
 		s.state.Bytes += uint64(len(data))
 		batch = append(batch, lp)
+		var ready []*LivePacket
 		if len(batch) >= 64 {
-			flush()
+			ready = takeBatch()
 		}
 		s.mu.Unlock()
+
+		// Emitting marshals the batch to JSON and crosses the webview bridge.
+		// Doing that under the session mutex stalled the mirror writer and every
+		// status query behind it, for every 64 packets.
+		if len(ready) > 0 && s.emit != nil {
+			s.emit(ready)
+		}
 	}
 
 	s.mu.Lock()
-	flush()
+	out := takeBatch()
 	s.mu.Unlock()
+	if len(out) > 0 && s.emit != nil {
+		s.emit(out)
+	}
 	s.markInactive()
 }
 
@@ -621,10 +683,23 @@ func (m *mirrorWriter) Write(p []byte) (int, error) {
 			return 0, err
 		}
 	}
-	n, err := m.s.pcapFile.Write(p)
+	n, err := m.s.writeMirrorLocked(p)
 	m.s.pcapBytes += int64(n)
 	m.s.state.PcapBytes = m.s.pcapBytes
 	return n, err
+}
+
+// writeMirrorLocked writes to the buffered mirror, or straight to the file if
+// buffering has not been set up (a rotation replaying the header before pump
+// installs its writer). Callers must hold s.mu.
+func (s *liveSession) writeMirrorLocked(p []byte) (int, error) {
+	if s.mirror != nil {
+		return s.mirror.Write(p)
+	}
+	if s.pcapFile == nil {
+		return len(p), nil
+	}
+	return s.pcapFile.Write(p)
 }
 
 // rotateMirrorLocked is called with s.mu held. Truncates the file, replays the
@@ -634,6 +709,14 @@ func (s *liveSession) rotateMirrorLocked() error {
 	if s.pcapFile == nil {
 		return nil
 	}
+	// Buffered bytes belong to the file we are about to discard; flushing them
+	// after the truncate would write records from before the wrap on top of the
+	// replayed header and corrupt the pcap.
+	if s.mirror != nil {
+		if err := s.mirror.Flush(); err != nil {
+			return err
+		}
+	}
 	if err := s.pcapFile.Truncate(0); err != nil {
 		return err
 	}
@@ -641,7 +724,7 @@ func (s *liveSession) rotateMirrorLocked() error {
 		return err
 	}
 	if len(s.pcapHeader) > 0 {
-		if _, err := s.pcapFile.Write(s.pcapHeader); err != nil {
+		if _, err := s.writeMirrorLocked(s.pcapHeader); err != nil {
 			return err
 		}
 		s.pcapBytes = int64(len(s.pcapHeader))
@@ -773,6 +856,20 @@ func ethertypeToLayer(et uint16) gopacket.LayerType {
 	}
 }
 
+// liveDecodeOptions govern per-packet decoding.
+//
+// NoCopy is the one that matters: without it gopacket duplicates every payload,
+// doubling the allocation and the copying for a buffer that is already freshly
+// allocated per record and never written to again — it goes straight into the
+// ring and is only ever read. The contract NoCopy asks for (do not modify or
+// reuse the slice) is one this path already satisfies.
+//
+// Lazy is set but does little here, and the comment is worth more than the
+// flag: the list column shows every layer's name, so Layers() below forces a
+// full decode regardless. It stays for the paths that return before reaching
+// that, and so this does not read as an oversight.
+var liveDecodeOptions = gopacket.DecodeOptions{Lazy: true, NoCopy: true}
+
 // decodeLivePacket produces the row-level summary handed to the UI list.
 func decodeLivePacket(data []byte, ts time.Time, no uint64, linkType uint32) *LivePacket {
 	lp := &LivePacket{No: no, Ts: ts, Length: len(data), Proto: "?"}
@@ -783,7 +880,7 @@ func decodeLivePacket(data []byte, ts time.Time, no uint64, linkType uint32) *Li
 		lp.Info = fmt.Sprintf("Unparsed L3 (linktype=%d, %dB after %dB L2)", linkType, len(payload), l2bytes)
 		return lp
 	}
-	pkt := gopacket.NewPacket(payload, l3type, gopacket.Lazy)
+	pkt := gopacket.NewPacket(payload, l3type, liveDecodeOptions)
 	for _, l := range pkt.Layers() {
 		lp.Layers = append(lp.Layers, layerShortName(l))
 	}
@@ -1096,7 +1193,8 @@ func (l *LiveCapture) DescribeLivePacket(serial string, no uint64) *LivePacketDe
 		return nil
 	}
 	s.mu.Lock()
-	data, has := s.rawIdx[no]
+	data := s.ring.Raw(no)
+	has := data != nil
 	linkType := s.linkType
 	s.mu.Unlock()
 	if !has {

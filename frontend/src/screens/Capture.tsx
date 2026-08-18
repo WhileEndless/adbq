@@ -5,6 +5,7 @@ import {Icon} from '../icons';
 import {Badge, CommandChip, SearchInput, confirmDialog, showToast} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
 import {parseFilter} from '../lib/captureFilter';
+import {usePoll} from '../lib/poll';
 import {CapturePacket, useStore} from '../store';
 
 interface LiveLayer { name: string; bytes: number; offset: number; fields: {k: string; v: string}[] }
@@ -67,10 +68,13 @@ export function CaptureScreen({device}: {device: adb.Device}) {
       } catch {}
     };
     tick();
-    const t = setInterval(tick, 1500);
     API.ProbeTcpdump(device.id).then(td => { if (!cancelled) setTdAvailable(!!td?.available); }).catch(() => { if (!cancelled) setTdAvailable(false); });
-    return () => { cancelled = true; clearInterval(t); };
-  }, [device?.id]);
+    return () => { cancelled = true; };
+  }, [device?.id, store]);
+  // Only while a capture is actually running: a stopped capture's status does
+  // not change on its own, and this used to poll regardless.
+  usePoll(() => { void API.LiveCaptureStatus(device.id).then(st => store.setCaptureState(device.id, st)); },
+    1500, !!device?.id && active);
 
   // Re-render the command as the interface or filter changes. Resolving
   // tcpdump's path is a device call, so it is debounced rather than run per
@@ -115,7 +119,16 @@ export function CaptureScreen({device}: {device: adb.Device}) {
   // doesn't block — we degrade to "match everything" so typing mid-expression
   // doesn't hide the whole list.
   const parsed = useMemo(() => parseFilter(displayFilter), [displayFilter]);
-  const filtered = useMemo(() => packets.filter(parsed.pred), [packets, parsed]);
+  // `packets` is a ring mutated in place, so its identity never changes — `rev`
+  // is what signals new data (the same arrangement the logcat pane uses). An
+  // unfiltered view skips the walk entirely: at the 100k setting, filtering to
+  // "everything" was copying a hundred thousand references several times a
+  // second to produce a list identical to the one it started from.
+  const filtered = useMemo(
+    () => (parsed.isEmpty ? packets : packets.filter(parsed.pred)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [packets, parsed, slice.rev],
+  );
 
   // Virtual window over `filtered`. The sticky header occupies the first row, so
   // offset the inner scroll position by one row height.

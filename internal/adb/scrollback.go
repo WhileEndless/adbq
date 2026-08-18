@@ -1,6 +1,7 @@
 package adb
 
 import (
+	"bufio"
 	"io"
 	"os"
 	"path/filepath"
@@ -55,17 +56,23 @@ func OpenScrollbackWriter(serial, label string) (io.WriteCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &cappedWriter{f: f, path: p}, nil
+	return &cappedWriter{f: f, w: bufio.NewWriterSize(f, scrollbackBuffer), path: p}, nil
 }
+
+// scrollbackBuffer batches log appends. The writer sits on the shell's output
+// path and was called once per PTY read — a separate write syscall for every
+// few keystrokes' worth of echo, for the life of every session.
+const scrollbackBuffer = 32 << 10
 
 type cappedWriter struct {
 	f     *os.File
+	w     *bufio.Writer
 	path  string
 	count int
 }
 
 func (w *cappedWriter) Write(p []byte) (int, error) {
-	n, err := w.f.Write(p)
+	n, err := w.w.Write(p)
 	w.count += n
 	// Every ~64KB written, check size and trim if needed.
 	if w.count > 64*1024 {
@@ -75,10 +82,25 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (w *cappedWriter) Close() error { return w.f.Close() }
+// Flush makes buffered output visible to anything reading the file.
+func (w *cappedWriter) Flush() error { return w.w.Flush() }
+
+func (w *cappedWriter) Close() error {
+	if err := w.w.Flush(); err != nil {
+		_ = w.f.Close()
+		return err
+	}
+	return w.f.Close()
+}
 
 // trim rotates the log: if it exceeds 2*cap, keep only the last cap bytes.
 func (w *cappedWriter) trim() error {
+	// The tail is read from disk, so buffered bytes have to be there first —
+	// otherwise trimming would discard up to a buffer's worth of the newest
+	// output, which is the part worth keeping.
+	if err := w.w.Flush(); err != nil {
+		return err
+	}
 	info, err := os.Stat(w.path)
 	if err != nil {
 		return err
@@ -106,6 +128,7 @@ func (w *cappedWriter) trim() error {
 		return err
 	}
 	w.f = f
+	w.w.Reset(f)
 	return nil
 }
 

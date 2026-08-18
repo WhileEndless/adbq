@@ -1073,6 +1073,11 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--ok);
   position: relative;
 }
+/* The one animation in the app that runs indefinitely — it marks a live
+   capture, a running task, an attached Frida session. An infinite animation
+   keeps the webview's compositor ticking even with the window hidden, which is
+   a small amount of someone's battery spent drawing a dot nobody can see, so it
+   is paused along with everything else when the window is not visible. */
 .pulse::after {
   content: "";
   position: absolute;
@@ -1082,6 +1087,8 @@ input, select, textarea { font: inherit; color: inherit; }
   opacity: 0.35;
   animation: pulse 1.6s ease-out infinite;
 }
+body.hidden-window .pulse::after,
+body.hidden-window .spin { animation-play-state: paused; }
 @keyframes pulse {
   0% { transform: scale(0.6); opacity: 0.4; }
   100% { transform: scale(1.6); opacity: 0; }
@@ -1293,13 +1300,6 @@ input, select, textarea { font: inherit; color: inherit; }
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
-.shimmer {
-  background: linear-gradient(90deg, transparent 0%, var(--hover) 50%, transparent 100%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s linear infinite;
-}
-@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 /* Spinning refresh indicator — shown on a screen's Reload button while a
    background revalidation is in flight. */

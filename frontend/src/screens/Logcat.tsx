@@ -6,6 +6,9 @@ import {Combobox, CommandChip, IconBtn, SearchInput, showToast} from '../ui';
 import {useStore} from '../store';
 import {logcatStore, useLogcat} from '../logcatStore';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
+import {fileStamp, saveTextAs} from '../lib/saveText';
+import {deviceKey as cacheKey, getOrFetch} from '../cache';
+import {APPS_STALE_MS} from '../App';
 import {LogEntry} from '../types';
 
 const LEVELS = ['V', 'D', 'I', 'W', 'E', 'F'] as const;
@@ -56,6 +59,11 @@ export function LogcatScreen({device}: {device: adb.Device}) {
   // on every mount — including StrictMode's double mount.
   useEffect(() => {
     logcatStore.ensure(device.id, logcatStore.getState(device.id).pkgFilter);
+    // While this screen is mounted the backend delivers; when it is not, the
+    // stream keeps running but stops emitting. Also covers the window being
+    // minimised — there is nothing to render into either way.
+    logcatStore.setVisible(device.id, true);
+    return () => logcatStore.setVisible(device.id, false);
   }, [device.id]);
 
   // The logcat invocation actually feeding this pane, pid filter and all. Only
@@ -76,7 +84,10 @@ export function LogcatScreen({device}: {device: adb.Device}) {
 
   useEffect(() => {
     if (!device?.id) return;
-    store.cached(`apps:${device.id}:user`, 30_000, () => API.ListApps(device.id, true)).then(list => setApps(list || [])).catch(() => {});
+    // Same key and TTL as the Apps screen and the sidebar badge. This used to
+    // be a second TTL over the same key, so whichever screen loaded first won.
+    getOrFetch(cacheKey('apps', device.id, 'user'), () => API.ListApps(device.id, true), APPS_STALE_MS)
+      .then(list => setApps(list || [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device?.id]);
 
@@ -355,12 +366,15 @@ function LevelMenu({value, onChange}: {value: string; onChange: (v: string) => v
 }
 
 function exportLines(lines: LogEntry[], serial: string) {
+  if (lines.length === 0) {
+    showToast({title: 'Nothing to export', body: 'No lines match the current filter.', kind: 'info'});
+    return;
+  }
   const header = `# adbq logcat export — ${serial} — ${new Date().toISOString()}\n# ${lines.length} lines\n\n`;
   const text = header + lines.map(l => `${l.time}  ${l.pid}-${l.tid} ${l.lvl} ${l.tag}: ${l.msg}`).join('\n');
-  const blob = new Blob([text], {type: 'text/plain'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `logcat-${serial}-${Date.now()}.txt`; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast({title: 'Logcat exported', body: `${lines.length} lines`, kind: 'ok'});
+  void saveTextAs({
+    title: 'Export logcat',
+    suggestedName: `logcat-${serial}-${fileStamp()}.txt`,
+    content: text,
+  });
 }

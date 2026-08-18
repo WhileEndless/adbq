@@ -234,11 +234,18 @@ git push origin main --tags
 ```
 adbq/
 ├── app.go                  # Wails bindings: thin layer over internal/adb
+├── app_invalidate.go       # cache-domain declarations for mutating bindings
+├── device_watcher.go       # publishes the device list (push, with poll fallback)
 ├── main.go                 # Wails bootstrap + `--version` flag
 ├── internal/
 │   ├── version/            # single source of truth for the version
 │   └── adb/
 │       ├── adb.go          # Client (binary lookup, exec, su wrapping)
+│       ├── metrics.go      # adb process-spawn counters (Settings → adb load)
+│       ├── track.go        # host:track-devices — pushed device list, no polling
+│       ├── cachedomain.go  # cache domains + invalidation (CLAUDE.md §4.2)
+│       ├── capabilities.go # one batched probe of everything fixed per device
+│       ├── packetring.go   # fixed-memory ring behind the live capture
 │       ├── devices.go      # adb devices, getprop, root detection
 │       ├── logcat.go       # streaming logcat (events)
 │       ├── shell.go        # interactive shell sessions
@@ -254,6 +261,8 @@ adbq/
 ├── frontend/src/
 │   ├── App.tsx             # shell (titlebar, device tabs, sidebar)
 │   ├── ui.tsx              # theme hook, toasts, modals, search
+│   ├── cache.tsx           # the one client cache; keys carry their domain
+│   ├── lib/poll.ts         # polling gated on visibility and on what can change
 │   ├── icons.tsx          # inline SVG set
 │   └── screens/            # one file per screen, live-bound via Wails events
 ├── .github/workflows/      # ci.yml (build everywhere) + release.yml (publish)

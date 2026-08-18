@@ -3,6 +3,8 @@
 import {adb} from '../models';
 import {main} from '../models';
 
+export function ADBStats():Promise<adb.ADBStats>;
+
 export function ADBVersion():Promise<string>;
 
 export function AVDDetail(arg1:string):Promise<adb.AVD>;
@@ -36,6 +38,8 @@ export function BindDeviceProfile(arg1:string,arg2:string):Promise<void>;
 export function BindDeviceProfileByKey(arg1:string,arg2:string):Promise<void>;
 
 export function BrowseCodeshare(arg1:number):Promise<Array<adb.CodeshareProject> | null>;
+
+export function CacheDomains():Promise<Array<adb.Domain> | null>;
 
 export function CancelTask(arg1:string):Promise<void>;
 
@@ -108,6 +112,8 @@ export function DeviceCommands(arg1:string,arg2:number):Promise<adb.DeviceComman
 export function DeviceDetails(arg1:string):Promise<adb.Device>;
 
 export function DeviceKey(arg1:string):Promise<string>;
+
+export function DeviceTracking():Promise<adb.TrackerState>;
 
 export function DisconnectDevice(arg1:string):Promise<string>;
 
@@ -355,6 +361,8 @@ export function RemoveRootAVD():Promise<void>;
 
 export function RemoveTask(arg1:string):Promise<void>;
 
+export function ResetADBStats():Promise<void>;
+
 export function ResizeShell(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function RestartAdbd(arg1:string):Promise<string>;
@@ -387,6 +395,8 @@ export function SaveProfile(arg1:adb.Profile):Promise<adb.Profile>;
 
 export function SaveScreenshotAs(arg1:string):Promise<string>;
 
+export function SaveTextAs(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function ScrcpyActive(arg1:string):Promise<boolean>;
 
 export function ScrcpyAvailable():Promise<boolean>;
@@ -406,6 +416,8 @@ export function SetIptablesPolicy(arg1:string,arg2:string,arg3:string,arg4:strin
 export function SetJadxPath(arg1:string):Promise<adb.JadxInfo>;
 
 export function SetJavaPath(arg1:string):Promise<adb.JadxInfo>;
+
+export function SetLogcatQuiet(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetLogcatSystem(arg1:string,arg2:boolean):Promise<void>;
 

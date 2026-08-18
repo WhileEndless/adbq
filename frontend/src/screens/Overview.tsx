@@ -1,25 +1,24 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, CommandChip, CommandPreview, Dropdown, commandToast, confirmDialog, showToast} from '../ui';
-import {getCached, mutateData} from '../cache';
+import {deviceKey as cacheKey, getCached, mutateData} from '../cache';
 import {pickApkAndInstall} from '../lib/apk';
+import {useScrcpyActive, useScrcpyAvailable} from '../lib/scrcpy';
+import {usePoll} from '../lib/poll';
 
 export function OverviewScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
   // Seed from cache for an instant first paint when reopening Overview; the poll
   // below keeps it live and writes each sample back to the cache.
-  const [stats, setStats] = useState<adb.Stats | null>(() => getCached<adb.Stats>(`stats:${device?.id}`) ?? null);
+  const [stats, setStats] = useState<adb.Stats | null>(() => getCached<adb.Stats>(cacheKey('storage', device?.id ?? '', 'stats')) ?? null);
   const [history, setHistory] = useState<{cpu: number[]; mem: number[]; batt: number[]}>({cpu: [], mem: [], batt: []});
 
-  useEffect(() => {
+  const sample = useCallback(() => {
     if (!device?.id) return;
-    let alive = true;
-    setStats(getCached<adb.Stats>(`stats:${device.id}`) ?? null);
-    const tick = () => API.GetStats(device.id).then(s => {
-      if (!alive) return;
+    API.GetStats(device.id).then(s => {
       setStats(s);
-      mutateData(`stats:${device.id}`, s);
+      mutateData(cacheKey('storage', device.id, 'stats'), s);
       const memPct = s.memTotalKb > 0 ? (1 - s.memAvailKb / s.memTotalKb) * 100 : 0;
       setHistory(h => ({
         cpu: [...h.cpu.slice(-29), s.cpuPercent || 0],
@@ -27,10 +26,20 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
         batt: [...h.batt.slice(-29), s.batteryLevel],
       }));
     }).catch(() => {});
-    tick();
-    const t = setInterval(tick, 2500);
-    return () => { alive = false; clearInterval(t); };
   }, [device?.id]);
+
+  // Seed from cache on a device switch so the gauges are not blank while the
+  // first sample is in flight, then take that sample.
+  useEffect(() => {
+    if (!device?.id) return;
+    setStats(getCached<adb.Stats>(cacheKey('storage', device.id, 'stats')) ?? null);
+    sample();
+  }, [device?.id, sample]);
+
+  // Live gauges: genuinely per-second data, so this stays a poll. usePoll gates
+  // it on window visibility — there is nothing to learn about CPU load while
+  // nobody is looking at the graph, and the phone pays for every sample.
+  usePoll(sample, 2500, !!device?.id);
 
   // The commands behind this screen's buttons. From Go, so the reboot dialog
   // shows the line that runs rather than one typed out here (CLAUDE.md §4.1).
@@ -255,18 +264,8 @@ export function OverviewScreen({device, setScreen}: {device: adb.Device; setScre
 }
 
 function ScrcpyAction({device, cmd}: {device: adb.Device; cmd?: string[] | null}) {
-  const [available, setAvailable] = useState<boolean | null>(null);
-  const [active, setActive] = useState(false);
-  useEffect(() => {
-    API.ScrcpyAvailable().then(setAvailable).catch(() => setAvailable(false));
-  }, []);
-  useEffect(() => {
-    if (!device?.id) return;
-    const tick = () => API.ScrcpyActive(device.id).then(setActive).catch(() => {});
-    tick();
-    const t = setInterval(tick, 2000);
-    return () => clearInterval(t);
-  }, [device?.id]);
+  const available = useScrcpyAvailable();
+  const active = useScrcpyActive(device?.id ?? '');
   if (available === null) return <QA icon={<Icon.Monitor/>} label='scrcpy' onClick={() => {}}/>;
   if (available === false) {
     return (
@@ -282,10 +281,10 @@ function ScrcpyAction({device, cmd}: {device: adb.Device; cmd?: string[] | null}
   return (
     <QA icon={active ? <Icon.Stop/> : <Icon.Monitor/>} label={active ? 'Stop scrcpy' : 'Mirror (scrcpy)'} onClick={() => {
       if (active) {
-        API.StopScrcpy(device.id).then(() => { setActive(false); showToast({title: 'scrcpy stopped', kind: 'ok'}); });
+        API.StopScrcpy(device.id).then(() => showToast({title: 'scrcpy stopped', kind: 'ok'})).catch(() => {});
       } else {
         API.StartScrcpy(device.id)
-          .then(() => { setActive(true); showToast({title: 'scrcpy starting', kind: 'ok', actions: commandToast(cmd)}); })
+          .then(() => showToast({title: 'scrcpy starting', kind: 'ok', actions: commandToast(cmd)}))
           .catch(e => showToast({title: 'scrcpy failed', body: String(e), kind: 'err'}));
       }
     }}/>

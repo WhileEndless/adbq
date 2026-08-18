@@ -91,6 +91,43 @@ type Profile struct {
 	Iptables IptablesStep `json:"iptables"`
 }
 
+// Domains reports the cache domains applying this profile would dirty, derived
+// from which steps are actually enabled rather than hand-listed at the call
+// site. It lives here, beside the step definitions, so adding a step forces the
+// question "what does this invalidate?" in the same edit — a list kept anywhere
+// else would go stale the first time someone added a step and forgot.
+//
+// Enabled-only: applying a profile with the cert step off must not drop the
+// cert cache, or a profile apply would cost a re-read of everything a profile
+// could conceivably touch.
+func (p *Profile) Domains() []Domain {
+	if p == nil {
+		return nil
+	}
+	var out []Domain
+	if p.Iptables.Enabled {
+		out = append(out, DomIptables)
+	}
+	if p.Hosts.Enabled {
+		// Rewriting hosts changes name resolution, so network reads go too.
+		out = append(out, DomHosts, DomNet)
+	}
+	if p.Cert.Enabled {
+		out = append(out, DomCerts)
+	}
+	if p.Frida.Enabled {
+		// The step can push a server binary as well as start it.
+		out = append(out, DomFrida, DomFiles, DomStorage)
+	}
+	if p.Forwards.Enabled {
+		out = append(out, DomForwards)
+	}
+	if p.Proxy.Enabled {
+		out = append(out, DomProxy, DomNet)
+	}
+	return out
+}
+
 // DeviceRecord remembers a device adbq has seen and which profile it last used
 // (its default on reconnect). Keyed by the stable DeviceKey.
 type DeviceRecord struct {

@@ -42,19 +42,29 @@ func wlanStateFromIfaces(ifaces []NetIface) wlanState {
 
 // ssidResolver routes the "which network is this device on" question to the
 // cheapest command the device's API level offers.
-var ssidResolver = NewResolver[string]("wifi.ssid",
+// The fact name is domain-prefixed ("net.") so InvalidateDomains(DomNet)
+// reaches it — see cachedomain.go. A bare name would be cached forever by
+// any invalidation short of dropping the whole device.
+var ssidResolver = NewResolver[string]("net.ssid",
 	ssidViaWifiShell{},
 	ssidViaDumpsysWifi{},
 )
 
 // ssidViaWifiShell asks the Wi-Fi shell service, which exists from API 30. It
-// answers in a few lines and has no side effects, so it can run on a poll.
+// answers in a few lines — far cheaper than dumping the whole Wi-Fi service —
+// but it is still a round trip to a binder service, and device enrichment runs
+// on a poll.
 type ssidViaWifiShell struct{}
 
 func (ssidViaWifiShell) Name() string { return "cmd-wifi-status" }
 
 func (ssidViaWifiShell) Requires() Requirements {
-	return Requirements{MinSDK: 30, Bins: []string{"cmd"}}
+	// Costly is about "must not run on every poll", not about how heavy the
+	// command is. Left un-Costly, this ran on every device-list refresh — an
+	// adb process every few seconds to re-read a value that only moves when the
+	// Wi-Fi link does, which is precisely what the freshness key already
+	// tracks. The dump-based fallback below has always been marked this way.
+	return Requirements{MinSDK: 30, Bins: []string{"cmd"}, Costly: true}
 }
 
 func (s ssidViaWifiShell) Run(ctx context.Context, c *Client, serial string) (string, error) {

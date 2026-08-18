@@ -2,8 +2,8 @@ import React, {useEffect, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {CommandChip, CommandPreview, Modal, confirmDialog, showToast} from '../ui';
-import {useDeviceData} from '../cache';
+import {CommandChip, CommandPreview, confirmDialog, DataAge, Modal, showToast} from '../ui';
+import {deviceKey as cacheKey, useDeviceData} from '../cache';
 
 // Curated bidirectional preset catalogue. `dir` decides which adb call we
 // make ("forward" host→device, "reverse" device→host). Kept together in one
@@ -24,8 +24,8 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
   const [aLocal, setALocal] = useState('tcp:8080');
   const [aRemote, setARemote] = useState('tcp:8080');
 
-  const {data, refreshing, error, refresh} = useDeviceData(
-    device?.id ? `forwards:${device.id}` : null,
+  const {data, refreshing, error, refresh, fetchedAt} = useDeviceData(
+    device?.id ? cacheKey('forwards', device.id) : null,
     async () => {
       const [f, r] = await Promise.all([API.ListForwards(device.id), API.ListReverses(device.id)]);
       return {fwd: f || [], rev: r || []};
@@ -107,6 +107,7 @@ export function ForwardsScreen({device}: {device: adb.Device}) {
         <h1>ADB Forwards <span className='subtitle mono'>{fwd.length} fwd · {rev.length} rev</span></h1>
         {!!error && <span style={{color: 'var(--err)', fontSize: 11}}>load failed</span>}
         <div className='spacer' style={{flex: 1}}/>
+        <DataAge fetchedAt={fetchedAt}/>
         <button className='btn' onClick={reload}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
       </div>
 
