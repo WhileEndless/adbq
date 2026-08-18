@@ -9,6 +9,11 @@ import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
 import {rootUnavailableReason} from '../lib/android';
 import {CodeEditor} from '../components/CodeEditor';
 import {fileStamp, saveTextAs} from '../lib/saveText';
+import {deviceKey as cacheKey, getOrFetch, invalidateData} from '../cache';
+
+// The frida release list comes from GitHub, not the device, and new versions
+// appear a few times a month. Reload re-fetches on demand.
+const FRIDA_RELEASES_STALE_MS = 15 * 60_000;
 
 export function FridaScreen({device}: {device: adb.Device}) {
   const store = useStore();
@@ -46,9 +51,9 @@ export function FridaScreen({device}: {device: adb.Device}) {
     if (!device?.id) return;
     setRelLoading(true);
     setRelError('');
-    const key = `frida-releases:${device.id}:${a}`;
-    if (force) store.invalidate(key);
-    store.cached(key, 15 * 60_000, () => API.ListFridaReleases(device.id, a))
+    const key = cacheKey('frida', device.id, 'releases', a);
+    if (force) invalidateData(key);
+    getOrFetch(key, () => API.ListFridaReleases(device.id, a), FRIDA_RELEASES_STALE_MS)
       .then(r => { setReleases(r || []); setRelLoading(false); })
       .catch(e => { setRelError(String(e)); setReleases([]); setRelLoading(false); });
   };

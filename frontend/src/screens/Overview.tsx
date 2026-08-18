@@ -3,23 +3,23 @@ import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
 import {Badge, CommandChip, CommandPreview, Dropdown, commandToast, confirmDialog, showToast} from '../ui';
-import {getCached, mutateData} from '../cache';
+import {deviceKey as cacheKey, getCached, mutateData} from '../cache';
 import {pickApkAndInstall} from '../lib/apk';
 
 export function OverviewScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
   // Seed from cache for an instant first paint when reopening Overview; the poll
   // below keeps it live and writes each sample back to the cache.
-  const [stats, setStats] = useState<adb.Stats | null>(() => getCached<adb.Stats>(`stats:${device?.id}`) ?? null);
+  const [stats, setStats] = useState<adb.Stats | null>(() => getCached<adb.Stats>(cacheKey('storage', device?.id ?? '', 'stats')) ?? null);
   const [history, setHistory] = useState<{cpu: number[]; mem: number[]; batt: number[]}>({cpu: [], mem: [], batt: []});
 
   useEffect(() => {
     if (!device?.id) return;
     let alive = true;
-    setStats(getCached<adb.Stats>(`stats:${device.id}`) ?? null);
+    setStats(getCached<adb.Stats>(cacheKey('storage', device.id, 'stats')) ?? null);
     const tick = () => API.GetStats(device.id).then(s => {
       if (!alive) return;
       setStats(s);
-      mutateData(`stats:${device.id}`, s);
+      mutateData(cacheKey('storage', device.id, 'stats'), s);
       const memPct = s.memTotalKb > 0 ? (1 - s.memAvailKb / s.memTotalKb) * 100 : 0;
       setHistory(h => ({
         cpu: [...h.cpu.slice(-29), s.cpuPercent || 0],

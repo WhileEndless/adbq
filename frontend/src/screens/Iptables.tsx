@@ -2,8 +2,8 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandChip, CommandPreview, FeatureNotice, SearchInput, confirmDialog, showToast} from '../ui';
-import {useDeviceData, mutateData, getCached} from '../cache';
+import {Badge, CommandChip, CommandPreview, confirmDialog, DataAge, FeatureNotice, SearchInput, showToast} from '../ui';
+import {deviceKey as cacheKey, useDeviceData, mutateData, getCached} from '../cache';
 
 type Family = 'ipv4' | 'ipv6';
 type Table = 'filter' | 'nat' | 'mangle' | 'raw';
@@ -23,9 +23,9 @@ export function IptablesScreen({device}: {device: adb.Device}) {
   // Cached-first load: show the last ruleset instantly, revalidate in the
   // background. Probe first so a device without iptables/nft shows a clean
   // banner instead of a "List failed" toast; listing needs root.
-  const cacheKey = device?.id ? `iptables:${device.id}:${family}:${table}` : null;
-  const {data, loading, refreshing, refresh} = useDeviceData(
-    cacheKey,
+  const iptKey = device?.id ? cacheKey('iptables', device.id, family, table) : null;
+  const {data, loading, refreshing, refresh, fetchedAt} = useDeviceData(
+    iptKey,
     async (): Promise<{info: adb.IPTBackendInfo | null; snap: adb.IPTSnapshot | null}> => {
       const pb = await API.ProbeIptables(device.id, family);
       if (!pb?.available || !device.root) return {info: pb, snap: null};
@@ -39,9 +39,9 @@ export function IptablesScreen({device}: {device: adb.Device}) {
   // Apply a mutation's returned snapshot straight into the cache (no re-list),
   // preserving the freshest backend info (read from the cache, not a stale closure).
   const applySnap = (sn: adb.IPTSnapshot) => {
-    if (!cacheKey) return;
-    const latest = getCached<{info: adb.IPTBackendInfo | null; snap: adb.IPTSnapshot | null}>(cacheKey);
-    mutateData(cacheKey, {info: latest?.info ?? info, snap: sn});
+    if (!iptKey) return;
+    const latest = getCached<{info: adb.IPTBackendInfo | null; snap: adb.IPTSnapshot | null}>(iptKey);
+    mutateData(iptKey, {info: latest?.info ?? info, snap: sn});
   };
 
   useEffect(() => {
@@ -245,6 +245,7 @@ export function IptablesScreen({device}: {device: adb.Device}) {
           {label: 'Import', commands: cmds?.import},
           {label: 'Undo', commands: cmds?.undo, note: 'Restores the snapshot taken before the last change.'},
         ]}/>
+        <DataAge fetchedAt={fetchedAt}/>
         <button className='btn sm' onClick={() => refresh()}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
       </div>
 

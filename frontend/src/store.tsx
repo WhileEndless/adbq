@@ -16,12 +16,10 @@ export interface ShellSession {
   buf: string;
 }
 
-// ─── Generic TTL cache for cheap reloads ─────────────────────────────────
-
-interface CacheEntry<T> {
-  data: T;
-  ts: number;
-}
+// Caching lives in cache.tsx, not here. This file used to carry a second TTL
+// cache, which meant one key could have two different TTLs depending on which
+// screen loaded first, and neither could be invalidated by the backend — the
+// only side that knows when device state has actually changed.
 
 // ─── Store shape ─────────────────────────────────────────────────────────
 
@@ -107,10 +105,6 @@ interface Store {
   stopFridaSession: (id: string) => Promise<void>;
   removeFridaSession: (id: string) => void;
   clearFridaSession: (id: string) => void;
-
-  // generic cache with TTL
-  cached: <T>(key: string, ttlMs: number, fetcher: () => Promise<T>) => Promise<T>;
-  invalidate: (prefix: string) => void;
 
   // cross-screen hand-off: queue a command for the Shell screen to type into a
   // newly-opened session (e.g. from Apps "Open shell here").
@@ -307,33 +301,6 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
     setFridaSessions(prev => prev[id] ? {...prev, [id]: {...prev[id], messages: [], rev: prev[id].rev + 1}} : prev);
   }, []);
 
-  // ── cache ──────────────────────────────────────────────────────────────
-  const cache = useRef<Record<string, CacheEntry<unknown>>>({});
-  const inflight = useRef<Record<string, Promise<unknown>>>({});
-
-  const cached = useCallback(async <T,>(key: string, ttlMs: number, fetcher: () => Promise<T>): Promise<T> => {
-    const e = cache.current[key];
-    if (e && (Date.now() - e.ts) < ttlMs) return e.data as T;
-    const pending = inflight.current[key];
-    if (pending) return pending as Promise<T>;
-    const p = fetcher().then((d) => {
-      cache.current[key] = {data: d, ts: Date.now()};
-      delete inflight.current[key];
-      return d;
-    }).catch((err) => {
-      delete inflight.current[key];
-      throw err;
-    });
-    inflight.current[key] = p as Promise<unknown>;
-    return p;
-  }, []);
-
-  const invalidate = useCallback((prefix: string) => {
-    for (const k of Object.keys(cache.current)) {
-      if (k.startsWith(prefix)) delete cache.current[k];
-    }
-  }, []);
-
   // ── queued shell command for cross-screen hand-off ──────────────────────
   const queuedCmds = useRef<Record<string, QueuedShellCmd>>({});
   const queueShellCmd = useCallback((req: QueuedShellCmd) => {
@@ -368,7 +335,6 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
     getCapture, startCapture, stopCapture, clearCapture,
     setCaptureDisplayFilter, setCaptureMaxPackets, setCaptureState, setCapturePreset, setCaptureIface,
     fridaSessions, startFridaSession, adoptFridaSession, attachFridaSession, stopFridaSession, removeFridaSession, clearFridaSession,
-    cached, invalidate,
     queueShellCmd, consumeShellCmd,
     requestFridaTab, consumeFridaTab,
   };

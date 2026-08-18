@@ -616,3 +616,51 @@ export function FeatureNotice({state}: {state: FeatureState}) {
     </div>
   );
 }
+
+/**
+ * "· 4 min ago", with a Refresh button beside it.
+ *
+ * Device state is cached for minutes rather than seconds, which is what keeps
+ * adbq from spawning an `adb` process several times a second. That trade is
+ * only fair if the user can see when a screen last spoke to the device and can
+ * force the question again — otherwise stale and wrong look identical.
+ */
+export function DataAge({fetchedAt, refreshing, onRefresh}: {
+  fetchedAt: number;
+  refreshing?: boolean;
+  onRefresh?: () => void;
+}) {
+  // Re-render on a slow tick so the label ages while the screen sits open;
+  // one minute is the smallest step the label can show, so anything faster
+  // would be work with nothing to draw.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!fetchedAt) return;
+    const t = setInterval(() => tick(n => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, [fetchedAt]);
+
+  return (
+    <span style={{display: 'inline-flex', alignItems: 'center', gap: 6}}>
+      {fetchedAt > 0 && (
+        <span className='subtle' style={{fontSize: 10.5}} title={new Date(fetchedAt).toLocaleString()}>
+          {relativeAge(fetchedAt)}
+        </span>
+      )}
+      {onRefresh && (
+        <IconBtn title='Refresh now' onClick={onRefresh}>
+          <Icon.Refresh width={13} height={13} className={refreshing ? 'spin' : ''}/>
+        </IconBtn>
+      )}
+    </span>
+  );
+}
+
+function relativeAge(ts: number): string {
+  const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (secs < 45) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  return `${hours} h ago`;
+}

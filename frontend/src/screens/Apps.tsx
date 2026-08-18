@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandChip, CommandPreview, Modal, SearchInput, commandToast, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, commandToast, confirmDialog, DataAge, Modal, SearchInput, showToast} from '../ui';
 import {useStore} from '../store';
 import {pickApkAndInstall} from '../lib/apk';
 import {ensureJadx, jadxInfo, jadxLabel} from '../lib/jadx';
@@ -26,7 +26,7 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
   // 60s, by Logcat at 30s under the SAME key (so whichever screen loaded first
   // decided the TTL), and uncached by the sidebar badge on every screen change.
   const listKey = device?.id ? cacheKey('apps', device.id, onlyUser ? 'user' : 'all') : null;
-  const {data: appsData, loading, refreshing, refresh} = useDeviceData(
+  const {data: appsData, loading, refreshing, refresh, fetchedAt} = useDeviceData(
     listKey, () => API.ListApps(device.id, onlyUser), {staleMs: APPS_STALE_MS},
   );
   const apps = appsData ?? [];
@@ -96,6 +96,7 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
         <button className={`btn sm${onlyUser ? ' primary' : ''}`} onClick={() => setOnlyUser(true)}>User</button>
         <button className={`btn sm${!onlyUser ? ' primary' : ''}`} onClick={() => setOnlyUser(false)}>All</button>
         <div className='spacer' style={{flex: 1}}/>
+        <DataAge fetchedAt={fetchedAt}/>
         <button className='btn' onClick={refresh}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
         <button className='btn primary' title='Single .apk, or a split bundle as .apks / .xapk'
                 onClick={() => pickApkAndInstall(device.id)}>

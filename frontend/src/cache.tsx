@@ -177,18 +177,42 @@ EventsOn('cache:invalidate', (payload: {serial?: string; domains?: Domain[]}) =>
   invalidateDomains(payload?.serial ?? '', payload?.domains ?? []);
 });
 
+/**
+ * Fallback staleness for callers that do not specify one.
+ *
+ * Deliberately short. The savings in this app come from long TTLs on facts that
+ * genuinely cannot change (see the volatility classes in docs/performance.md),
+ * each declared at its call site alongside the backend invalidation that keeps
+ * it honest. Making the *default* long would extend that trust to keys nobody
+ * reasoned about.
+ */
+export const DEFAULT_STALE_MS = 4000;
+
 export interface DeviceData<T> {
   data?: T;
   loading: boolean;     // first load, no cached value to show yet
   refreshing: boolean;  // background revalidation while cached data is shown
   error?: unknown;
   refresh: () => void;  // force a revalidation now
+  /**
+   * When the shown value was fetched, or 0 if there is none yet.
+   *
+   * Exposed so screens can say how old their data is. Values here are cached
+   * for minutes now, not seconds, and that is only reasonable while the user
+   * can see it: visible age plus a Refresh button turns a long TTL from
+   * something done to them into something they can override. Without it, a
+   * stale screen is indistinguishable from a wrong one.
+   */
+  fetchedAt: number;
 }
 
 // useDeviceData returns the cached value immediately (if any) and revalidates in
 // the background when it's stale. Pass key=null to disable (e.g. no device).
 export function useDeviceData<T>(key: string | null, fetcher: () => Promise<T>, opts?: {staleMs?: number}): DeviceData<T> {
-  const staleMs = opts?.staleMs ?? 4000;
+  // A caller that does not say how volatile its data is gets a conservative
+  // default. Long TTLs belong to keys whose owner has thought about what makes
+  // them stale and declared it on the backend — not to everything by accident.
+  const staleMs = opts?.staleMs ?? DEFAULT_STALE_MS;
   const [, force] = useState(0);
   const rerender = useCallback(() => force(n => n + 1), []);
   const fetcherRef = useRef(fetcher);
@@ -219,5 +243,6 @@ export function useDeviceData<T>(key: string | null, fetcher: () => Promise<T>, 
     refreshing: !!e?.loading && hasData,
     error: e?.error,
     refresh,
+    fetchedAt: hasData ? (e?.ts ?? 0) : 0,
   };
 }

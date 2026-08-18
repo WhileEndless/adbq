@@ -34,8 +34,8 @@ export namespace adb {
 	    perSecond: number;
 	    windowSeconds: number;
 	    totalMillis: number;
-	    buckets: DurationBucket[];
-	    topCommands: CommandCount[];
+	    buckets: DurationBucket[] | null;
+	    topCommands: CommandCount[] | null;
 	    trackingDevices: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -98,7 +98,7 @@ export namespace adb {
 	    sysImgDir: string;
 	    ramdiskRel: string;
 	    patched: boolean;
-	    snapshots: string[];
+	    snapshots: string[] | null;
 	    state: string;
 	    serial: string;
 	    port: number;
@@ -106,7 +106,7 @@ export namespace adb {
 	    root: string;
 	    error: string;
 	    warning: string;
-	    commands: string[];
+	    commands: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new AVD(source);
@@ -248,10 +248,10 @@ export namespace adb {
 	}
 	export class ApkInstallPlan {
 	    file: string;
-	    install: string[];
-	    skipped: string[];
+	    install: string[] | null;
+	    skipped: string[] | null;
 	    split: boolean;
-	    commands: string[];
+	    commands: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new ApkInstallPlan(source);
@@ -283,10 +283,10 @@ export namespace adb {
 	export class ApkSet {
 	    pkg: string;
 	    base: string;
-	    splits: string[];
+	    splits: string[] | null;
 	    split: boolean;
 	    suggested: string;
-	    commands: string[];
+	    commands: string[] | null;
 	    version: AppVersion;
 	
 	    static createFrom(source: any = {}) {
@@ -346,11 +346,11 @@ export namespace adb {
 	}
 	export class AppCommands {
 	    pkg: string;
-	    launch: string[];
-	    forceStop: string[];
-	    clear: string[];
-	    uninstall: string[];
-	    exportData: string[];
+	    launch: string[] | null;
+	    forceStop: string[] | null;
+	    clear: string[] | null;
+	    uninstall: string[] | null;
+	    exportData: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppCommands(source);
@@ -400,10 +400,10 @@ export namespace adb {
 	    installLocation: string;
 	    primaryAbi: string;
 	    secondaryAbi: string;
-	    splits: string[];
-	    flags: string[];
-	    privateFlags: string[];
-	    supportsScreens: string[];
+	    splits: string[] | null;
+	    flags: string[] | null;
+	    privateFlags: string[] | null;
+	    supportsScreens: string[] | null;
 	    signature: string;
 	    apkSigningVersion: string;
 	    enabled: string;
@@ -412,9 +412,9 @@ export namespace adb {
 	    notLaunched: string;
 	    suspended: string;
 	    instant: string;
-	    gids: string[];
-	    requestedPerms: string[];
-	    grantedPerms: GrantedPerm[];
+	    gids: string[] | null;
+	    requestedPerms: string[] | null;
+	    grantedPerms: GrantedPerm[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppDetail(source);
@@ -492,7 +492,7 @@ export namespace adb {
 	}
 	export class AppScripts {
 	    package: string;
-	    scriptIds: string[];
+	    scriptIds: string[] | null;
 	    mode: string;
 	    venvVer?: string;
 	
@@ -532,7 +532,7 @@ export namespace adb {
 	    profileName: string;
 	    serial: string;
 	    rooted: boolean;
-	    steps: StepResult[];
+	    steps: StepResult[] | null;
 	    needsReboot: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -571,7 +571,7 @@ export namespace adb {
 	    pkg: string;
 	    suggested: string;
 	    sources: number;
-	    commands: string[];
+	    commands: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new BinaryPlan(source);
@@ -610,9 +610,9 @@ export namespace adb {
 	    }
 	}
 	export class CaptureCommands {
-	    start: string[];
-	    stop: string[];
-	    pull: string[];
+	    start: string[] | null;
+	    stop: string[] | null;
+	    pull: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new CaptureCommands(source);
@@ -660,7 +660,7 @@ export namespace adb {
 	    store: string;
 	    path: string;
 	    persistent: boolean;
-	    commands: string[];
+	    commands: string[] | null;
 	    note: string;
 	
 	    static createFrom(source: any = {}) {
@@ -769,8 +769,8 @@ export namespace adb {
 	}
 	
 	export class ConnectCommands {
-	    connect: string[];
-	    disconnect: string[];
+	    connect: string[] | null;
+	    disconnect: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectCommands(source);
@@ -859,16 +859,16 @@ export namespace adb {
 	    }
 	}
 	export class DeviceCommands {
-	    reboot: string[];
-	    rebootRecovery: string[];
-	    rebootBootloader: string[];
-	    tcpip: string[];
-	    screenshot: string[];
-	    screenRecord: string[];
-	    powerOff: string[];
-	    restartAdbd: string[];
-	    rootProbe: string[];
-	    scrcpy: string[];
+	    reboot: string[] | null;
+	    rebootRecovery: string[] | null;
+	    rebootBootloader: string[] | null;
+	    tcpip: string[] | null;
+	    screenshot: string[] | null;
+	    screenRecord: string[] | null;
+	    powerOff: string[] | null;
+	    restartAdbd: string[] | null;
+	    rootProbe: string[] | null;
+	    scrcpy: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeviceCommands(source);
@@ -957,7 +957,7 @@ export namespace adb {
 	    dns: string;
 	    httpProxy: string;
 	    selinux: string;
-	    extra: string[];
+	    extra: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new EmulatorOpts(source);
@@ -1009,11 +1009,11 @@ export namespace adb {
 	}
 	export class FileCommands {
 	    path: string;
-	    list: string[];
-	    mkdir: string[];
-	    push: string[];
-	    pull: string[];
-	    delete: string[];
+	    list: string[] | null;
+	    mkdir: string[] | null;
+	    push: string[] | null;
+	    pull: string[] | null;
+	    delete: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new FileCommands(source);
@@ -1075,9 +1075,9 @@ export namespace adb {
 	    kind: string;
 	    local: string;
 	    remote: string;
-	    add: string[];
-	    remove: string[];
-	    list: string[];
+	    add: string[] | null;
+	    remove: string[] | null;
+	    list: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new ForwardCommands(source);
@@ -1123,8 +1123,8 @@ export namespace adb {
 	}
 	export class ForwardsStep {
 	    enabled: boolean;
-	    forwards: ForwardSpec[];
-	    reverses: ReverseSpec[];
+	    forwards: ForwardSpec[] | null;
+	    reverses: ReverseSpec[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new ForwardsStep(source);
@@ -1160,7 +1160,7 @@ export namespace adb {
 	    abiList: string;
 	    bits64: boolean;
 	    primary: string;
-	    supported: string[];
+	    supported: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaArchInfo(source);
@@ -1176,13 +1176,13 @@ export namespace adb {
 	    }
 	}
 	export class FridaCommands {
-	    install: string[];
-	    list: string[];
-	    start: string[];
-	    stop: string[];
-	    log: string[];
-	    forward: string[];
-	    version: string[];
+	    install: string[] | null;
+	    list: string[] | null;
+	    start: string[] | null;
+	    stop: string[] | null;
+	    log: string[] | null;
+	    forward: string[] | null;
+	    version: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaCommands(source);
@@ -1203,8 +1203,8 @@ export namespace adb {
 	    package: string;
 	    mode: string;
 	    runtimeVer: string;
-	    scriptIds: string[];
-	    scriptNames: string[];
+	    scriptIds: string[] | null;
+	    scriptNames: string[] | null;
 	    lastRun: number;
 	    count: number;
 	
@@ -1384,8 +1384,8 @@ export namespace adb {
 	    }
 	}
 	export class FridaSessionCommands {
-	    runner: string[];
-	    cli: string[];
+	    runner: string[] | null;
+	    cli: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new FridaSessionCommands(source);
@@ -1506,7 +1506,7 @@ export namespace adb {
 	}
 	export class HostsApplyPlan {
 	    path: string;
-	    commands: string[];
+	    commands: string[] | null;
 	    note: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1623,7 +1623,7 @@ export namespace adb {
 	    policy: string;
 	    pkts: number;
 	    bytes: number;
-	    rules: IPTRule[];
+	    rules: IPTRule[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new IPTChain(source);
@@ -1661,7 +1661,7 @@ export namespace adb {
 	    family: string;
 	    table: string;
 	    mode: string;
-	    chains: IPTChain[];
+	    chains: IPTChain[] | null;
 	    restore: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1702,7 +1702,7 @@ export namespace adb {
 	    pos: number;
 	    num: number;
 	    policy: string;
-	    spec: string[];
+	    spec: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new IptablesCommandRequest(source);
@@ -1720,17 +1720,17 @@ export namespace adb {
 	    }
 	}
 	export class IptablesCommands {
-	    list: string[];
-	    save: string[];
-	    addRule: string[];
-	    deleteRule: string[];
-	    flushChain: string[];
-	    flushTable: string[];
-	    policy: string[];
-	    newChain: string[];
-	    dropChain: string[];
-	    import: string[];
-	    undo: string[];
+	    list: string[] | null;
+	    save: string[] | null;
+	    addRule: string[] | null;
+	    deleteRule: string[] | null;
+	    flushChain: string[] | null;
+	    flushTable: string[] | null;
+	    policy: string[] | null;
+	    newChain: string[] | null;
+	    dropChain: string[] | null;
+	    import: string[] | null;
+	    undo: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new IptablesCommands(source);
@@ -1783,7 +1783,7 @@ export namespace adb {
 	    javaSource: string;
 	    javaError: string;
 	    ready: boolean;
-	    disclosures: string[];
+	    disclosures: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new JadxInfo(source);
@@ -1812,12 +1812,12 @@ export namespace adb {
 	export class JadxOpenPlan {
 	    bin: string;
 	    java: string;
-	    names: string[];
+	    names: string[] | null;
 	    split: boolean;
 	    staged: boolean;
 	    ready: boolean;
 	    reason: string;
-	    commands: string[];
+	    commands: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new JadxOpenPlan(source);
@@ -1925,7 +1925,7 @@ export namespace adb {
 	    name: string;
 	    bytes: number;
 	    offset: number;
-	    fields: LivePacketField[];
+	    fields: LivePacketField[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new LivePacketLayer(source);
@@ -1968,8 +1968,8 @@ export namespace adb {
 	    dstPort: number;
 	    proto: string;
 	    info: string;
-	    layers: string[];
-	    layersFull: LivePacketLayer[];
+	    layers: string[] | null;
+	    layersFull: LivePacketLayer[] | null;
 	    rawHex: string;
 	
 	    static createFrom(source: any = {}) {
@@ -2013,12 +2013,12 @@ export namespace adb {
 	
 	
 	export class NetCommands {
-	    proxy: string[];
-	    clearProxy: string[];
-	    flushDns: string[];
-	    readProxy: string[];
-	    readDns: string[];
-	    connections: string[];
+	    proxy: string[] | null;
+	    clearProxy: string[] | null;
+	    flushDns: string[] | null;
+	    readProxy: string[] | null;
+	    readDns: string[] | null;
+	    connections: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new NetCommands(source);
@@ -2055,12 +2055,12 @@ export namespace adb {
 	export class NetworkInfo {
 	    ip: string;
 	    gateway: string;
-	    dns: string[];
+	    dns: string[] | null;
 	    wifiSsid: string;
 	    wifiBssid: string;
 	    mac: string;
 	    proxy: string;
-	    interfaces: NetIface[];
+	    interfaces: NetIface[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new NetworkInfo(source);
@@ -2174,7 +2174,7 @@ export namespace adb {
 	    magiskSHA: string;
 	    runner: string;
 	    runnerNote: string;
-	    disclosures: string[];
+	    disclosures: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new RootAVDInfo(source);
@@ -2257,7 +2257,7 @@ export namespace adb {
 	    title: string;
 	    detail: string;
 	    needsRoot: boolean;
-	    commands: string[];
+	    commands: string[] | null;
 	    willSkip: boolean;
 	    skipReason?: string;
 	
@@ -2278,8 +2278,8 @@ export namespace adb {
 	}
 	
 	export class StreamCommands {
-	    stream: string[];
-	    clear: string[];
+	    stream: string[] | null;
+	    clear: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new StreamCommands(source);
@@ -2306,7 +2306,7 @@ export namespace adb {
 	    rootable: boolean;
 	    compatible: boolean;
 	    note: string;
-	    commands: string[];
+	    commands: string[] | null;
 	
 	    static createFrom(source: any = {}) {
 	        return new SystemImage(source);

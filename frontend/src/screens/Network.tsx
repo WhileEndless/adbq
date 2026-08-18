@@ -2,9 +2,9 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {adb, main} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandChip, CommandPreview, SearchInput, Switch, commandToast, confirmDialog, showToast} from '../ui';
+import {Badge, CommandChip, CommandPreview, commandToast, confirmDialog, DataAge, SearchInput, showToast, Switch} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
-import {useDeviceData} from '../cache';
+import {deviceKey as cacheKey, useDeviceData} from '../cache';
 
 type Tab = 'overview' | 'proxy' | 'cert' | 'hosts' | 'dns' | 'capture' | 'connections';
 
@@ -12,8 +12,8 @@ export function NetworkScreen({device}: {device: adb.Device}) {
   const [tab, setTab] = useState<Tab>('overview');
 
   // Cached-first: show the last network snapshot instantly, revalidate quietly.
-  const {data: info, refreshing, error, refresh: reload} = useDeviceData(
-    device?.id ? `net-info:${device.id}` : null,
+  const {data: info, refreshing, error, refresh: reload, fetchedAt} = useDeviceData(
+    device?.id ? cacheKey('net', device.id, 'info') : null,
     () => API.GetNetworkInfo(device.id),
     {staleMs: 10000},
   );
@@ -35,6 +35,7 @@ export function NetworkScreen({device}: {device: adb.Device}) {
         <span className='subtitle mono'>{info?.wifiSsid || '—'} · {info?.ip || device.ip} · {info?.mac || device.mac}</span>
         {!!error && <span style={{color: 'var(--err)', fontSize: 11}}>load failed</span>}
         <div className='spacer' style={{flex: 1}}/>
+        <DataAge fetchedAt={fetchedAt}/>
         <button className='btn' onClick={reload}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Refresh</button>
       </div>
 

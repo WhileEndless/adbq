@@ -2,8 +2,8 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
-import {Badge, CommandChip, CommandPreview, Modal, Switch, confirmDialog, promptDialog, showToast} from '../ui';
-import {useDeviceData} from '../cache';
+import {Badge, CommandChip, CommandPreview, confirmDialog, DataAge, Modal, promptDialog, showToast, Switch} from '../ui';
+import {deviceKey as cacheKey, useDeviceData} from '../cache';
 
 const ROOTS = ['/', '/sdcard', '/storage/emulated/0', '/data/local/tmp', '/data', '/system'];
 
@@ -19,8 +19,8 @@ export function FilesScreen({device}: {device: adb.Device}) {
 
   // Cached per (device, root, path) so revisiting a directory is instant; a
   // background revalidate then refreshes it. Navigation just changes `path`.
-  const dirKey = device?.id ? `dir:${device.id}:${asRoot ? 'r' : 'u'}:${path}` : null;
-  const {data, loading, refreshing, error, refresh} = useDeviceData(
+  const dirKey = device?.id ? cacheKey('files', device.id, asRoot ? 'r' : 'u', path) : null;
+  const {data, loading, refreshing, error, refresh, fetchedAt} = useDeviceData(
     dirKey, () => API.ListDir(device.id, path, asRoot), {staleMs: 20000},
   );
   const entries = data || [];
@@ -128,6 +128,7 @@ export function FilesScreen({device}: {device: adb.Device}) {
           {label: 'Pull the selected file', commands: cmds?.pull},
           {label: 'Delete the selection', commands: cmds?.delete},
         ]}/>
+        <DataAge fetchedAt={fetchedAt}/>
         <button className='btn' onClick={() => load()}><Icon.Refresh className={refreshing ? 'spin' : ''}/></button>
       </div>
 

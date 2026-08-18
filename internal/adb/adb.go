@@ -316,6 +316,16 @@ func (c *Client) ShellSU(ctx context.Context, serial, command string) (string, b
 	if err != nil {
 		low := strings.ToLower(err.Error() + " " + out)
 		if strings.Contains(low, "not found") || strings.Contains(low, "permission denied") || strings.Contains(low, "no such file") {
+			// Root just stopped working through a form we had cached as good —
+			// a revoked Magisk grant, a `su` that vanished with a module, an
+			// adbd that dropped back to shell. Forget the probe so the next
+			// caller re-derives it instead of failing the same way forever.
+			//
+			// This is what keeps a long-lived root cache honest: rather than
+			// bounding staleness with a short TTL and paying for a re-probe on
+			// a timer, the failure itself is the signal. Cached facts describe
+			// the device for display; the privileged call always really tries.
+			c.ForgetRootProbe(serial)
 			return out, true, err
 		}
 		return out, false, err

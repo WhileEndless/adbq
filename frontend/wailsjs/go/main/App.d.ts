@@ -37,9 +37,9 @@ export function BindDeviceProfile(arg1:string,arg2:string):Promise<void>;
 
 export function BindDeviceProfileByKey(arg1:string,arg2:string):Promise<void>;
 
-export function BrowseCodeshare(arg1:number):Promise<Array<adb.CodeshareProject>>;
+export function BrowseCodeshare(arg1:number):Promise<Array<adb.CodeshareProject> | null>;
 
-export function CacheDomains():Promise<Array<adb.Domain>>;
+export function CacheDomains():Promise<Array<adb.Domain> | null>;
 
 export function CancelTask(arg1:string):Promise<void>;
 
@@ -81,7 +81,7 @@ export function CreateIptablesChain(arg1:string,arg2:string,arg3:string,arg4:str
 
 export function DNSLookup(arg1:string,arg2:string):Promise<string>;
 
-export function DNSLookupCommands(arg1:string,arg2:string):Promise<Array<string>>;
+export function DNSLookupCommands(arg1:string,arg2:string):Promise<Array<string> | null>;
 
 export function DefaultAVDSpec(arg1:string):Promise<adb.AVDSpec>;
 
@@ -121,7 +121,7 @@ export function DownloadRootAVD():Promise<adb.RootAVDInfo>;
 
 export function EmulatorLaunchCommand(arg1:string,arg2:adb.EmulatorOpts):Promise<string>;
 
-export function EmulatorLog(arg1:string,arg2:number):Promise<Array<adb.HostLogLine>>;
+export function EmulatorLog(arg1:string,arg2:number):Promise<Array<adb.HostLogLine> | null>;
 
 export function EnsureFridaVenv(arg1:string):Promise<adb.FridaRuntime>;
 
@@ -145,7 +145,7 @@ export function FlushIptables(arg1:string,arg2:string,arg3:string,arg4:string):P
 
 export function ForceStopApp(arg1:string,arg2:string):Promise<string>;
 
-export function ForwardCommands(arg1:string,arg2:string,arg3:Array<adb.Forward>):Promise<Array<adb.ForwardCommands>>;
+export function ForwardCommands(arg1:string,arg2:string,arg3:Array<adb.Forward>):Promise<Array<adb.ForwardCommands> | null>;
 
 export function FridaArchInfo(arg1:string):Promise<adb.FridaArchInfo>;
 
@@ -163,7 +163,7 @@ export function GetCodeshareScript(arg1:string,arg2:string):Promise<adb.Codeshar
 
 export function GetFridaScript(arg1:string):Promise<adb.FridaScript>;
 
-export function GetFridaSessionLog(arg1:string,arg2:number):Promise<Array<adb.FridaMsg>>;
+export function GetFridaSessionLog(arg1:string,arg2:number):Promise<Array<adb.FridaMsg> | null>;
 
 export function GetNetworkInfo(arg1:string):Promise<adb.NetworkInfo>;
 
@@ -173,9 +173,9 @@ export function GetProxy(arg1:string):Promise<string>;
 
 export function GetStats(arg1:string):Promise<adb.Stats>;
 
-export function HostABIs():Promise<Array<string>>;
+export function HostABIs():Promise<Array<string> | null>;
 
-export function HostLANIPs(arg1:string):Promise<Array<string>>;
+export function HostLANIPs(arg1:string):Promise<Array<string> | null>;
 
 export function HostSettings():Promise<adb.HostSettings>;
 
@@ -213,55 +213,55 @@ export function KillExternalCapture(arg1:string):Promise<adb.CaptureState>;
 
 export function LaunchApp(arg1:string,arg2:string):Promise<string>;
 
-export function ListAVDs():Promise<Array<adb.AVD>>;
+export function ListAVDs():Promise<Array<adb.AVD> | null>;
 
-export function ListAppFridaScripts():Promise<Array<adb.AppScripts>>;
+export function ListAppFridaScripts():Promise<Array<adb.AppScripts> | null>;
 
-export function ListApps(arg1:string,arg2:boolean):Promise<Array<adb.App>>;
+export function ListApps(arg1:string,arg2:boolean):Promise<Array<adb.App> | null>;
 
-export function ListCACerts(arg1:string):Promise<Array<adb.CACert>>;
+export function ListCACerts(arg1:string):Promise<Array<adb.CACert> | null>;
 
-export function ListConnections(arg1:string):Promise<Array<adb.Connection>>;
+export function ListConnections(arg1:string):Promise<Array<adb.Connection> | null>;
 
-export function ListDeviceProfiles():Promise<Array<adb.DeviceProfile>>;
+export function ListDeviceProfiles():Promise<Array<adb.DeviceProfile> | null>;
 
-export function ListDeviceRecords():Promise<Array<adb.DeviceRecord>>;
+export function ListDeviceRecords():Promise<Array<adb.DeviceRecord> | null>;
 
-export function ListDevices():Promise<Array<adb.Device>>;
+export function ListDevices():Promise<Array<adb.Device> | null>;
 
-export function ListDir(arg1:string,arg2:string,arg3:boolean):Promise<Array<adb.FileEntry>>;
+export function ListDir(arg1:string,arg2:string,arg3:boolean):Promise<Array<adb.FileEntry> | null>;
 
-export function ListForwards(arg1:string):Promise<Array<adb.Forward>>;
+export function ListForwards(arg1:string):Promise<Array<adb.Forward> | null>;
 
-export function ListFridaHistory():Promise<Array<adb.FridaHistoryEntry>>;
+export function ListFridaHistory():Promise<Array<adb.FridaHistoryEntry> | null>;
 
-export function ListFridaReleases(arg1:string,arg2:string):Promise<Array<adb.FridaRelease>>;
+export function ListFridaReleases(arg1:string,arg2:string):Promise<Array<adb.FridaRelease> | null>;
 
-export function ListFridaRuntimes():Promise<Array<adb.FridaRuntime>>;
+export function ListFridaRuntimes():Promise<Array<adb.FridaRuntime> | null>;
 
-export function ListFridaScripts():Promise<Array<adb.FridaScript>>;
+export function ListFridaScripts():Promise<Array<adb.FridaScript> | null>;
 
-export function ListFridaServers(arg1:string):Promise<Array<adb.FridaServer>>;
+export function ListFridaServers(arg1:string):Promise<Array<adb.FridaServer> | null>;
 
-export function ListFridaSessions():Promise<Array<adb.FridaSessionInfo>>;
+export function ListFridaSessions():Promise<Array<adb.FridaSessionInfo> | null>;
 
-export function ListInstalledSystemImages():Promise<Array<adb.SystemImage>>;
+export function ListInstalledSystemImages():Promise<Array<adb.SystemImage> | null>;
 
 export function ListIptables(arg1:string,arg2:string,arg3:string):Promise<adb.IPTSnapshot>;
 
 export function ListPackageUIDs(arg1:string):Promise<Record<number, string>>;
 
-export function ListProfiles():Promise<Array<adb.Profile>>;
+export function ListProfiles():Promise<Array<adb.Profile> | null>;
 
-export function ListReverses(arg1:string):Promise<Array<adb.Forward>>;
+export function ListReverses(arg1:string):Promise<Array<adb.Forward> | null>;
 
-export function ListShellHistory():Promise<Array<adb.ScrollbackEntry>>;
+export function ListShellHistory():Promise<Array<adb.ScrollbackEntry> | null>;
 
-export function ListSystemImages(arg1:boolean):Promise<Array<adb.SystemImage>>;
+export function ListSystemImages(arg1:boolean):Promise<Array<adb.SystemImage> | null>;
 
-export function ListTasks():Promise<Array<adb.TaskState>>;
+export function ListTasks():Promise<Array<adb.TaskState> | null>;
 
-export function LiveCaptureCommand(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
+export function LiveCaptureCommand(arg1:string,arg2:string,arg3:string):Promise<Array<string> | null>;
 
 export function LiveCaptureStatus(arg1:string):Promise<adb.LiveCaptureState>;
 
@@ -311,13 +311,13 @@ export function PlanTcpdumpAutoInstall(arg1:string):Promise<adb.TcpdumpAutoPlan>
 
 export function PowerOffDevice(arg1:string):Promise<string>;
 
-export function PreviewProfile(arg1:string,arg2:string):Promise<Array<adb.StepPreview>>;
+export function PreviewProfile(arg1:string,arg2:string):Promise<Array<adb.StepPreview> | null>;
 
 export function ProbeIptables(arg1:string,arg2:string):Promise<adb.IPTBackendInfo>;
 
 export function ProbeTcpdump(arg1:string):Promise<adb.TcpdumpInfo>;
 
-export function ProcessCommands(arg1:string):Promise<Array<string>>;
+export function ProcessCommands(arg1:string):Promise<Array<string> | null>;
 
 export function ProxyCommand(arg1:string,arg2:string):Promise<string>;
 
@@ -403,7 +403,7 @@ export function ScrcpyCommand(arg1:string):Promise<string>;
 
 export function ScreenRecord(arg1:string,arg2:number):Promise<string>;
 
-export function SearchCodeshare(arg1:string):Promise<Array<adb.CodeshareProject>>;
+export function SearchCodeshare(arg1:string):Promise<Array<adb.CodeshareProject> | null>;
 
 export function SetAppFridaScripts(arg1:string,arg2:Array<string>,arg3:string,arg4:string):Promise<void>;
 
@@ -467,7 +467,7 @@ export function SuggestProxyHost(arg1:string,arg2:number):Promise<main.ProxySugg
 
 export function TakeScreenshot(arg1:string):Promise<string>;
 
-export function TcpdumpInstallCommands(arg1:string):Promise<Array<string>>;
+export function TcpdumpInstallCommands(arg1:string):Promise<Array<string> | null>;
 
 export function TcpipMode(arg1:string,arg2:number):Promise<string>;
 

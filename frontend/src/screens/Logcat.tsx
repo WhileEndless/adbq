@@ -7,6 +7,8 @@ import {useStore} from '../store';
 import {logcatStore, useLogcat} from '../logcatStore';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
 import {fileStamp, saveTextAs} from '../lib/saveText';
+import {deviceKey as cacheKey, getOrFetch} from '../cache';
+import {APPS_STALE_MS} from '../App';
 import {LogEntry} from '../types';
 
 const LEVELS = ['V', 'D', 'I', 'W', 'E', 'F'] as const;
@@ -77,7 +79,10 @@ export function LogcatScreen({device}: {device: adb.Device}) {
 
   useEffect(() => {
     if (!device?.id) return;
-    store.cached(`apps:${device.id}:user`, 30_000, () => API.ListApps(device.id, true)).then(list => setApps(list || [])).catch(() => {});
+    // Same key and TTL as the Apps screen and the sidebar badge. This used to
+    // be a second TTL over the same key, so whichever screen loaded first won.
+    getOrFetch(cacheKey('apps', device.id, 'user'), () => API.ListApps(device.id, true), APPS_STALE_MS)
+      .then(list => setApps(list || [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device?.id]);
 
