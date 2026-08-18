@@ -11,6 +11,7 @@ import {Icon} from '../icons';
 import {showToast} from '../ui';
 import {useStore} from '../store';
 import {TerminalView, disposeTerm, replayScrollbackInto, getOrCreateTerm, getTerm, dumpTerm} from '../components/Terminal';
+import {fileStamp, saveTextAs} from '../lib/saveText';
 
 const SNIPPETS: {label: string; cmd: string; desc?: string}[] = [
   {label: 'whoami',          cmd: 'whoami; id',                       desc: 'Identity'},
@@ -111,14 +112,15 @@ export function ShellScreen({device}: {device: adb.Device}) {
   function saveBuffer() {
     if (!cur) return;
     const text = dumpTerm(cur.id);
-    const blob = new Blob([text], {type: 'text/plain'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `shell-${device.id}-${Date.now()}.txt`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast({title: 'Buffer saved', kind: 'ok'});
+    if (!text.trim()) {
+      showToast({title: 'Nothing to save', body: 'This session has no output yet.', kind: 'info'});
+      return;
+    }
+    void saveTextAs({
+      title: 'Save shell buffer',
+      suggestedName: `shell-${device.id}-${fileStamp()}.txt`,
+      content: text,
+    });
   }
 
   return (

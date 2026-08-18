@@ -39,8 +39,27 @@ type LogcatStream struct {
 	stderr   *bytes.Buffer
 	ch       chan LogEntry
 	stopOnce sync.Once
-	stopped  atomic.Bool // set by Stop(); suppresses the stderr-on-exit entry
+	stopped  atomic.Bool // set by Stop(); suppresses the exit reason
 	done     chan struct{}
+
+	// exitReason holds whatever adb said on its way out, for the owner to
+	// interpret once the stream has ended.
+	exitReason atomic.Value // string
+}
+
+// ExitReason returns adb's own diagnostic from when the stream ended, or "" if
+// it ended cleanly or was stopped deliberately.
+//
+// The reason is reported here rather than pushed into Lines() as a synthetic
+// log entry, because the two possible meanings need opposite handling and only
+// the owner can tell them apart. "--pid rejected by this logcat" is a permanent
+// misconfiguration the user must see; "read: unexpected EOF" is a dropped
+// transport that should simply be reconnected. Injecting both into the log
+// meant the second one showed up as a red error line every time the USB link
+// hiccuped, next to a pane that had silently stopped updating for good.
+func (s *LogcatStream) ExitReason() string {
+	r, _ := s.exitReason.Load().(string)
+	return r
 }
 
 // StartLogcat spawns `adb -s serial logcat -v threadtime [--pid=N] [-T tail]`.
@@ -119,15 +138,81 @@ func (s *LogcatStream) pump() {
 		}
 	}
 	_ = s.cmd.Wait()
-	// If the process produced diagnostics on stderr (a rejected flag, missing
-	// buffer, permission denial), surface them so the stream doesn't just end
-	// silently with no logs and no explanation. Skip this when the user stopped
-	// the stream — a kill can leave benign teardown noise on stderr.
+	// Record why adb stopped so the owner can decide what it means — see
+	// ExitReason. Skipped when the user stopped us: a kill leaves benign
+	// teardown noise on stderr that is not worth reporting as anything.
 	if s.stderr != nil && !s.stopped.Load() {
 		if msg := strings.TrimSpace(s.stderr.String()); msg != "" {
-			s.ch <- LogEntry{Level: "E", Tag: "adbq", Msg: "logcat: " + firstLine(msg)}
+			s.exitReason.Store(firstLine(msg))
 		}
 	}
+}
+
+// transientExitReasons are the adb diagnostics that mean "the connection went
+// away", as opposed to "this invocation is wrong and always will be". They are
+// worth reconnecting through rather than reporting: a USB link renegotiating, a
+// device dozing, or an adb server that got restarted underneath us all produce
+// one of these, and all of them come back on their own.
+var transientExitReasons = []string{
+	"unexpected eof",
+	"connection reset",
+	"device offline",
+	"device still authorizing",
+	"protocol fault",
+	"closed",
+	"broken pipe",
+	"no such device",
+	"device not found",
+}
+
+// IsTransientStreamEnd reports whether an ExitReason describes a dropped
+// connection rather than a permanent problem with the command.
+func IsTransientStreamEnd(reason string) bool {
+	if reason == "" {
+		// The process exited with nothing to say. Under normal operation logcat
+		// runs until killed, so a silent exit is the adb client being torn down,
+		// not a rejected invocation — reconnect.
+		return true
+	}
+	low := stripQuoted(strings.ToLower(reason))
+	for _, m := range transientExitReasons {
+		if strings.Contains(low, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// stripQuoted removes single-quoted spans from a message, collapsing each to a
+// single space.
+//
+// adb interpolates the device serial into its diagnostics — "device '<serial>'
+// not found" — which splits the phrase we want to match on. Matching a bare
+// "not found" instead would be too loose, so the variable part is removed and
+// the stable wording matched intact.
+func stripQuoted(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\'':
+			if !inQuote {
+				b.WriteByte(' ')
+			}
+			inQuote = !inQuote
+		case !inQuote:
+			b.WriteByte(s[i])
+		}
+	}
+	// An unbalanced quote would otherwise swallow the rest of the message.
+	out := b.String()
+	if inQuote {
+		out = strings.ReplaceAll(s, "'", " ")
+	}
+	// Collapse the gap the removal left, so "device 'x' not found" becomes
+	// "device not found" and matches as one phrase.
+	return strings.Join(strings.Fields(out), " ")
 }
 
 func (s *LogcatStream) Lines() <-chan LogEntry { return s.ch }

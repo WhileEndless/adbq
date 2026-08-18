@@ -73,6 +73,7 @@ var exemptBindings = map[string]string{
 	"StartScrcpy":             "host-side mirror process; no device state",
 	"StopScrcpy":              "host-side mirror process; no device state",
 	"SaveScreenshotAs":        "writes a host-side file",
+	"SaveTextAs":              "writes UI text the caller already holds to a host-side file",
 	"SaveLivePcap":            "writes a host-side file",
 	"TakeScreenshot":          "reads the framebuffer",
 	"PullCapture":             "copies a device file to the host",

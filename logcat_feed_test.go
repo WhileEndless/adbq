@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -213,5 +214,72 @@ func TestFeedAsksAboutEachUnknownPidOnlyOnce(t *testing.T) {
 	}
 	if len(f.nudged) != 1 {
 		t.Errorf("nudged = %v, want exactly the one unknown pid", f.nudged)
+	}
+}
+
+// A dropped adb stream used to be terminal: the feed marked itself dead, the
+// pane froze, and the only way back was to leave the screen and return. Over
+// USB a drop is routine, so that made the log unreliable in exactly the case it
+// exists for. These cover the classification that decides retry vs report.
+func TestTransientStreamEndClassification(t *testing.T) {
+	transient := []string{
+		"",                      // silent exit: adb client torn down
+		"read: unexpected EOF",  // the one users kept seeing
+		"error: device offline", // phone dozing / renegotiating USB
+		"error: protocol fault (couldn't read status): Connection reset by peer",
+		"error: device '0123456789abcdef' not found", // transport gone, may return
+		"adb: device still authorizing",
+	}
+	for _, r := range transient {
+		if !adb.IsTransientStreamEnd(r) {
+			t.Errorf("IsTransientStreamEnd(%q) = false, want true — a recoverable "+
+				"drop reported as permanent freezes the pane", r)
+		}
+	}
+
+	permanent := []string{
+		"logcat: Unrecognized Option --pid", // pre-API-24 logcat
+		"Unable to open log device '/dev/log/main': No such file or directory",
+		"logcat: invalid filter expression",
+	}
+	for _, r := range permanent {
+		if adb.IsTransientStreamEnd(r) {
+			t.Errorf("IsTransientStreamEnd(%q) = true, want false — retrying a "+
+				"rejected invocation spins forever on something retry cannot fix", r)
+		}
+	}
+}
+
+// A permanent failure must stop the feed AND say so. Reporting without marking
+// dead would leave EnsureLogcat believing the subscription is healthy; marking
+// dead without reporting leaves the user staring at a pane that simply stopped.
+func TestFeedFailMarksDeadAndExplains(t *testing.T) {
+	f, batches := newTestFeed(t, map[int]adb.ProcOwner{}, true)
+
+	if !f.Alive() {
+		t.Fatal("a fresh feed should be alive")
+	}
+	f.fail("logcat: Unrecognized Option --pid")
+
+	if f.Alive() {
+		t.Error("feed still reports Alive after fail(); EnsureLogcat would not rebuild it")
+	}
+	var msg string
+	for _, b := range batches() {
+		for _, e := range b {
+			if e.Tag == "adbq" {
+				msg = e.Msg
+			}
+		}
+	}
+	if msg == "" {
+		t.Fatal("fail() emitted nothing; the pane would just stop with no explanation")
+	}
+	// The user needs the cause and the next step, not just adb's words.
+	if !strings.Contains(msg, "Unrecognized Option") {
+		t.Errorf("message drops the cause: %q", msg)
+	}
+	if !strings.Contains(msg, "reopen this screen") {
+		t.Errorf("message names no way forward: %q", msg)
 	}
 }

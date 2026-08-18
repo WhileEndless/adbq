@@ -8,6 +8,7 @@ import {useStore} from '../store';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
 import {rootUnavailableReason} from '../lib/android';
 import {CodeEditor} from '../components/CodeEditor';
+import {fileStamp, saveTextAs} from '../lib/saveText';
 
 export function FridaScreen({device}: {device: adb.Device}) {
   const store = useStore();
@@ -1256,12 +1257,11 @@ function exportFridaLog(rows: FridaRow[], info: adb.FridaSessionInfo) {
   const header = `# adbq frida session export — ${info.package} — ${new Date().toISOString()}\n`
     + `# mode=${info.mode} · frida ${info.runtime} · ${rows.length} lines\n\n`;
   const text = header + rows.map(r => `${new Date(r.m.time).toISOString()}  ${r.tag.padEnd(8)} ${r.text}`).join('\n');
-  const blob = new Blob([text], {type: 'text/plain'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `frida-${info.package}-${Date.now()}.txt`; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast({title: 'Session log exported', body: `${rows.length} lines`, kind: 'ok'});
+  void saveTextAs({
+    title: 'Export Frida session log',
+    suggestedName: `frida-${info.package}-${fileStamp()}.txt`,
+    content: text,
+  });
 }
 
 function fmtMB(n: number): string {

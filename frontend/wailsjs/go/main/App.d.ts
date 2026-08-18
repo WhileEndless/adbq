@@ -393,6 +393,8 @@ export function SaveProfile(arg1:adb.Profile):Promise<adb.Profile>;
 
 export function SaveScreenshotAs(arg1:string):Promise<string>;
 
+export function SaveTextAs(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function ScrcpyActive(arg1:string):Promise<boolean>;
 
 export function ScrcpyAvailable():Promise<boolean>;

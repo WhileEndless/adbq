@@ -1011,6 +1011,35 @@ func (a *App) ConnectCommands(addr string) adb.ConnectCommands {
 func (a *App) GetStats(serial string) (*adb.Stats, error) { return a.client.GetStats(a.ctx, serial) }
 func (a *App) ADBVersion() (string, error)                { return a.client.ServerVersion(a.ctx) }
 
+// SaveTextAs writes text the UI already holds to a file the user picks.
+//
+// The Logcat, Shell and Frida panes used to "export" by building a Blob URL and
+// clicking a synthetic <a download>. That is a browser idiom, and the webview
+// adbq runs in is not a browser: WKWebView ignores the download attribute, so
+// the button did nothing at all — no file, no error, and a success toast on top.
+// Saving is the backend's job here, the same way every other export in this app
+// already does it (ExportAPK, SaveLivePcap, …).
+//
+// Returns the chosen path, or "" when the user cancelled — a cancel is not an
+// error and must not raise one, or every dismissed dialog becomes a red toast.
+func (a *App) SaveTextAs(title, suggestedName, content string) (string, error) {
+	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           title,
+		DefaultFilename: suggestedName,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Text file (*.txt)", Pattern: "*.txt"},
+			{DisplayName: "All files", Pattern: "*"},
+		},
+	})
+	if err != nil || dst == "" {
+		return "", err
+	}
+	if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", dst, err)
+	}
+	return dst, nil
+}
+
 // ADBStats reports how many adb processes adbq has started and which command
 // shapes dominate. adbq is a wrapper around a CLI, so its cost is overwhelmingly
 // process creation rather than anything it computes; this is the number that

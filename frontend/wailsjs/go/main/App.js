@@ -782,6 +782,10 @@ export function SaveScreenshotAs(arg1) {
   return window['go']['main']['App']['SaveScreenshotAs'](arg1);
 }
 
+export function SaveTextAs(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveTextAs'](arg1, arg2, arg3);
+}
+
 export function ScrcpyActive(arg1) {
   return window['go']['main']['App']['ScrcpyActive'](arg1);
 }

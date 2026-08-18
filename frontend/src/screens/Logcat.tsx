@@ -6,6 +6,7 @@ import {Combobox, CommandChip, IconBtn, SearchInput, showToast} from '../ui';
 import {useStore} from '../store';
 import {logcatStore, useLogcat} from '../logcatStore';
 import {SEARCH_DEBOUNCE_MS, highlight} from '../lib/logSearch';
+import {fileStamp, saveTextAs} from '../lib/saveText';
 import {LogEntry} from '../types';
 
 const LEVELS = ['V', 'D', 'I', 'W', 'E', 'F'] as const;
@@ -355,12 +356,15 @@ function LevelMenu({value, onChange}: {value: string; onChange: (v: string) => v
 }
 
 function exportLines(lines: LogEntry[], serial: string) {
+  if (lines.length === 0) {
+    showToast({title: 'Nothing to export', body: 'No lines match the current filter.', kind: 'info'});
+    return;
+  }
   const header = `# adbq logcat export — ${serial} — ${new Date().toISOString()}\n# ${lines.length} lines\n\n`;
   const text = header + lines.map(l => `${l.time}  ${l.pid}-${l.tid} ${l.lvl} ${l.tag}: ${l.msg}`).join('\n');
-  const blob = new Blob([text], {type: 'text/plain'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `logcat-${serial}-${Date.now()}.txt`; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast({title: 'Logcat exported', body: `${lines.length} lines`, kind: 'ok'});
+  void saveTextAs({
+    title: 'Export logcat',
+    suggestedName: `logcat-${serial}-${fileStamp()}.txt`,
+    content: text,
+  });
 }
