@@ -75,6 +75,7 @@ func (c *Client) StartLogcat(ctx context.Context, serial string, pid int, buffer
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	countStreamSpawn(cmd.Args)
 	if buffer <= 0 {
 		buffer = 1024
 	}

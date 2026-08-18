@@ -293,6 +293,7 @@ func (c *Client) StartLiveCapture(ctx context.Context, serial, iface, bpf string
 		_ = pf.Close()
 		return nil, fmt.Errorf("tcpdump spawn: %w", err)
 	}
+	countStreamSpawn(cmd.Args)
 
 	maxPkts, maxPcap := opts.normalize()
 	s := &liveSession{

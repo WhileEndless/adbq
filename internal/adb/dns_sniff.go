@@ -84,6 +84,7 @@ func (c *Client) startTcpdumpDNS(ctx context.Context, serial, tcpdumpPath string
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("tcpdump spawn failed: %w", err)
 	}
+	countStreamSpawn(cmd.Args)
 	s := &DNSSnifferStream{
 		cmd:    cmd,
 		stdout: stdout,
@@ -128,6 +129,7 @@ func (c *Client) startLogcatDNS(ctx context.Context, serial string) (*DNSSniffer
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("logcat spawn failed: %w", err)
 	}
+	countStreamSpawn(cmd.Args)
 	s := &DNSSnifferStream{
 		cmd:    cmd,
 		stdout: stdout,

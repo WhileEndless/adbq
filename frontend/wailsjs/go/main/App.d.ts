@@ -3,6 +3,8 @@
 import {adb} from '../models';
 import {main} from '../models';
 
+export function ADBStats():Promise<adb.ADBStats>;
+
 export function ADBVersion():Promise<string>;
 
 export function AVDDetail(arg1:string):Promise<adb.AVD>;
@@ -354,6 +356,8 @@ export function RemoveReverse(arg1:string,arg2:string):Promise<string>;
 export function RemoveRootAVD():Promise<void>;
 
 export function RemoveTask(arg1:string):Promise<void>;
+
+export function ResetADBStats():Promise<void>;
 
 export function ResizeShell(arg1:string,arg2:number,arg3:number):Promise<void>;
 

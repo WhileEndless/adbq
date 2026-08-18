@@ -64,6 +64,7 @@ func (c *Client) StartShell(ctx context.Context, serial, id string, root bool) (
 		}
 		return nil, err
 	}
+	countStreamSpawn(cmd.Args)
 	s := &ShellSession{
 		ID:        id,
 		Root:      root,

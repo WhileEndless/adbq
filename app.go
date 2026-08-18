@@ -963,6 +963,17 @@ func (a *App) ConnectCommands(addr string) adb.ConnectCommands {
 func (a *App) GetStats(serial string) (*adb.Stats, error) { return a.client.GetStats(a.ctx, serial) }
 func (a *App) ADBVersion() (string, error)                { return a.client.ServerVersion(a.ctx) }
 
+// ADBStats reports how many adb processes adbq has started and which command
+// shapes dominate. adbq is a wrapper around a CLI, so its cost is overwhelmingly
+// process creation rather than anything it computes; this is the number that
+// says whether a change actually helped. Surfaced in Settings so the answer is
+// available on a real device with a real ROM, not only under a profiler.
+func (a *App) ADBStats() adb.ADBStats { return adb.ADBStatsSnapshot(15) }
+
+// ResetADBStats reopens the measurement window so a before/after comparison can
+// be made without restarting the app.
+func (a *App) ResetADBStats() { adb.ResetADBStats() }
+
 // ─── Logcat streaming via events ────────────────────────────────────────
 
 // restartLogcatLocked replaces whatever feed a device has with a fresh one.

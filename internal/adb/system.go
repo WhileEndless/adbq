@@ -243,6 +243,7 @@ func (c *Client) StartScreenRecord(parent context.Context, serial string, maxSec
 		cancel()
 		return nil, err
 	}
+	countStreamSpawn(cmd.Args)
 	go func() {
 		_ = cmd.Wait()
 		close(sess.Done)

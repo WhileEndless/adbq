@@ -1,5 +1,77 @@
 export namespace adb {
 	
+	export class CommandCount {
+	    command: string;
+	    count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CommandCount(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.command = source["command"];
+	        this.count = source["count"];
+	    }
+	}
+	export class DurationBucket {
+	    upToMillis: number;
+	    count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DurationBucket(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.upToMillis = source["upToMillis"];
+	        this.count = source["count"];
+	    }
+	}
+	export class ADBStats {
+	    spawns: number;
+	    streams: number;
+	    perSecond: number;
+	    windowSeconds: number;
+	    totalMillis: number;
+	    buckets: DurationBucket[] | null;
+	    topCommands: CommandCount[] | null;
+	    trackingDevices: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ADBStats(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.spawns = source["spawns"];
+	        this.streams = source["streams"];
+	        this.perSecond = source["perSecond"];
+	        this.windowSeconds = source["windowSeconds"];
+	        this.totalMillis = source["totalMillis"];
+	        this.buckets = this.convertValues(source["buckets"], DurationBucket);
+	        this.topCommands = this.convertValues(source["topCommands"], CommandCount);
+	        this.trackingDevices = source["trackingDevices"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AVD {
 	    name: string;
 	    display: string;
@@ -695,6 +767,7 @@ export namespace adb {
 	        this.sourceSha = source["sourceSha"];
 	    }
 	}
+	
 	export class ConnectCommands {
 	    connect: string[] | null;
 	    disconnect: string[] | null;
@@ -865,6 +938,7 @@ export namespace adb {
 	        this.boundProfileId = source["boundProfileId"];
 	    }
 	}
+	
 	export class EmulatorOpts {
 	    coldBoot: boolean;
 	    noSnapshotSave: boolean;

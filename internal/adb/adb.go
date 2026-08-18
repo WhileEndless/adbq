@@ -141,7 +141,14 @@ func (c *Client) DeviceCommand(ctx context.Context, serial string, args ...strin
 }
 
 // Run executes the command and returns trimmed stdout, or an error containing stderr.
+//
+// This is the single funnel for one-shot adb invocations — every Shell/ShellSU
+// call lands here — which is why the spawn metrics are recorded at this point
+// and nowhere else (see metrics.go). Long-lived streams start their processes
+// directly and count themselves via countStreamSpawn.
 func Run(cmd *exec.Cmd) (string, error) {
+	started := time.Now()
+	defer func() { adbMetrics.recordSpawn(spawnOneShot, cmd.Args, time.Since(started)) }()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

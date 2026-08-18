@@ -534,7 +534,79 @@ function Settings({open, onClose, themeMode, setTheme, accent, setAccent}:{open:
         </div>
       </div>
       <JadxSettings open={open}/>
+      <AdbLoadPanel open={open}/>
     </Modal>
+  );
+}
+
+// AdbLoadPanel shows how many adb processes adbq has started. adbq is a wrapper
+// around a CLI, so process creation — not parsing, not rendering — is what it
+// actually costs, and the per-second figure is the one number that says whether
+// a change to a read path helped. It lives in Settings rather than a debug
+// build because the honest measurement is the one taken on a real phone with a
+// real ROM, which is exactly where a profiler is not available.
+//
+// It polls only while the Settings modal is open, and counts its own polling:
+// ADBStats itself spawns nothing, so the figure stays truthful.
+function AdbLoadPanel({open}: {open: boolean}) {
+  const [stats, setStats] = useState<adb.ADBStats | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    const tick = () => API.ADBStats().then(s => { if (live) setStats(s); }).catch(() => {});
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => { live = false; clearInterval(t); };
+  }, [open]);
+  if (!stats) return null;
+  const top = stats.topCommands ?? [];
+  const busiest = Math.max(1, ...top.map(c => c.count));
+  return (
+    <div className='card' style={{marginTop: 16}}>
+      <div className='card-body'>
+        <div className='spread' style={{alignItems: 'baseline', marginBottom: 10}}>
+          <strong style={{fontSize: 12}}>adb load</strong>
+          <button className='btn sm' onClick={() => API.ResetADBStats().then(() => API.ADBStats().then(setStats))}>
+            Reset window
+          </button>
+        </div>
+        <div className='spread'>
+          <span className='muted'>processes / second</span>
+          <span className='mono' style={{fontSize: 13, fontWeight: 600}}>{stats.perSecond.toFixed(2)}</span>
+        </div>
+        <div className='spread'>
+          <span className='muted'>one-shot spawns</span>
+          <span className='mono subtle' style={{fontSize: 11}}>
+            {stats.spawns.toLocaleString()} in {Math.round(stats.windowSeconds)}s
+          </span>
+        </div>
+        <div className='spread'>
+          <span className='muted'>live streams</span>
+          <span className='mono subtle' style={{fontSize: 11}}>{stats.streams}</span>
+        </div>
+        <div className='spread'>
+          <span className='muted'>device tracking</span>
+          <span className='mono subtle' style={{fontSize: 11}}>
+            {stats.trackingDevices ? 'push (track-devices)' : 'polling (fallback)'}
+          </span>
+        </div>
+        {top.length > 0 && (
+          <div style={{marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 8}}>
+            {top.map(c => (
+              <div key={c.command} style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2}}>
+                <span className='mono subtle' style={{fontSize: 10.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                  {c.command}
+                </span>
+                <span style={{width: 90, height: 5, background: 'var(--bg-inset)', borderRadius: 3, overflow: 'hidden', flexShrink: 0}}>
+                  <span style={{display: 'block', height: '100%', width: `${(c.count / busiest) * 100}%`, background: 'var(--accent)'}}/>
+                </span>
+                <span className='mono subtle' style={{fontSize: 10.5, width: 46, textAlign: 'right'}}>{c.count.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
