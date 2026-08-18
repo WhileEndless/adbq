@@ -5,6 +5,7 @@
 // so the user can see a background refresh is happening. `prefetchData` warms
 // the cache when a device connects, before any screen is opened.
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {EventsOn} from '../wailsjs/runtime/runtime';
 
 interface Entry<T> {
   data?: T;
@@ -13,9 +14,45 @@ interface Entry<T> {
   error?: unknown;
 }
 
+// ─── Cache domains ────────────────────────────────────────────────────────
+//
+// Only the backend knows that an install finished or a forward was removed, so
+// it is the backend that decides this cache is stale: every mutating binding
+// declares the domains it dirties and emits `cache:invalidate` (see
+// app_invalidate.go and internal/adb/cachedomain.go). Without that the
+// frontend would have to guess, which in practice means it never invalidates —
+// which is exactly the state this replaced.
+//
+// The contract that makes it work is the key shape:
+//
+//     <domain>:<serial>[:...anything]
+//
+// Build keys with deviceKey()/hostKey() rather than by hand, so a screen cannot
+// invent a key no invalidation can reach.
+
+export type Domain =
+  | 'apps' | 'storage' | 'files' | 'net' | 'forwards' | 'iptables'
+  | 'certs' | 'hosts' | 'frida' | 'tcpdump' | 'props' | 'root' | 'proxy'
+  | 'sdk' | 'jadx' | 'scrcpy' | 'avd';
+
+/** Key for per-device state. Parts are joined with ':' after the serial. */
+export function deviceKey(domain: Domain, serial: string, ...parts: string[]): string {
+  return [domain, serial, ...parts].join(':');
+}
+
+/** Key for host-scoped state (SDK, jadx, AVDs) — no serial, so an empty one. */
+export function hostKey(domain: Domain, ...parts: string[]): string {
+  return [domain, '', ...parts].join(':');
+}
+
 const store = new Map<string, Entry<unknown>>();
 const listeners = new Map<string, Set<() => void>>();
 const inflight = new Map<string, Promise<unknown>>();
+// The last fetcher seen for a key, so an invalidation arriving from the backend
+// can refresh a key that a component is watching without that component having
+// to notice and re-ask. Without this, "invalidate" could only ever mean
+// "delete", and a mounted screen would go on showing the value it already had.
+const fetchers = new Map<string, () => Promise<unknown>>();
 
 function notify(key: string) {
   listeners.get(key)?.forEach(cb => cb());
@@ -31,6 +68,7 @@ function subscribe(key: string, cb: () => void): () => void {
 // revalidate fetches fresh data, updates the store, and notifies subscribers.
 // Concurrent calls for the same key share one in-flight request.
 function revalidate<T>(key: string, fetcher: () => Promise<T>): Promise<T | undefined> {
+  fetchers.set(key, fetcher as () => Promise<unknown>);
   const existing = inflight.get(key);
   if (existing) return existing as Promise<T | undefined>;
   const prev = store.get(key);
@@ -76,12 +114,68 @@ export function getCached<T>(key: string): T | undefined {
   return store.get(key)?.data as T | undefined;
 }
 
+/**
+ * Promise-shaped read for callers that cannot use the hook — an effect keyed on
+ * something other than the component's identity, say, or a one-off fetch inside
+ * an event handler. Returns the cached value when it is fresher than staleMs,
+ * otherwise fetches (deduplicating concurrent callers).
+ *
+ * This is what the old `store.cached` did, moved here so there is exactly one
+ * cache. Two caches meant two TTLs for one key and no way for the backend to
+ * invalidate either reliably.
+ */
+export async function getOrFetch<T>(key: string, fetcher: () => Promise<T>, staleMs: number): Promise<T | undefined> {
+  const e = store.get(key);
+  if (e && !e.error && e.data !== undefined && Date.now() - e.ts < staleMs) {
+    return e.data as T;
+  }
+  return revalidate(key, fetcher);
+}
+
 // invalidateData drops cached entries whose key starts with prefix.
 export function invalidateData(prefix: string): void {
   for (const k of Array.from(store.keys())) {
     if (k.startsWith(prefix)) store.delete(k);
   }
 }
+
+/**
+ * Drops every cached entry in `domains` for `serial`, and re-fetches the ones a
+ * component is currently showing.
+ *
+ * Deleting alone is not enough. A mounted screen holds no subscription to a key
+ * that no longer exists, so nothing would tell it to refetch and it would keep
+ * rendering the value it captured — the user uninstalls an app and the list sits
+ * there looking correct. So live keys are revalidated rather than dropped;
+ * unobserved ones are simply deleted and will be fetched fresh on next use.
+ */
+export function invalidateDomains(serial: string, domains: readonly Domain[]): void {
+  if (!domains?.length) return;
+  const prefixes = domains.map(d => `${d}:${serial}`);
+  for (const key of Array.from(store.keys())) {
+    // Match `<domain>:<serial>` exactly or as a `<domain>:<serial>:…` prefix, so
+    // invalidating serial "R58" cannot also clear "R58M12".
+    const hit = prefixes.some(p => key === p || key.startsWith(p + ':'));
+    if (!hit) continue;
+    if (listeners.get(key)?.size) {
+      const fetcher = fetchers.get(key);
+      if (fetcher) {
+        void revalidate(key, fetcher);
+        continue;
+      }
+    }
+    store.delete(key);
+    notify(key);
+  }
+}
+
+// The backend is the authority on staleness; this is the wire it speaks over.
+// Subscribed at module scope rather than from a component: an invalidation that
+// arrives while the relevant screen is unmounted still has to land, or the
+// screen shows a stale value the moment it mounts again.
+EventsOn('cache:invalidate', (payload: {serial?: string; domains?: Domain[]}) => {
+  invalidateDomains(payload?.serial ?? '', payload?.domains ?? []);
+});
 
 export interface DeviceData<T> {
   data?: T;

@@ -23,7 +23,7 @@ import {IptablesScreen} from './screens/Iptables';
 import {ProcessesScreen} from './screens/Processes';
 import {EmulatorsScreen} from './screens/Emulators';
 import {ProfileSelector, ProfileEditor, ApplyConfirm, PastDevices, deviceKey} from './screens/Profiles';
-import {prefetchData} from './cache';
+import {deviceKey as cacheKey, getCached, prefetchData, useDeviceData} from './cache';
 
 // prefetchDeviceData warms the shared cache for the cheaper request/response
 // screens when a device appears online, so opening those screens is instant —
@@ -31,19 +31,26 @@ import {prefetchData} from './cache';
 // screen reads via useDeviceData. Heavy/streaming screens are left out.
 function prefetchDeviceData(d: adb.Device) {
   const id = d.id;
-  prefetchData(`forwards:${id}`, async () => {
+  prefetchData(cacheKey('forwards', id), async () => {
     const [f, r] = await Promise.all([API.ListForwards(id), API.ListReverses(id)]);
     return {fwd: f || [], rev: r || []};
   });
-  prefetchData(`net-info:${id}`, () => API.GetNetworkInfo(id));
-  prefetchData(`stats:${id}`, () => API.GetStats(id));
-  prefetchData(`iptables:${id}:ipv4:filter`, async () => {
+  prefetchData(cacheKey('net', id, 'info'), () => API.GetNetworkInfo(id));
+  prefetchData(cacheKey('storage', id, 'stats'), () => API.GetStats(id));
+  prefetchData(cacheKey('iptables', id, 'ipv4', 'filter'), async () => {
     const pb = await API.ProbeIptables(id, 'ipv4');
     if (!pb?.available || !d.root) return {info: pb, snap: null};
     const sn = await API.ListIptables(id, 'ipv4', 'filter');
     return {info: pb, snap: sn};
   });
 }
+
+// The installed package list changes only when adbq installs or uninstalls
+// something — and it invalidates the cache when it does (see app_invalidate.go),
+// so this is a backstop for changes made outside adbq rather than the mechanism
+// that keeps the list correct. `pm list packages` is slow enough that a short
+// TTL here was costing a device call per screen change for nothing.
+export const APPS_STALE_MS = 10 * 60_000;
 
 const ACCENTS = ['#a07cf7', '#7aa2ff', '#5ed29a', '#e9b454', '#ec6a73', '#c5a3ff'];
 
@@ -112,7 +119,6 @@ function AppInner() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectAddr, setConnectAddr] = useState('192.168.1.10:5555');
-  const [counts, setCounts] = useState<{forwards: number; apps: number}>({forwards: 0, apps: 0});
 
   // ─── Device profiles ──────────────────────────────────────────────────────
   const [profilesVersion, setProfilesVersion] = useState(0);
@@ -236,12 +242,20 @@ function AppInner() {
 
   const device = useMemo(() => devices.find(d => d.id === activeId) || devices[0], [devices, activeId]);
 
-  useEffect(() => {
-    if (!device?.id) return;
-    Promise.all([API.ListForwards(device.id), API.ListReverses(device.id)])
-      .then(([f, r]) => setCounts(c => ({...c, forwards: (f?.length || 0) + (r?.length || 0)})));
-    API.ListApps(device.id, true).then(a => setCounts(c => ({...c, apps: a?.length || 0}))).catch(() => {});
-  }, [device?.id, screen]);
+  // Sidebar badge counts. These come out of the shared cache rather than their
+  // own fetches: the previous version re-ran ListApps and ListForwards on every
+  // screen change, uncached, for two numbers — and `pm list packages` is one of
+  // the slowest calls adbq makes. The Apps and Forwards screens already populate
+  // these exact keys, and the backend invalidates them on install/uninstall and
+  // on forward changes, so the badges stay correct without asking again.
+  const appsCount = useDeviceData(
+    device?.id ? cacheKey('apps', device.id, 'user') : null,
+    () => API.ListApps(device!.id, true),
+    {staleMs: APPS_STALE_MS},
+  ).data?.length ?? 0;
+  const forwardsData = getCached<{fwd: unknown[]; rev: unknown[]}>(
+    device?.id ? cacheKey('forwards', device.id) : '');
+  const forwardsCount = (forwardsData?.fwd?.length ?? 0) + (forwardsData?.rev?.length ?? 0);
 
   // Global keyboard shortcuts: Cmd/Ctrl+1..9 jump to the device screen at that
   // index, and Cmd/Ctrl+0 to Emulators — the host screen sits outside the
@@ -309,7 +323,7 @@ function AppInner() {
                     }
                     reload();
                   })}/>
-      <Sidebar device={device} screen={screen} setScreen={setScreen} counts={counts}/>
+      <Sidebar device={device} screen={screen} setScreen={setScreen} counts={{apps: appsCount, forwards: forwardsCount}}/>
       <main className='main'>
         {device || HOST_SCREENS.includes(screen)
           ? <ScreenComp device={device as adb.Device} setScreen={setScreen as any}/>

@@ -331,11 +331,11 @@ func TestResolverNilClient(t *testing.T) {
 }
 
 func TestResolverErrorNamesTheFact(t *testing.T) {
-	r := NewResolver("wifi.ssid",
+	r := NewResolver("net.ssid",
 		fakeStrategy{name: "modern", req: Requirements{MinSDK: 30}, runs: new(int)},
 	)
 	_, err := r.Resolve(context.Background(), testClient(&Capabilities{SDK: 21}), testSerial, "")
-	if err == nil || !strings.Contains(err.Error(), "wifi.ssid") {
+	if err == nil || !strings.Contains(err.Error(), "net.ssid") {
 		t.Errorf("error = %v, want it to name the fact", err)
 	}
 }

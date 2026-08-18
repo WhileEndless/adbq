@@ -7,26 +7,29 @@ import {useStore} from '../store';
 import {pickApkAndInstall} from '../lib/apk';
 import {ensureJadx, jadxInfo, jadxLabel} from '../lib/jadx';
 import {sdkLabel, rootUnavailableReason} from '../lib/android';
+import {deviceKey as cacheKey, getOrFetch, useDeviceData} from '../cache';
+import {APPS_STALE_MS} from '../App';
+
+// App details (permissions, version, sizes) move only when the app itself is
+// installed, updated or cleared — all of which invalidate the apps domain from
+// the backend, so this TTL is only a backstop for changes made outside adbq.
+const APP_DETAIL_STALE_MS = 10 * 60_000;
 
 export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?: (s: string) => void}) {
-  const [apps, setApps] = useState<adb.App[]>([]);
-  const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
   const [onlyUser, setOnlyUser] = useState(true);
   const [sel, setSel] = useState<adb.App | null>(null);
   const [detail, setDetail] = useState<adb.AppDetail | null>(null);
 
   const store = useStore();
-  const load = (force = false) => {
-    if (!device?.id) return;
-    setLoading(true);
-    const key = `apps:${device.id}:${onlyUser ? 'user' : 'all'}`;
-    if (force) store.invalidate(key);
-    store.cached(key, 60_000, () => API.ListApps(device.id, onlyUser))
-      .then(a => { setApps(a || []); setLoading(false); })
-      .catch(e => { setLoading(false); showToast({title: 'List apps failed', body: String(e), kind: 'err'}); });
-  };
-  useEffect(() => { load(); }, [device?.id, onlyUser]);
+  // One cache, one key shape. This list used to be fetched three ways — here at
+  // 60s, by Logcat at 30s under the SAME key (so whichever screen loaded first
+  // decided the TTL), and uncached by the sidebar badge on every screen change.
+  const listKey = device?.id ? cacheKey('apps', device.id, onlyUser ? 'user' : 'all') : null;
+  const {data: appsData, loading, refreshing, refresh} = useDeviceData(
+    listKey, () => API.ListApps(device.id, onlyUser), {staleMs: APPS_STALE_MS},
+  );
+  const apps = appsData ?? [];
 
   // Use an epoch counter so a stale DescribeApp resolve doesn't overwrite
   // detail for a newly-selected app.
@@ -34,8 +37,10 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
   useEffect(() => {
     if (!sel) { setDetail(null); return; }
     const my = ++reqId.current;
-    store.cached(`describe:${device.id}:${sel.pkg}`, 120_000, () => API.DescribeApp(device.id, sel.pkg))
-      .then(d => { if (my === reqId.current) setDetail(d); })
+    // Namespaced under the apps domain so an install/uninstall/clear drops the
+    // per-app detail too, not just the list it came from.
+    getOrFetch(cacheKey('apps', device.id, 'describe', sel.pkg), () => API.DescribeApp(device.id, sel.pkg), APP_DETAIL_STALE_MS)
+      .then(d => { if (my === reqId.current) setDetail(d ?? null); })
       .catch(() => { if (my === reqId.current) setDetail(null); });
   }, [sel?.pkg, device?.id]);
 
@@ -91,9 +96,9 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
         <button className={`btn sm${onlyUser ? ' primary' : ''}`} onClick={() => setOnlyUser(true)}>User</button>
         <button className={`btn sm${!onlyUser ? ' primary' : ''}`} onClick={() => setOnlyUser(false)}>All</button>
         <div className='spacer' style={{flex: 1}}/>
-        <button className='btn' onClick={() => load(true)}><Icon.Refresh/>Reload</button>
+        <button className='btn' onClick={refresh}><Icon.Refresh className={refreshing ? 'spin' : ''}/>Reload</button>
         <button className='btn primary' title='Single .apk, or a split bundle as .apks / .xapk'
-                onClick={() => pickApkAndInstall(device.id).then(done => { if (done) setTimeout(() => load(true), 2500); })}>
+                onClick={() => pickApkAndInstall(device.id)}>
           <Icon.Upload/>Install APK / APKS
         </button>
       </div>

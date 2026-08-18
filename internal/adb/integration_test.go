@@ -294,7 +294,7 @@ func TestSSIDStaysOffPollingPath_Integration(t *testing.T) {
 func costlySSIDReadAt(c *Client, serial string) time.Time {
 	c.factMu.Lock()
 	defer c.factMu.Unlock()
-	if st := c.facts[factKey("wifi.ssid", serial)]; st != nil && st.cached {
+	if st := c.facts[factKey("net.ssid", serial)]; st != nil && st.cached {
 		return st.at
 	}
 	return time.Time{}

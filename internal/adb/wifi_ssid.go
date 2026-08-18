@@ -42,7 +42,10 @@ func wlanStateFromIfaces(ifaces []NetIface) wlanState {
 
 // ssidResolver routes the "which network is this device on" question to the
 // cheapest command the device's API level offers.
-var ssidResolver = NewResolver[string]("wifi.ssid",
+// The fact name is domain-prefixed ("net.") so InvalidateDomains(DomNet)
+// reaches it — see cachedomain.go. A bare name would be cached forever by
+// any invalidation short of dropping the whole device.
+var ssidResolver = NewResolver[string]("net.ssid",
 	ssidViaWifiShell{},
 	ssidViaDumpsysWifi{},
 )

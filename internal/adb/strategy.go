@@ -82,7 +82,9 @@ type Resolver[T any] struct {
 
 // NewResolver registers strategies for a named fact, cheapest-first. The fact
 // name keys the per-device cache, so it must be unique across resolvers; use a
-// dotted form like "wifi.ssid".
+// dotted form like "net.ssid". The first segment MUST be a Domain (see
+// cachedomain.go): domain invalidation matches on that prefix, so a fact named
+// outside the scheme can never be invalidated except by dropping the device.
 func NewResolver[T any](fact string, strategies ...Strategy[T]) *Resolver[T] {
 	return &Resolver[T]{fact: fact, strategies: strategies}
 }

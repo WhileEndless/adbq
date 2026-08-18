@@ -220,6 +220,10 @@ func (a *App) ApplyProfile(serial, profileID string) (*adb.ApplyReport, error) {
 	if !ok {
 		return nil, fmt.Errorf("profile %s not found", profileID)
 	}
+	// Derived from the profile's enabled steps rather than hand-listed here, so
+	// a new step kind cannot be added without its invalidation — see
+	// Profile.Domains. Deferred, so a partial apply still invalidates.
+	defer a.touch(serial, p.Domains()...)
 	d, err := a.DeviceDetails(serial)
 	if err != nil {
 		return nil, err

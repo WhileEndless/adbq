@@ -74,6 +74,10 @@ export function BrowseCodeshare(arg1) {
   return window['go']['main']['App']['BrowseCodeshare'](arg1);
 }
 
+export function CacheDomains() {
+  return window['go']['main']['App']['CacheDomains']();
+}
+
 export function CancelTask(arg1) {
   return window['go']['main']['App']['CancelTask'](arg1);
 }
