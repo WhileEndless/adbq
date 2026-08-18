@@ -34,19 +34,32 @@ export interface Packet {
 
 const TRUE: Pred = () => true;
 
-export interface ParsedFilter { pred: Pred; error: string }
+export interface ParsedFilter {
+  pred: Pred;
+  error: string;
+  /**
+   * True when the filter matches everything, either because it is blank or
+   * because it failed to parse and degraded to "show all".
+   *
+   * Callers use it to skip the walk: running a match-everything predicate over
+   * a hundred thousand packets several times a second produces a copy of the
+   * list it started from, which is the common case — most of the time nobody
+   * has typed a filter.
+   */
+  isEmpty: boolean;
+}
 
 export function parseFilter(input: string): ParsedFilter {
   const text = (input || '').trim();
-  if (!text) return {pred: TRUE, error: ''};
+  if (!text) return {pred: TRUE, error: '', isEmpty: true};
   try {
     const toks = tokenize(text);
     const p = new Parser(toks);
     const pred = p.parseExpr();
     if (!p.eof()) throw new Error(`unexpected token '${p.peek()!.text}'`);
-    return {pred, error: ''};
+    return {pred, error: '', isEmpty: false};
   } catch (e) {
-    return {pred: TRUE, error: e instanceof Error ? e.message : String(e)};
+    return {pred: TRUE, error: e instanceof Error ? e.message : String(e), isEmpty: true};
   }
 }
 

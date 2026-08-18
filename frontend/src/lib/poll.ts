@@ -24,7 +24,15 @@ export function useVisible(): boolean {
   const [visible, setVisible] = useState(() =>
     typeof document === 'undefined' ? true : !document.hidden);
   useEffect(() => {
-    const onChange = () => setVisible(!document.hidden);
+    const onChange = () => {
+      const v = !document.hidden;
+      setVisible(v);
+      // Mirror the state onto the body so CSS can pause the indefinite
+      // animations too — an infinite keyframe keeps the compositor ticking
+      // even when there is nothing to see.
+      document.body.classList.toggle('hidden-window', !v);
+    };
+    onChange();
     document.addEventListener('visibilitychange', onChange);
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);

@@ -27,6 +27,19 @@ interface ProcSnapshot {
 type SortKey = 'cpu' | 'mem' | 'rss' | 'pid' | 'name';
 const INTERVALS = [1, 2, 5] as const;
 
+// Row geometry, kept in sync with `.dt-row { height: 32px }` in styles.css.
+// The list is windowed: only the rows intersecting the viewport (plus a small
+// overscan) exist in the DOM. A real device reports a thousand to fifteen
+// hundred processes and the whole table is replaced every couple of seconds —
+// rendering all of it meant reconciling some nine thousand elements per tick,
+// which was the most expensive thing this application did to a machine.
+const ROW_H = 32;
+const OVERSCAN = 8;
+
+// Column widths, shared by the header and the rows so they line up without a
+// table layout pass.
+const GRID = '70px 100px 70px 70px 90px 32px minmax(0, 1fr)';
+
 export function ProcessesScreen({device}: {device: adb.Device}) {
   const [snap, setSnap] = useState<ProcSnapshot | null>(null);
   const [search, setSearch] = useState('');
@@ -36,6 +49,9 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [running, setRunning] = useState(false);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(0);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
   // The procfs sweep behind this table, as the user it is being read by: the
@@ -100,12 +116,35 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
     return out;
   }, [rows, search, sortKey, sortDesc]);
 
+  // Window bounds over the sorted list.
+  const rowsPerScreen = Math.max(10, Math.ceil((viewportH || 600) / ROW_H));
+  const first = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
+  const last = Math.min(filteredSorted.length, first + rowsPerScreen + OVERSCAN * 2);
+  const visible = filteredSorted.slice(first, last);
+
+  // Track the scroll viewport so the window covers it without reading layout
+  // during render.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => setViewportH(el.clientHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // One pass, not four. A process table is a thousand-odd rows replaced
+  // wholesale every couple of seconds, so a filter plus two reduces is three
+  // extra walks of it for four numbers.
   const stats = useMemo(() => {
-    const total = rows.length;
-    const root = rows.filter(r => r.user === 'root').length;
-    const topCpu = rows.reduce((m, r) => Math.max(m, r.cpu), 0);
-    const totalMem = rows.reduce((m, r) => m + r.rss, 0);
-    return {total, root, topCpu, totalMem};
+    let root = 0, topCpu = 0, totalMem = 0;
+    for (const r of rows) {
+      if (r.user === 'root') root++;
+      if (r.cpu > topCpu) topCpu = r.cpu;
+      totalMem += r.rss;
+    }
+    return {total: rows.length, root, topCpu, totalMem};
   }, [rows]);
 
   useEffect(() => {
@@ -159,35 +198,44 @@ export function ProcessesScreen({device}: {device: adb.Device}) {
         ))}
       </div>
 
-      <div style={{flex: 1, minHeight: 0, overflow: 'auto'}}>
-        <table className='table'>
-          <thead>
-            <tr>
-              <th style={{paddingLeft: 14, width: 70}}>PID</th>
-              <th style={{width: 100}}>User</th>
-              <th style={{width: 70}}>%CPU</th>
-              <th style={{width: 70}}>%MEM</th>
-              <th style={{width: 90}}>RSS</th>
-              <th style={{width: 32}}>S</th>
-              <th>Name</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSorted.map(r => (
-              <tr key={r.pid} onClick={() => setExpanded(e => ({...e, [r.pid]: !e[r.pid]}))} style={{cursor: 'pointer'}}>
-                <td style={{paddingLeft: 14}} className='mono'>{r.pid}</td>
-                <td className='mono muted'>{r.user}</td>
-                <td className='mono' style={{color: r.cpu > 50 ? 'var(--err)' : r.cpu > 10 ? 'var(--warn)' : undefined}}>{r.cpu.toFixed(1)}</td>
-                <td className='mono'>{r.mem.toFixed(1)}</td>
-                <td className='mono'>{fmtKB(r.rss)}</td>
-                <td><StateBadge s={r.state}/></td>
-                <td className='mono' style={{wordBreak: 'break-all'}}>
-                  {expanded[r.pid] ? r.cmdline : truncate(r.name, 80)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className='dt' style={{flex: 1, minHeight: 0}}>
+        <div className='dt-head' style={{gridTemplateColumns: GRID}}>
+          <div>PID</div>
+          <div>User</div>
+          <div>%CPU</div>
+          <div>%MEM</div>
+          <div>RSS</div>
+          <div>S</div>
+          <div>Name</div>
+        </div>
+        <div className='dt-body' ref={bodyRef} onScroll={e => setScrollTop(e.currentTarget.scrollTop)}>
+          {/* A spacer of the full list height keeps the scrollbar honest while
+              only the visible slice exists in the DOM. */}
+          <div style={{height: filteredSorted.length * ROW_H, position: 'relative'}}>
+            <div style={{position: 'absolute', top: first * ROW_H, left: 0, right: 0}}>
+              {visible.map(r => (
+                <div key={r.pid} className='dt-row' style={{gridTemplateColumns: GRID, cursor: 'pointer'}}
+                     title={r.cmdline || r.name}
+                     onClick={() => setExpanded(e => ({...e, [r.pid]: !e[r.pid]}))}>
+                  <div className='mono'>{r.pid}</div>
+                  <div className='mono muted'>{r.user}</div>
+                  <div className='mono' style={{color: r.cpu > 50 ? 'var(--err)' : r.cpu > 10 ? 'var(--warn)' : undefined}}>{r.cpu.toFixed(1)}</div>
+                  <div className='mono'>{r.mem.toFixed(1)}</div>
+                  <div className='mono'>{fmtKB(r.rss)}</div>
+                  <div><StateBadge s={r.state}/></div>
+                  {/* Clicking swaps the name for the full command line. It
+                      stays on one line and scrolls sideways rather than
+                      growing the row: a windowed list needs every row to be
+                      the same height, and a wrapped command line was the one
+                      thing that made rows unpredictable. */}
+                  <div className='mono' style={{overflowX: expanded[r.pid] ? 'auto' : 'hidden'}}>
+                    {expanded[r.pid] ? (r.cmdline || r.name) : r.name}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
         {!snap && (
           <div className='muted' style={{padding: 30, textAlign: 'center'}}>
             {running ? 'Waiting for top snapshot…' : 'Starting top…'}
@@ -239,8 +287,4 @@ function fmtKB(kb: number) {
   if (kb < 1024) return kb + ' K';
   if (kb < 1024 * 1024) return (kb / 1024).toFixed(1) + ' M';
   return (kb / 1024 / 1024).toFixed(2) + ' G';
-}
-
-function truncate(s: string, n: number) {
-  return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }

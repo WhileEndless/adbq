@@ -1105,6 +1105,22 @@ interface FridaRow {
  *
  * Returns null for messages that have nothing to display.
  */
+// Derived rows are cached per message.
+//
+// The console re-derives its row list whenever a batch arrives, and the
+// messages are append-only — so without this it rebuilt a row object for every
+// message in the buffer, up to five thousand of them, several times a second,
+// to discover that all but the newest few were unchanged. A WeakMap keyed on
+// the message means each is converted once and released with it.
+const rowCache = new WeakMap<adb.FridaMsg, FridaRow | null>();
+
+function fridaRowCached(m: adb.FridaMsg): FridaRow | null {
+  if (rowCache.has(m)) return rowCache.get(m) ?? null;
+  const r = fridaRow(m);
+  rowCache.set(m, r);
+  return r;
+}
+
 function fridaRow(m: adb.FridaMsg): FridaRow | null {
   const cat: FridaCat =
     m.kind === 'error' || m.kind === 'fatal' ? 'err'
@@ -1149,14 +1165,17 @@ function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
     const keep = new Set(cats);
     const out: FridaRow[] = [];
     for (const m of slice.messages) {
-      const r = fridaRow(m);
+      const r = fridaRowCached(m);
       if (!r) continue;
       if (!keep.has(r.cat)) continue;
       if (q && !r.text.toLowerCase().includes(q) && !r.tag.toLowerCase().includes(q)) continue;
       out.push(r);
     }
     return out;
-  }, [slice.messages, search, cats]);
+    // `slice.messages` is a ring mutated in place, so `rev` is what signals a
+    // change — the same arrangement the logcat and packet lists use.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slice.messages, slice.rev, search, cats]);
 
   // Keep the latest line in view while following. useLayoutEffect so the jump
   // lands in the same frame the rows paint, instead of flashing the old offset.
@@ -1247,7 +1266,17 @@ function FridaConsole({slice}: {slice: import('../store').FridaSessionSlice}) {
   );
 }
 
-function FridaLogLine({row, q}: {row: FridaRow; q: string}) {
+// Memoized, which is what keeps the console usable once the buffer fills.
+//
+// Frida output is free-form and wraps, so the rows are not a fixed height and
+// cannot be windowed the way the logcat and packet lists are. What can be
+// avoided is re-rendering them: the list is append-only and each row's props
+// are stable, so with a stable key React reconciles only the rows that are
+// actually new instead of all five thousand on every batch.
+//
+// `q` changes only when the (debounced) search text does, which is exactly when
+// every row's highlighting genuinely has to be recomputed.
+const FridaLogLine = React.memo(function FridaLogLine({row, q}: {row: FridaRow; q: string}) {
   const t = new Date(row.m.time).toLocaleTimeString(undefined, {hour12: false});
   return (
     <div className={`frida-line ${row.cat}`}>
@@ -1256,7 +1285,7 @@ function FridaLogLine({row, q}: {row: FridaRow; q: string}) {
       <span className='msg'>{highlight(row.text, q)}</span>
     </div>
   );
-}
+});
 
 function exportFridaLog(rows: FridaRow[], info: adb.FridaSessionInfo) {
   const header = `# adbq frida session export — ${info.package} — ${new Date().toISOString()}\n`

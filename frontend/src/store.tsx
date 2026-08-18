@@ -1,7 +1,7 @@
 // Cross-screen state store. Lives at App level so shell sessions, captures,
 // Frida sessions and per-device caches survive navigation between screens.
 // Logcat deliberately does NOT live here — see logcatStore.ts for why.
-import React, {createContext, useCallback, useContext, useEffect, useRef, useState} from 'react';
+import React, {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../wailsjs/go/models';
 import * as API from '../wailsjs/go/main/App';
 import {EventsOn, EventsOff} from '../wailsjs/runtime/runtime';
@@ -159,17 +159,34 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   }, []);
 
   // ── captures (cross-screen) ────────────────────────────────────────────
+  //
+  // The packet list is mutated in place and signalled by a counter, rather than
+  // replaced. Appending used to be `concat` followed by `slice`, which at the
+  // 100k-packet setting the UI offers meant copying a hundred thousand
+  // references twice per batch, five batches a second, and handing the garbage
+  // collector three arrays that size each time. The list is append-only with a
+  // fixed cap — exactly what a ring is for. logcatStore.ts does the same thing
+  // for the same reason, and says so.
   const [captures, setCaptures] = useState<Record<string, CaptureSlice>>({});
   const capturesRef = useRef(captures);
   capturesRef.current = captures;
   const capSubs = useRef<Record<string, () => void>>({});
+  // Packet arrays live here, outside React state, so appending does not have to
+  // produce a new one. `rev` on the slice is what tells React something changed.
+  const capPackets = useRef<Record<string, CapturePacket[]>>({});
+
+  const packetsFor = useCallback((serial: string): CapturePacket[] => {
+    return capPackets.current[serial] || (capPackets.current[serial] = []);
+  }, []);
 
   const getCapture = useCallback((serial: string): CaptureSlice => {
-    return capturesRef.current[serial] || {
-      active: false, packets: [], iface: 'any', bpf: '', preset: 0,
+    const cur = capturesRef.current[serial];
+    if (cur) return {...cur, packets: packetsFor(serial)};
+    return {
+      active: false, packets: packetsFor(serial), iface: 'any', bpf: '', preset: 0,
       displayFilter: '', maxPackets: 10000, state: null, rev: 0,
     };
-  }, []);
+  }, [packetsFor]);
 
   const setCaptureState = useCallback((serial: string, st: any) => {
     setCaptures(prev => ({...prev, [serial]: {...(prev[serial] || getCapture(serial)), state: st, active: !!st?.active}}));
@@ -180,12 +197,13 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   }, [getCapture]);
 
   const setCaptureMaxPackets = useCallback((serial: string, n: number) => {
+    const ring = packetsFor(serial);
+    if (ring.length > n) ring.splice(0, ring.length - n);
     setCaptures(prev => {
       const cur = prev[serial] || getCapture(serial);
-      const trimmed = cur.packets.length > n ? cur.packets.slice(cur.packets.length - n) : cur.packets;
-      return {...prev, [serial]: {...cur, maxPackets: n, packets: trimmed}};
+      return {...prev, [serial]: {...cur, maxPackets: n, rev: cur.rev + 1}};
     });
-  }, [getCapture]);
+  }, [getCapture, packetsFor]);
 
   const setCapturePreset = useCallback((serial: string, p: number, bpf: string) => {
     setCaptures(prev => ({...prev, [serial]: {...(prev[serial] || getCapture(serial)), preset: p, bpf}}));
@@ -195,30 +213,33 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
     setCaptures(prev => ({...prev, [serial]: {...(prev[serial] || getCapture(serial)), iface}}));
   }, [getCapture]);
 
-  const startCapture = useCallback(async (serial: string, iface: string, bpf: string, preset: number, maxPackets: number, mirrorMaxBytes: number) => {
+  const startCapture = useCallback(async (serial: string, iface: string, bpf: string, preset: number, maxPackets: number, mirrorMaxBytes: number) => { // eslint-disable-line
     // Tear down any prior subscription for the same serial so we don't double-
     // append packets after a "stop → start" cycle from the UI.
     if (capSubs.current[serial]) { capSubs.current[serial](); delete capSubs.current[serial]; }
+    capPackets.current[serial] = [];
     setCaptures(prev => ({...prev, [serial]: {
       ...(prev[serial] || getCapture(serial)),
       iface, bpf, preset, maxPackets,
-      packets: [], rev: 0, active: true, state: null,
+      rev: 0, active: true, state: null,
     }}));
     const st = await API.StartLiveCapture(serial, iface, bpf, {maxPackets, maxPcapBytes: mirrorMaxBytes});
     setCaptures(prev => ({...prev, [serial]: {...(prev[serial] || getCapture(serial)), state: st, active: !!st?.active}}));
     const ev = 'pcap:' + serial;
     EventsOn(ev, (batch: CapturePacket[]) => {
       if (!batch || !batch.length) return;
+      const ring = packetsFor(serial);
+      ring.push(...batch);
+      const cap = maxPackets || 10000;
+      if (ring.length > cap) ring.splice(0, ring.length - cap);
+      // The array is the same object; rev is what React sees change.
       setCaptures(prev => {
         const cur = prev[serial]; if (!cur) return prev;
-        const merged = cur.packets.concat(batch);
-        const cap = cur.maxPackets || 10000;
-        const next = merged.length > cap ? merged.slice(merged.length - cap) : merged;
-        return {...prev, [serial]: {...cur, packets: next, rev: cur.rev + 1}};
+        return {...prev, [serial]: {...cur, rev: cur.rev + 1}};
       });
     });
     capSubs.current[serial] = () => EventsOff(ev);
-  }, [getCapture]);
+  }, [getCapture, packetsFor]);
 
   const stopCapture = useCallback(async (serial: string) => {
     if (capSubs.current[serial]) { capSubs.current[serial](); delete capSubs.current[serial]; }
@@ -227,19 +248,23 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   }, []);
 
   const clearCapture = useCallback((serial: string) => {
-    setCaptures(prev => prev[serial] ? {...prev, [serial]: {...prev[serial], packets: [], rev: 0}} : prev);
+    capPackets.current[serial] = [];
+    setCaptures(prev => prev[serial] ? {...prev, [serial]: {...prev[serial], rev: 0}} : prev);
   }, []);
 
   // ── frida sessions (cross-screen) ───────────────────────────────────────
   const [fridaSessions, setFridaSessions] = useState<Record<string, FridaSessionSlice>>({});
   const fridaSessionsRef = useRef(fridaSessions);
   fridaSessionsRef.current = fridaSessions;
+  // Message lists live outside React state so appending does not copy them.
+  const fridaMsgs = useRef<Record<string, adb.FridaMsg[]>>({});
   const fridaSubs = useRef<Record<string, () => void>>({});
 
   // mergeFridaMsgs appends new messages, drops any whose seq we already hold
   // (the subscribe/backfill overlap window), keeps them seq-ordered, and rings.
   const mergeFridaMsgs = useCallback((id: string, incoming: adb.FridaMsg[]) => {
     if (!incoming || incoming.length === 0) return;
+    const ring = fridaMsgs.current[id] || (fridaMsgs.current[id] = []);
     setFridaSessions(prev => {
       const cur = prev[id];
       if (!cur) return prev;
@@ -247,10 +272,13 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
       const fresh = incoming.filter(m => m.seq > cur.lastSeq);
       if (fresh.length === 0) return prev;
       for (const m of fresh) if (m.seq > maxSeq) maxSeq = m.seq;
-      let merged = cur.messages.concat(fresh);
-      if (merged.length > FRIDA_MSG_MAX) merged = merged.slice(merged.length - FRIDA_MSG_MAX);
+      // Appended in place, like the packet ring: a session's console holds
+      // thousands of messages and copying the whole list per batch was work
+      // proportional to the history rather than to what arrived.
+      ring.push(...fresh);
+      if (ring.length > FRIDA_MSG_MAX) ring.splice(0, ring.length - FRIDA_MSG_MAX);
       const ended = fresh.some(m => m.kind === 'detached') || cur.ended;
-      return {...prev, [id]: {...cur, messages: merged, lastSeq: maxSeq, rev: cur.rev + 1, ended}};
+      return {...prev, [id]: {...cur, messages: ring, lastSeq: maxSeq, rev: cur.rev + 1, ended}};
     });
   }, []);
 
@@ -274,7 +302,7 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   // adoptFridaSession registers a session the backend already created (e.g. via
   // StartAppWithFrida's orchestration) so the store subscribes + backfills it.
   const adoptFridaSession = useCallback((info: adb.FridaSessionInfo) => {
-    setFridaSessions(prev => prev[info.id] ? prev : ({...prev, [info.id]: {info, messages: [], lastSeq: 0, rev: 0, ended: false}}));
+    setFridaSessions(prev => prev[info.id] ? prev : ({...prev, [info.id]: {info, messages: fridaMsgs.current[info.id] || (fridaMsgs.current[info.id] = []), lastSeq: 0, rev: 0, ended: false}}));
     attachFridaSession(info.id);
   }, [attachFridaSession]);
 
@@ -292,13 +320,16 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   }, []);
 
   const removeFridaSession = useCallback((id: string) => {
+    delete fridaMsgs.current[id];
     if (fridaSubs.current[id]) { fridaSubs.current[id](); delete fridaSubs.current[id]; }
     API.RemoveFridaSession(id).catch(() => {});
     setFridaSessions(prev => { const next = {...prev}; delete next[id]; return next; });
   }, []);
 
   const clearFridaSession = useCallback((id: string) => {
-    setFridaSessions(prev => prev[id] ? {...prev, [id]: {...prev[id], messages: [], rev: prev[id].rev + 1}} : prev);
+    const ring = fridaMsgs.current[id];
+    if (ring) ring.length = 0;
+    setFridaSessions(prev => prev[id] ? {...prev, [id]: {...prev[id], rev: prev[id].rev + 1}} : prev);
   }, []);
 
   // ── queued shell command for cross-screen hand-off ──────────────────────
@@ -330,14 +361,24 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
     };
   }, []);
 
-  const value: Store = {
+  const value: Store = useMemo(() => ({
     shells, openShell, writeShell, closeShell, clearShellBuf,
     getCapture, startCapture, stopCapture, clearCapture,
     setCaptureDisplayFilter, setCaptureMaxPackets, setCaptureState, setCapturePreset, setCaptureIface,
     fridaSessions, startFridaSession, adoptFridaSession, attachFridaSession, stopFridaSession, removeFridaSession, clearFridaSession,
     queueShellCmd, consumeShellCmd,
     requestFridaTab, consumeFridaTab,
-  };
+    // Rebuilt only when a piece of reactive state actually moves. The callbacks
+    // are all useCallback-stable, so this collapses to a no-op on renders
+    // caused by something else.
+  }), [
+    shells, openShell, writeShell, closeShell, clearShellBuf,
+    getCapture, startCapture, stopCapture, clearCapture,
+    setCaptureDisplayFilter, setCaptureMaxPackets, setCaptureState, setCapturePreset, setCaptureIface,
+    fridaSessions, startFridaSession, adoptFridaSession, attachFridaSession, stopFridaSession,
+    removeFridaSession, clearFridaSession,
+    queueShellCmd, consumeShellCmd, requestFridaTab, consumeFridaTab,
+  ]);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   void captures;
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;

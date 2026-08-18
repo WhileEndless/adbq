@@ -10,6 +10,7 @@ import {sdkLabel, rootUnavailableReason} from '../lib/android';
 import {deviceKey as cacheKey, getOrFetch, useDeviceData} from '../cache';
 import {APPS_STALE_MS} from '../App';
 import {usePoll} from '../lib/poll';
+import {SEARCH_DEBOUNCE_MS} from '../lib/logSearch';
 
 // App details (permissions, version, sizes) move only when the app itself is
 // installed, updated or cleared — all of which invalidate the apps domain from
@@ -82,10 +83,21 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
     API.IsAppRunning(device.id, sel.pkg).then(setRunning).catch(() => setRunning(null));
   }
 
+  // The search box is debounced like the ones on Logcat and Frida. With system
+  // apps shown this list runs to several hundred entries, all of them rendered,
+  // so filtering on every keystroke meant a full re-filter and a full re-render
+  // per character — the lag landed on typing, which is the worst place for it.
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(q), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const filtered = useMemo(() => {
-    const Q = q.toLowerCase();
-    return apps.filter(a => !Q || a.pkg.toLowerCase().includes(Q) || (a.name||'').toLowerCase().includes(Q));
-  }, [apps, q]);
+    const Q = query.toLowerCase();
+    if (!Q) return apps;
+    return apps.filter(a => a.pkg.toLowerCase().includes(Q) || (a.name || '').toLowerCase().includes(Q));
+  }, [apps, query]);
 
   function doAction(action: (s: string, p: string) => Promise<string>, label: string) {
     if (!sel) return;

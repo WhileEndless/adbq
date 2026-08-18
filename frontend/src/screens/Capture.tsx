@@ -119,7 +119,16 @@ export function CaptureScreen({device}: {device: adb.Device}) {
   // doesn't block — we degrade to "match everything" so typing mid-expression
   // doesn't hide the whole list.
   const parsed = useMemo(() => parseFilter(displayFilter), [displayFilter]);
-  const filtered = useMemo(() => packets.filter(parsed.pred), [packets, parsed]);
+  // `packets` is a ring mutated in place, so its identity never changes — `rev`
+  // is what signals new data (the same arrangement the logcat pane uses). An
+  // unfiltered view skips the walk entirely: at the 100k setting, filtering to
+  // "everything" was copying a hundred thousand references several times a
+  // second to produce a list identical to the one it started from.
+  const filtered = useMemo(
+    () => (parsed.isEmpty ? packets : packets.filter(parsed.pred)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [packets, parsed, slice.rev],
+  );
 
   // Virtual window over `filtered`. The sticky header occupies the first row, so
   // offset the inner scroll position by one row height.
