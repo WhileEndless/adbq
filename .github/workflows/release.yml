@@ -1,8 +1,13 @@
 name: release
 
-# Build native binaries for macOS, Windows, and Linux on their own runners
-# (Wails cannot reliably cross-compile a webview app between OSes) and attach
-# them to a GitHub Release. Triggered by pushing a semver tag, e.g. `v0.1.0-beta`.
+# Build the macOS binary and attach it to a GitHub Release. Triggered by
+# pushing a semver tag, e.g. `v0.1.0-beta`.
+#
+# macOS only: that is the platform adbq is developed on, run on, and actually
+# verified against hardware. The Go and React code has no macOS-specific
+# assumptions and Wails targets the others, but shipping a build nobody has
+# ever launched is a promise this project cannot keep — an untested download
+# in a Releases page reads as support.
 on:
   push:
     tags:
@@ -42,20 +47,11 @@ jobs:
     needs: [verify-version]
     # workflow_dispatch has no verify-version job, so don't hard-require it.
     if: always() && (needs.verify-version.result == 'success' || needs.verify-version.result == 'skipped')
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            platform: darwin/universal
-            artifact: adbq-macos-universal
-          - os: windows-latest
-            platform: windows/amd64
-            artifact: adbq-windows-amd64
-          - os: ubuntu-22.04
-            platform: linux/amd64
-            artifact: adbq-linux-amd64
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
+    env:
+      # Universal, so one download runs on both Apple Silicon and Intel.
+      PLATFORM: darwin/universal
+      ARTIFACT: adbq-macos-universal
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -67,12 +63,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
-
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
@@ -87,46 +77,20 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          wails build -platform ${{ matrix.platform }} -clean -trimpath \
+          wails build -platform "$PLATFORM" -clean -trimpath \
             -ldflags "-s -w -X adbq/internal/version.Version=${{ steps.ver.outputs.version }}"
 
-      - name: Package (macOS)
-        if: runner.os == 'macOS'
+      - name: Package
         run: |
           cd build/bin
-          ditto -c -k --keepParent adbq.app "../../${{ matrix.artifact }}.zip"
-
-      # A bare binary in a tarball has no icon and no launcher entry, so the app
-      # shows up as a generic window with a generic name. Ship the desktop entry
-      # and the icon in the layout `install` expects, plus a script that puts
-      # them where the desktop environment looks.
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          stage="pkg/adbq"
-          mkdir -p "$stage/share/applications" "$stage/share/icons/hicolor/512x512/apps"
-          cp build/bin/adbq "$stage/adbq"
-          chmod +x "$stage/adbq"
-          cp build/linux/adbq.desktop "$stage/share/applications/adbq.desktop"
-          cp build/linux/adbq.png "$stage/share/icons/hicolor/512x512/apps/adbq.png"
-          cp build/linux/install.sh "$stage/install.sh"
-          chmod +x "$stage/install.sh"
-          tar -czf "${{ matrix.artifact }}.tar.gz" -C pkg adbq
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Compress-Archive -Path build/bin/adbq.exe -DestinationPath "${{ matrix.artifact }}.zip"
+          ditto -c -k --keepParent adbq.app "../../$ARTIFACT.zip"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ matrix.artifact }}
-          path: |
-            ${{ matrix.artifact }}.zip
-            ${{ matrix.artifact }}.tar.gz
-          if-no-files-found: ignore
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}.zip
+          if-no-files-found: error
 
   release:
     needs: [build]
@@ -145,7 +109,7 @@ jobs:
           cd dist
           shopt -s nullglob
           # Write outside dist first so the sums file can't hash itself.
-          sha256sum *.zip *.tar.gz > ../SHA256SUMS.txt
+          sha256sum *.zip > ../SHA256SUMS.txt
           mv ../SHA256SUMS.txt .
           cat SHA256SUMS.txt
       - name: Create or update the GitHub Release

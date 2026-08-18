@@ -10,17 +10,14 @@
 [![release](https://img.shields.io/github/v/release/WhileEndless/adbq?include_prereleases&sort=semver)](https://github.com/WhileEndless/adbq/releases)
 [![CI](https://github.com/WhileEndless/adbq/actions/workflows/ci.yml/badge.svg)](https://github.com/WhileEndless/adbq/actions/workflows/ci.yml)
 [![Lisans: MIT](https://img.shields.io/badge/Lisans-MIT-blue.svg)](LICENSE)
-[![Platformlar](https://img.shields.io/badge/platformlar-macOS%20%7C%20Windows%20%7C%20Linux-informational)](#indirme)
+[![Platform](https://img.shields.io/badge/platform-macOS-informational)](#indirme)
 
 **adbq**, günlük Android hata ayıklama işlerini — logcat, shell, uygulama
 yönetimi, dosya aktarımı, port yönlendirme, frida-server, ağ/proxy kontrolü,
 paket yakalama, iptables ve ekran görüntüsü — hızlı, klavye dostu,
-Linear/Raycast tarzı bir arayüzde toplayan çapraz platform bir masaüstü ADB
+Linear/Raycast tarzı bir arayüzde toplayan, macOS için bir masaüstü ADB
 yöneticisidir. [Wails v2](https://wails.io) (Go arka uç + React/TypeScript ön
-yüz) ile geliştirilmiştir ve macOS, Windows ve Linux üzerinde küçük bir yerel
-ikili (binary) olarak çalışır — neyin gerçekten denendiği, neyin yalnızca
-derlendiği için [Platform durumu](#platform-durumu--gerçekte-ne-deneniyor)
-bölümüne bakın.
+yüz) ile geliştirilmiştir ve küçük bir yerel ikili (binary) olarak çalışır.
 
 > 🇬🇧 **English:** For the English version of this document see
 > [README.md](README.md).
@@ -33,7 +30,7 @@ bölümüne bakın.
 - [İndirme](#indirme)
 - [Gereksinimler](#gereksinimler)
 - [Kaynaktan derleme](#kaynaktan-derleme)
-- [Çapraz platform derlemeler](#çapraz-platform-derlemeler)
+- [Derlemeler](#derlemeler)
 - [Kullanım notları ve sınırlamalar](#kullanım-notları-ve-sınırlamalar)
 - [Sürümleme ve yayınlar](#sürümleme-ve-yayınlar)
 - [Mimari](#mimari)
@@ -90,14 +87,12 @@ bölümüne bakın.
 
 ## İndirme
 
-İşletim sisteminiz için hazır ikiliyi
+Hazır ikiliyi
 **[Releases sayfasından](https://github.com/WhileEndless/adbq/releases)** indirin:
 
 | İşletim Sistemi | Dosya | Çalıştırma |
 |----|-------|-----|
 | **macOS** (Apple Silicon + Intel) | `adbq-macos-universal.zip` | Aç → `adbq.app`'i Uygulamalar'a sürükle |
-| **Windows** (x64) | `adbq-windows-amd64.zip` | Aç → `adbq.exe`'yi çalıştır |
-| **Linux** (x64) | `adbq-linux-amd64.tar.gz` | `tar -xzf … && adbq/adbq` — ya da simgeli menü girdisi için `adbq/install.sh` |
 
 Elinizdeki sürümü her an doğrulayın:
 
@@ -108,20 +103,9 @@ adbq --version      # ayrıca: -v veya `version`
 > **macOS Gatekeeper:** derlemeler henüz imzalı/noter onaylı değil, bu yüzden ilk
 > açılış engellenebilir. Uygulamaya sağ tık → **Aç**, ya da karantina bayrağını
 > temizleyin: `xattr -cr /Applications/adbq.app`.
->
-> **Linux çalışma zamanı bağımlılıkları:** WebKit GTK çalışma zamanı yoksa
-> kurun — örn. `sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37`.
 
-### Platform durumu — gerçekte ne deneniyor
-
-| Platform | Durum |
-|---|---|
-| **macOS** | Burada geliştiriliyor ve kullanılıyor. Bu belgedeki her şey macOS'ta çalıştırılıyor. |
-| **Linux** | CI'da derleniyor ve platform yolları bağlı (`~/Android/Sdk`, Java için `/usr/lib/jvm`, `xdg-open`, scrcpy, kurulabilir masaüstü girdisi). Yazar tarafından rutin olarak çalıştırılmıyor; "çalışması beklenir" deyin, "doğrulandı" demeyin. İkili **WebKit GTK 4.0**'a bağlanıyor — yalnızca 4.1 gönderen dağıtımlarda (Ubuntu 24.04+, Fedora 40+) 4.0 çalışma zamanı kurulmadıkça uygulama açılmaz. |
-| **Windows** | CI'da derleniyor ve host entegrasyonlarının çoğu var (`.bat`/`.exe` araç adları, `%LOCALAPPDATA%` SDK kökü, WebView2, Explorer'da gösterme). **Yazar tarafından test edilmedi ve etkileşimli Shell ekranı çalışmıyor**: sözde terminal (PTY) gerekiyor, adbq bunu Windows'ta uygulamadı. Geri kalanı — logcat, uygulamalar, dosyalar, forward'lar, ağ, capture — için bilinen bir Windows engeli yok; ama "bilinen engel yok", "denendi" ile aynı şey değil. |
-
-Linux ya da Windows'ta çalıştırırsan, neyin bozulduğunu (ya da hiçbir şeyin
-bozulmadığını) yazan bir issue gerçekten işe yarar.
+adbq macOS üzerinde geliştiriliyor, çalıştırılıyor ve yayınlanıyor. Bu belgedeki
+her şey orada deneniyor.
 
 ## Gereksinimler
 
@@ -135,10 +119,7 @@ adbq'yu **çalıştırmak** için yalnızca Android Platform Tools gerekir:
 - **Go 1.23+**
 - **Node.js 18+** (20+ önerilir)
 - **Wails v2 CLI**: `go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0`
-- `wails doctor`'ın sağlıklı raporladığı platform araç zinciri:
-  - **macOS:** Xcode komut satırı araçları
-  - **Windows:** WebView2 çalışma zamanı (Windows 10/11'de yerleşik) + bir C derleyici (MinGW veya MSVC)
-  - **Linux:** `gcc`, `libgtk-3-dev`, `libwebkit2gtk-4.0-dev`
+- **Xcode komut satırı araçları** — ya da `wails doctor` ne eksik diyorsa
 
 ## Kaynaktan derleme
 
@@ -167,33 +148,26 @@ Sık kullanılan Makefile hedefleri (argümansız `make` hepsini listeler):
 | `make version` | Sürümü yazdırır (tek doğru kaynak) |
 | `make doctor` | `wails doctor` |
 
-## Çapraz platform derlemeler
+## Derlemeler
 
-Wails uygulamaları her işletim sistemi için yerel bir webview gömer (macOS/Linux'ta
-WebKit, Windows'ta WebView2) ve CGO kullanır; bu yüzden **bir ikili, hedeflediği
-işletim sisteminde derlenmelidir** — tek bir makineden macOS `.app`, Windows
-`.exe` ve Linux ELF dosyasını güvenilir şekilde çapraz derleyemezsiniz.
+Wails uygulaması yerel bir webview gömer ve CGO kullanır; bu yüzden bir ikili,
+hedeflediği işletim sisteminde derlenmelidir. **Aynı** işletim sisteminin farklı
+mimarileri ise çapraz derlenebilir — tek bir indirmenin hem Apple Silicon'da hem
+Intel'de çalışmasının yolu bu: `make build-mac` universal `.app` üretir,
+`make build-mac-intel` yalnızca Intel'i, `make build-target PLATFORM=os/arch` ise
+istediğiniz hedefi zorlar.
 
-Ancak **aynı işletim sisteminin farklı mimarileri** yerel olarak çapraz
-derlenebilir — örn. Apple Silicon bir Mac'te `make build-mac-intel` (veya
-`make build-target PLATFORM=darwin/amd64`) ile Intel/x86_64 derlemesi,
-`make build-mac` ile de universal bir `.app` üretebilirsiniz.
-`make build-target PLATFORM=os/arch`, zorlamak istediğiniz her hedef için genel
-bir çıkış kapısıdır.
-
-İşletim sistemleri arası dağıtım için adbq, her hedefi kendi yerel runner'ında
-derleyip çıktıları yayınlayan bir **GitHub Actions matrisi** kullanır:
+CI aynı işi GitHub runner'larında yapar:
 
 - **[`.github/workflows/ci.yml`](.github/workflows/ci.yml)** — her push/PR'da
-  macOS + Windows + Linux üzerinde derler ve vet/gofmt/test çalıştırır. Bu,
-  uygulamanın her yerde derlendiğinin kanıtıdır.
+  vet, gofmt ve birim testleri, artı tam bir macOS derlemesi.
 - **[`.github/workflows/release.yml`](.github/workflows/release.yml)** — push
-  edilen bir `v*` etiketinde her üçünü derler, ardından bir GitHub Release
-  oluşturup `adbq-macos-universal.zip`, `adbq-windows-amd64.zip` ve
-  `adbq-linux-amd64.tar.gz` dosyalarını yükler.
+  edilen bir `v*` etiketinde universal `.app`'i derler, ardından
+  `adbq-macos-universal.zip` ve SHA-256 toplamıyla bir GitHub Release oluşturur.
 
-Yani tüm platformlar için ikili yayınlamak üzere üç makineye ihtiyacınız yok —
-sadece bir etiket push edin (aşağıya bakın), gerisini CI halletsin.
+Makefile'da başka işletim sistemleri için hedefler, Go tarafında da onların
+platform yolları duruyor; yani başka yerde derlemek mümkün — sadece
+yayınlanmıyor, çünkü kimsenin çalıştırmadığı bir indirmenin arkasında durulamaz.
 
 ## Kullanım notları ve sınırlamalar
 

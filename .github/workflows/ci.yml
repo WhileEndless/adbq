@@ -1,7 +1,12 @@
 name: ci
 
-# Fast feedback that the app still builds and tests pass on every supported OS.
-# The heavier, artifact-producing build lives in release.yml (tag-triggered).
+# Fast feedback that the app still builds and its tests pass. The heavier,
+# artifact-producing build lives in release.yml (tag-triggered).
+#
+# The packaged build runs on macOS only, because that is the only platform adbq
+# ships. Note that the test job below still compiles the whole Go side on Linux,
+# so a portability regression is caught there without paying for a full Wails
+# build of a target nobody downloads.
 on:
   push:
     branches: [main]
@@ -36,17 +41,7 @@ jobs:
         run: go test ./...
 
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            platform: darwin/universal
-          - os: windows-latest
-            platform: windows/amd64
-          - os: ubuntu-22.04
-            platform: linux/amd64
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -56,13 +51,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
         shell: bash
-        run: wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-s -w"
+        run: wails build -platform darwin/universal -clean -trimpath -ldflags "-s -w"

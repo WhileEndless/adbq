@@ -10,14 +10,14 @@
 [![release](https://img.shields.io/github/v/release/WhileEndless/adbq?include_prereleases&sort=semver)](https://github.com/WhileEndless/adbq/releases)
 [![CI](https://github.com/WhileEndless/adbq/actions/workflows/ci.yml/badge.svg)](https://github.com/WhileEndless/adbq/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-informational)](#download)
+[![Platform](https://img.shields.io/badge/platform-macOS-informational)](#download)
 
-**adbq** is a cross-platform desktop ADB manager that wraps the common
+**adbq** is a desktop ADB manager for macOS that wraps the common
 day-to-day Android-debugging workflows — logcat, shell, app management, file
 transfer, port forwards, frida-server, network/proxy control, packet capture,
 iptables, and screenshots — in a fast, keyboard-friendly, Linear/Raycast-style
 UI. Built with [Wails v2](https://wails.io) (Go backend + React/TypeScript
-frontend), it ships as a small native binary on macOS, Windows, and Linux —
+frontend), it ships as a small native binary —
 though see [Platform status](#platform-status--what-is-actually-tried) for what
 is genuinely exercised and what merely builds.
 
@@ -31,7 +31,7 @@ is genuinely exercised and what merely builds.
 - [Download](#download)
 - [Requirements](#requirements)
 - [Build from source](#build-from-source)
-- [Cross-platform builds](#cross-platform-builds)
+- [Builds](#builds)
 - [Usage notes & caveats](#usage-notes--caveats)
 - [Versioning & releases](#versioning--releases)
 - [Architecture](#architecture)
@@ -92,8 +92,6 @@ Grab a prebuilt binary for your OS from the
 | OS | Asset | Run |
 |----|-------|-----|
 | **macOS** (Apple Silicon + Intel) | `adbq-macos-universal.zip` | Unzip → drag `adbq.app` to Applications |
-| **Windows** (x64) | `adbq-windows-amd64.zip` | Unzip → run `adbq.exe` |
-| **Linux** (x64) | `adbq-linux-amd64.tar.gz` | `tar -xzf … && adbq/adbq` — or `adbq/install.sh` for a launcher entry with the icon |
 
 Verify what you have at any time:
 
@@ -104,20 +102,9 @@ adbq --version      # also: -v, or `version`
 > **macOS Gatekeeper:** the builds are not code-signed/notarized yet, so the
 > first launch may be blocked. Either right-click the app → **Open**, or clear
 > the quarantine flag: `xattr -cr /Applications/adbq.app`.
->
-> **Linux runtime deps:** install the WebKit GTK runtime if it is missing —
-> e.g. `sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37`.
 
-### Platform status — what is actually tried
-
-| Platform | State |
-|---|---|
-| **macOS** | Developed and used here. Everything in this README is exercised on it. |
-| **Linux** | Builds in CI and the platform paths are wired (SDK under `~/Android/Sdk`, `/usr/lib/jvm` for Java, `xdg-open`, scrcpy, an installable desktop entry). Not routinely run by the author, so treat it as expected-to-work rather than verified. The binary links against **WebKit GTK 4.0** — distros that ship only 4.1 (Ubuntu 24.04+, Fedora 40+) need the 4.0 runtime installed, or the app will not start. |
-| **Windows** | Builds in CI and most host integrations exist (`.bat`/`.exe` tool names, `%LOCALAPPDATA%` SDK root, WebView2, Explorer reveal). **Untested by the author, and the interactive Shell screen does not work**: it needs a pseudo-terminal, which adbq has not implemented on Windows. Everything else — logcat, apps, files, forwards, network, capture — has no known Windows-specific blocker, but "no known blocker" is not the same as "tried". |
-
-If you run it on Linux or Windows, an issue saying what broke (or that nothing
-did) is genuinely useful.
+adbq is developed, run and released on macOS. Everything in this README is
+exercised there.
 
 ## Requirements
 
@@ -131,10 +118,7 @@ To **build from source** you additionally need:
 - **Go 1.23+**
 - **Node.js 18+** (20+ recommended)
 - The **Wails v2 CLI**: `go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0`
-- Platform toolchain that `wails doctor` reports as healthy:
-  - **macOS:** Xcode command-line tools
-  - **Windows:** WebView2 runtime (preinstalled on Windows 10/11) + a C compiler (MinGW or MSVC)
-  - **Linux:** `gcc`, `libgtk-3-dev`, `libwebkit2gtk-4.0-dev`
+- **Xcode command-line tools** — or whatever `wails doctor` reports as missing
 
 ## Build from source
 
@@ -163,32 +147,26 @@ Common Makefile targets (`make` with no args prints them all):
 | `make version` | Print the version (single source of truth) |
 | `make doctor` | `wails doctor` |
 
-## Cross-platform builds
+## Builds
 
-Wails apps embed a native webview per OS (WebKit on macOS/Linux, WebView2 on
-Windows) and use CGO, so **a binary must be built on the OS it targets** — you
-cannot reliably cross-compile a macOS `.app`, a Windows `.exe`, and a Linux ELF
-from a single machine.
+A Wails app embeds a native webview and uses CGO, so a binary must be built on
+the OS it targets. Architectures of the *same* OS do cross-build, which is how
+one download serves both Apple Silicon and Intel: `make build-mac` produces the
+universal `.app`, `make build-mac-intel` an Intel-only one, and
+`make build-target PLATFORM=os/arch` forces any target you want.
 
-Different **architectures of the same OS**, however, *do* cross-build locally —
-e.g. on an Apple-Silicon Mac you can produce an Intel/x86_64 build with
-`make build-mac-intel` (or `make build-target PLATFORM=darwin/amd64`), and a
-universal `.app` with `make build-mac`. `make build-target PLATFORM=os/arch` is
-the generic escape hatch for any target you want to force.
+CI does the same thing on GitHub's runners:
 
-adbq handles this with a **GitHub Actions matrix** that builds each target on
-its own native runner and publishes the artifacts:
-
-- **[`.github/workflows/ci.yml`](.github/workflows/ci.yml)** — on every push/PR,
-  builds on macOS + Windows + Linux and runs vet/gofmt/tests. This is the proof
-  that the app compiles everywhere.
+- **[`.github/workflows/ci.yml`](.github/workflows/ci.yml)** — on every push/PR:
+  vet, gofmt and the unit tests, plus a full macOS build.
 - **[`.github/workflows/release.yml`](.github/workflows/release.yml)** — on a
-  pushed `v*` tag, builds all three, then creates a GitHub Release and uploads
-  `adbq-macos-universal.zip`, `adbq-windows-amd64.zip`, and
-  `adbq-linux-amd64.tar.gz`.
+  pushed `v*` tag: builds the universal `.app`, then creates a GitHub Release
+  with `adbq-macos-universal.zip` and its SHA-256 sum.
 
-So to ship binaries for all platforms you don't need three machines — just push
-a tag (see below) and let CI produce the downloads.
+The Makefile still has targets for other operating systems and the Go code
+carries their platform paths, so building elsewhere is possible — it is simply
+not released, because a download nobody has launched is not something this
+project can stand behind.
 
 ## Usage notes & caveats
 
