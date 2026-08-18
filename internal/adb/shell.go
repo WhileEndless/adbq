@@ -163,6 +163,20 @@ func (s *ShellSession) Resize(cols, rows uint16) error {
 	return pty.Setsize(s.pty, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
+// FlushTee pushes anything the tee has buffered to disk.
+//
+// The scrollback writer batches its appends, so a log being read while its
+// session is still open would otherwise be missing its newest output — the
+// part someone reading it is most likely after.
+func (s *ShellSession) FlushTee() {
+	s.teeMu.Lock()
+	t := s.tee
+	s.teeMu.Unlock()
+	if f, ok := t.(interface{ Flush() error }); ok {
+		_ = f.Flush()
+	}
+}
+
 // SetTee redirects a copy of all PTY output to w. Used to persist scrollback
 // to ~/.adbq/scrollback so it survives an app restart.
 func (s *ShellSession) SetTee(w io.Writer) {

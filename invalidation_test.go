@@ -49,6 +49,7 @@ var mutatingVerbs = []string{
 var exemptBindings = map[string]string{
 	// ── Pure host-side UI/session state; nothing on the device moves. ──
 	"SetLogcatSystem":         "flips a host-side line filter on a running feed; no device call",
+	"SetLogcatQuiet":          "stops/resumes event delivery to the UI; the device stream is untouched",
 	"ClearLogcat":             "drops buffered lines between device and UI; device log untouched",
 	"StopLogcat":              "tears down a host-side subscription",
 	"EnsureLogcat":            "starts/keeps a read-only log stream",

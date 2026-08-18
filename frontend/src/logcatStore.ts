@@ -126,6 +126,20 @@ class LogcatStore {
     this.ensure(serial, pkgFilter);
   }
 
+  /**
+   * Tells the backend whether anything is displaying this device's log.
+   *
+   * The feed used to keep delivering for the rest of the session after the
+   * screen was visited once — ten events a second, JSON-encoded and pushed
+   * across the bridge into a ring nobody was rendering. The device stream stays
+   * up while quiet, so returning to the screen still shows the history; only
+   * the delivery stops.
+   */
+  setVisible(serial: string, visible: boolean) {
+    if (!serial) return;
+    API.SetLogcatQuiet(serial, !visible).catch(() => {});
+  }
+
   setPaused(serial: string, paused: boolean) {
     if (paused) this.frozen[serial] = (this.rings[serial] || []).slice();
     else delete this.frozen[serial];

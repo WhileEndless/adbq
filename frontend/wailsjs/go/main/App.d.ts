@@ -417,6 +417,8 @@ export function SetJadxPath(arg1:string):Promise<adb.JadxInfo>;
 
 export function SetJavaPath(arg1:string):Promise<adb.JadxInfo>;
 
+export function SetLogcatQuiet(arg1:string,arg2:boolean):Promise<void>;
+
 export function SetLogcatSystem(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetProxy(arg1:string,arg2:string):Promise<string>;

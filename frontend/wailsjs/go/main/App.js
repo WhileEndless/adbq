@@ -830,6 +830,10 @@ export function SetJavaPath(arg1) {
   return window['go']['main']['App']['SetJavaPath'](arg1);
 }
 
+export function SetLogcatQuiet(arg1, arg2) {
+  return window['go']['main']['App']['SetLogcatQuiet'](arg1, arg2);
+}
+
 export function SetLogcatSystem(arg1, arg2) {
   return window['go']['main']['App']['SetLogcatSystem'](arg1, arg2);
 }

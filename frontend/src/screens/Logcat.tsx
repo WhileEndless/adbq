@@ -59,6 +59,11 @@ export function LogcatScreen({device}: {device: adb.Device}) {
   // on every mount — including StrictMode's double mount.
   useEffect(() => {
     logcatStore.ensure(device.id, logcatStore.getState(device.id).pkgFilter);
+    // While this screen is mounted the backend delivers; when it is not, the
+    // stream keeps running but stops emitting. Also covers the window being
+    // minimised — there is nothing to render into either way.
+    logcatStore.setVisible(device.id, true);
+    return () => logcatStore.setVisible(device.id, false);
   }, [device.id]);
 
   // The logcat invocation actually feeding this pane, pid filter and all. Only

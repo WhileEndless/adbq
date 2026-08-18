@@ -64,6 +64,16 @@ type logcatFeed struct {
 	// healthy subscription from a hollow one.
 	dead atomic.Bool
 
+	// quiet suppresses event delivery while nothing is displaying the log.
+	//
+	// The feed used to run at full volume for the rest of the session after the
+	// user visited the Logcat screen once: the adb stream, a proc-table refresh
+	// every few seconds, and ten events a second crossing the webview bridge to
+	// a component that had unmounted. The stream stays up — a log people come
+	// back to should not have a hole in it — but nothing is delivered until
+	// somebody is looking.
+	quiet atomic.Bool
+
 	lines  chan adb.LogEntry
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -180,6 +190,18 @@ func (f *logcatFeed) attach(ctx context.Context, pid, tailLines int) error {
 // SetShowSystem flips the OS-line filter on a running feed. Lines already
 // dropped are not recovered — only what arrives from here on is affected.
 func (f *logcatFeed) SetShowSystem(v bool) { f.sys.Store(v) }
+
+// SetQuiet stops or resumes delivery to the UI. The device stream keeps running
+// either way; only the events stop.
+func (f *logcatFeed) SetQuiet(v bool) { f.quiet.Store(v) }
+
+// send delivers a batch unless the feed is quiet.
+func (f *logcatFeed) send(entries []adb.LogEntry) {
+	if f.quiet.Load() || len(entries) == 0 {
+		return
+	}
+	f.emit(f.ev, entries)
+}
 
 func (f *logcatFeed) Stop() {
 	f.cancel()
@@ -303,7 +325,7 @@ func (f *logcatFeed) batch(ctx context.Context) {
 		if len(buf) == 0 {
 			return
 		}
-		f.emit(f.ev, buf)
+		f.send(buf)
 		buf = make([]adb.LogEntry, 0, maxBatch)
 	}
 	for {
@@ -328,7 +350,7 @@ func (f *logcatFeed) batch(ctx context.Context) {
 			flush()
 			if n := f.dropped.Swap(0); n > 0 {
 				// Say so rather than leaving an unexplained gap in the log.
-				f.emit(f.ev, []adb.LogEntry{{
+				f.send([]adb.LogEntry{{
 					Level: "W", Tag: "adbq",
 					Msg: fmt.Sprintf("dropped %d line(s): the UI could not keep up with the device", n),
 				}})

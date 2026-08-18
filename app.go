@@ -834,6 +834,10 @@ func (a *App) SaveLivePcap(serial string) (string, error) {
 	if st == nil || st.PcapPath == "" {
 		return "", fmt.Errorf("no pcap mirror available for %s", serial)
 	}
+	// The mirror is written through a buffer, so the newest packets may not be
+	// on disk yet. Saving without this quietly drops the tail of the capture —
+	// the part the user most likely just watched arrive.
+	a.client.Live.FlushMirror(serial)
 	dst, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Save live capture (.pcap)",
 		DefaultFilename: "adbq-live-" + serial + ".pcap",
@@ -1178,6 +1182,21 @@ func (a *App) LogcatCommands(serial string) adb.StreamCommands {
 	return adb.StreamCommands{Stream: stream, Clear: clear}
 }
 
+// SetLogcatQuiet stops or resumes logcat event delivery for a device.
+//
+// Called when the Logcat screen mounts and unmounts. The stream keeps running
+// while quiet — the ring behind it is what makes coming back to the screen
+// useful — but the events stop, and with them the JSON encoding, the bridge
+// crossings and the React work for a component that is not on screen.
+func (a *App) SetLogcatQuiet(serial string, quiet bool) {
+	a.mu.Lock()
+	f := a.logcats[serial]
+	a.mu.Unlock()
+	if f != nil {
+		f.SetQuiet(quiet)
+	}
+}
+
 // SetLogcatSystem toggles OS-line visibility on the running feed without
 // restarting adb, so flipping the switch is instant and loses nothing that is
 // already on screen.
@@ -1357,24 +1376,89 @@ func (a *App) OpenShell(serial string, root bool) (string, error) {
 	a.shellMu.Lock()
 	a.shells[id] = s
 	a.shellMu.Unlock()
-	eventName := "shell:" + id
-	go func() {
-		for chunk := range s.Output() {
-			runtime.EventsEmit(a.ctx, eventName, string(chunk))
-		}
-		runtime.EventsEmit(a.ctx, eventName+":done", nil)
-	}()
+	go a.pumpShellOutput("shell:"+id, s.Output())
 	return id, nil
+}
+
+// shellFlushEvery bounds how long a keystroke's echo waits to be coalesced.
+// Roughly one display frame: short enough that typing feels immediate, long
+// enough that a burst of output becomes one event instead of hundreds.
+const shellFlushEvery = 16 * time.Millisecond
+
+// shellMaxBatch flushes early once a batch is large, so a fast producer does
+// not build an unbounded string between ticks.
+const shellMaxBatch = 64 << 10
+
+// pumpShellOutput forwards a PTY's output to the UI, coalescing it.
+//
+// It used to emit one Wails event per read from the pty — 4KB at a time, so
+// running `top` or `cat` on a large file produced hundreds of events a second,
+// each one a JSON encode, a trip across the webview bridge and a separate
+// xterm write. logcat_feed.go had already learned this lesson and says so in
+// its header; the shell path never got the same treatment.
+//
+// The terminal is a stream, so batching is invisible: bytes arrive in the same
+// order, just fewer times.
+func (a *App) pumpShellOutput(eventName string, out <-chan []byte) {
+	tick := time.NewTicker(shellFlushEvery)
+	defer tick.Stop()
+
+	var buf []byte
+	flush := func() {
+		if len(buf) == 0 {
+			return
+		}
+		runtime.EventsEmit(a.ctx, eventName, string(buf))
+		buf = buf[:0]
+	}
+	for {
+		select {
+		case chunk, ok := <-out:
+			if !ok {
+				// Flush before the done signal: the last thing a shell prints is
+				// often the reason it exited, and dropping it would leave the
+				// terminal ending mid-sentence.
+				flush()
+				runtime.EventsEmit(a.ctx, eventName+":done", nil)
+				return
+			}
+			buf = append(buf, chunk...)
+			if len(buf) >= shellMaxBatch {
+				flush()
+			}
+		case <-tick.C:
+			flush()
+		}
+	}
 }
 
 // ListShellHistory returns persisted scrollback entries from previous adbq
 // runs, newest first. The frontend can replay these into a fresh terminal.
 func (a *App) ListShellHistory() ([]adb.ScrollbackEntry, error) {
+	a.flushShellLogs()
 	return adb.ListScrollbacks()
+}
+
+// flushShellLogs pushes every live session's buffered scrollback to disk.
+//
+// The logs are written through a buffer, and the history list and reader both
+// go to the filesystem — so without this, a session that is still open reads
+// back missing its most recent output.
+func (a *App) flushShellLogs() {
+	a.shellMu.Lock()
+	sessions := make([]*adb.ShellSession, 0, len(a.shells))
+	for _, sh := range a.shells {
+		sessions = append(sessions, sh)
+	}
+	a.shellMu.Unlock()
+	for _, sh := range sessions {
+		sh.FlushTee()
+	}
 }
 
 // ReadShellHistory returns the saved log content for a given session label.
 func (a *App) ReadShellHistory(serial, label string) (string, error) {
+	a.flushShellLogs()
 	return adb.ReadScrollback(serial, label)
 }
 

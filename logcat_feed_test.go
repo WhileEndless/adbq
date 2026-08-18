@@ -283,3 +283,44 @@ func TestFeedFailMarksDeadAndExplains(t *testing.T) {
 		t.Errorf("message names no way forward: %q", msg)
 	}
 }
+
+// A feed goes quiet when nothing is displaying it — the device stream keeps
+// running so the history survives, but nothing crosses the bridge. Getting this
+// backwards either wastes the work it exists to avoid, or silently blanks a
+// screen that is open.
+func TestFeedQuietStopsDeliveryButNotCapture(t *testing.T) {
+	f, batches := newTestFeed(t, map[int]adb.ProcOwner{1: {Name: "com.x", UID: 10001}}, true)
+
+	f.lines <- adb.LogEntry{PID: 1, Level: "I", Tag: "t", Msg: "before"}
+	if got := drain(batches); len(got) == 0 {
+		t.Fatal("nothing delivered while visible")
+	}
+
+	f.SetQuiet(true)
+	f.lines <- adb.LogEntry{PID: 1, Level: "I", Tag: "t", Msg: "while-quiet"}
+	time.Sleep(flushEvery * 3)
+	for _, b := range batches() {
+		for _, e := range b {
+			if e.Msg == "while-quiet" {
+				t.Error("delivered a line while quiet")
+			}
+		}
+	}
+
+	// Resuming must deliver again — a screen coming back to a permanently
+	// silent feed is the worse failure of the two.
+	f.SetQuiet(false)
+	f.lines <- adb.LogEntry{PID: 1, Level: "I", Tag: "t", Msg: "after"}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(flushEvery + 20*time.Millisecond)
+		for _, b := range batches() {
+			for _, e := range b {
+				if e.Msg == "after" {
+					return
+				}
+			}
+		}
+	}
+	t.Error("nothing delivered after resuming")
+}
