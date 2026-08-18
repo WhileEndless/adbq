@@ -47,6 +47,10 @@ type Capabilities struct {
 	StorageTotalKB int64 `json:"storageTotalKb"`
 	// NCPU is the core count from /proc/stat's per-cpu lines.
 	NCPU int `json:"ncpu"`
+
+	// Debuggable is ro.debuggable: a userdebug/eng build whose adbd will honour
+	// `adb root`. A production build does not advertise it and would refuse.
+	Debuggable bool `json:"debuggable"`
 }
 
 // capBins is the set of binaries probed in the batched capability scan. Add a
@@ -117,10 +121,11 @@ func (c *Client) InvalidateCapabilities(serial string) {
 // output. Sections are separated by a sentinel so parsing needs no awk/sed
 // (matching the procfs scan approach), and binary presence is reported by
 // echoing the name of each found binary.
+//
 // Sections are positional, so new ones are only ever APPENDED. Inserting one
-// would silently shift every field after it — and the parser has no way to
-// notice, because a getprop that returns nothing is indistinguishable from a
-// property that is simply unset on this ROM.
+// would silently shift every field after it, and the parser has no way to
+// notice: a getprop that returns nothing is indistinguishable from a property
+// this ROM does not set.
 func (c *Client) probeCapabilitiesRaw(ctx context.Context, serial string) string {
 	var sb strings.Builder
 	sb.WriteString("getprop ro.build.version.sdk; echo '@@@'; ")
@@ -144,6 +149,7 @@ func (c *Client) probeCapabilitiesRaw(ctx context.Context, serial string) string
 	sb.WriteString("; echo '@@@'; cat /proc/meminfo 2>/dev/null")
 	sb.WriteString("; echo '@@@'; df /data 2>/dev/null")
 	sb.WriteString("; echo '@@@'; cat /proc/stat 2>/dev/null")
+	sb.WriteString("; echo '@@@'; getprop ro.debuggable")
 	out, _ := c.Shell(ctx, serial, sb.String())
 	return out
 }
@@ -195,6 +201,7 @@ func parseCapabilities(out string) *Capabilities {
 		caps.StorageTotalKB = total
 	}
 	_, caps.NCPU = parseProcStat(get(17))
+	caps.Debuggable = get(18) == "1"
 
 	// "unknown" is what a redacted or unset ro.serialno reads as on some ROMs;
 	// carrying it forward would make every such device share one identity.

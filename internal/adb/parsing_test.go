@@ -318,3 +318,63 @@ func TestConnectionsRemoteSplitsSectionsPositionally(t *testing.T) {
 		t.Errorf("tcp local addr = %q, want 127.0.0.1:8080", got[0].LocalAddr)
 	}
 }
+
+// CaptureStatus decides whether to show "capture running" and offer to stop it.
+// A false positive there offers to kill a process the user did not start, so
+// the ownership test gets its own coverage — it is the one part of the batched
+// parse that can be wrong in a way that looks plausible.
+func TestFindOurTcpdumpMatchesOnlyOurCaptureFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		procs    string
+		wantPID  int
+		wantLive bool
+	}{
+		{
+			name:     "no tcpdump running",
+			procs:    "",
+			wantPID:  0,
+			wantLive: false,
+		},
+		{
+			name:     "our capture",
+			procs:    "PID 4821\ntcpdump -i any -w " + capturePath + " -U\n",
+			wantPID:  4821,
+			wantLive: true,
+		},
+		{
+			name: "somebody else's tcpdump must not be claimed",
+			procs: "PID 1234\ntcpdump -i wlan0 -w /sdcard/their-capture.pcap\n" +
+				"PID 1235\ntcpdump -i any -w /data/local/tmp/other.pcap\n",
+			wantPID:  0,
+			wantLive: false,
+		},
+		{
+			name: "ours among others",
+			procs: "PID 1234\ntcpdump -i wlan0 -w /sdcard/theirs.pcap\n" +
+				"PID 9099\ntcpdump -i any -w " + capturePath + "\n",
+			wantPID:  9099,
+			wantLive: true,
+		},
+		{
+			name:     "a PID line with no cmdline is not a match",
+			procs:    "PID 4821\n",
+			wantPID:  0,
+			wantLive: false,
+		},
+		{
+			name:     "unparseable pid is skipped rather than mis-attributed",
+			procs:    "PID notanumber\ntcpdump -w " + capturePath + "\n",
+			wantPID:  0,
+			wantLive: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pid, live := findOurTcpdump(tc.procs)
+			if pid != tc.wantPID || live != tc.wantLive {
+				t.Errorf("findOurTcpdump() = (%d, %v), want (%d, %v)", pid, live, tc.wantPID, tc.wantLive)
+			}
+		})
+	}
+}

@@ -409,11 +409,10 @@ func (c *Client) StartCapture(ctx context.Context, serial, iface, bpf string) (*
 		return nil, err
 	}
 	// Kill any leftover tcpdump (exact comm match) and remove our stale pcap.
-	// pkill is missing on stripped ROMs, so we scan procfs for the PIDs.
-	for _, pid := range c.tcpdumpPIDs(ctx, serial) {
-		_, _, _ = c.ShellSU(ctx, serial, "kill -9 "+itoa(int64(pid)))
-	}
-	_, _, _ = c.ShellSU(ctx, serial, "rm -f "+capturePath)
+	// pkill is missing on stripped ROMs, so procfs is scanned instead — by the
+	// same command Stop uses, in one round trip, rather than a scan followed by
+	// a kill per pid.
+	_, _, _ = c.ShellSU(ctx, serial, captureStopRemote("9")+"; rm -f "+capturePath)
 	// Strip outer quotes if the user wrapped the filter themselves.
 	bpf = strings.Trim(bpf, "'\"")
 	if _, _, err := c.ShellSU(ctx, serial, captureStartRemote(bin, iface, bpf)); err != nil {
@@ -435,27 +434,23 @@ func (c *Client) StopCapture(ctx context.Context, serial string) (*CaptureState,
 	return c.CaptureStatus(ctx, serial, "", "")
 }
 
-// tcpdumpPIDs scans /proc for processes whose comm is exactly "tcpdump" and
-// returns their PIDs. Runs via root because /proc/<pid>/comm of a root-owned
-// tcpdump isn't readable otherwise. Used in place of `pgrep -x`/`pkill`, both
-// missing on stripped ROMs.
-func (c *Client) tcpdumpPIDs(ctx context.Context, serial string) []int {
-	const scan = `for p in /proc/[0-9]*; do read c < "$p/comm" 2>/dev/null || continue; case "$c" in tcpdump) echo "${p##*/}";; esac; done`
-	out, _, err := c.ShellSU(ctx, serial, scan)
-	if err != nil && strings.TrimSpace(out) == "" {
-		return nil
-	}
-	var pids []int
-	for _, ln := range strings.Split(out, "\n") {
-		ln = strings.TrimSpace(strings.TrimRight(ln, "\r"))
-		if ln == "" {
-			continue
-		}
-		if n, err := strconv.Atoi(ln); err == nil && n > 0 {
-			pids = append(pids, n)
-		}
-	}
-	return pids
+// captureStatusRemote finds the tcpdump writing our pcap and sizes the file, in
+// one command.
+//
+// This runs on a poll while the Network panel is open, and it is the most
+// expensive thing adbq asks a device to do: the loop opens /proc/<pid>/comm for
+// every process on the system — nine hundred to fifteen hundred file opens on a
+// real phone. It used to run twice a second, and the pid scan, each candidate's
+// cmdline and the `ls -l` were three separate round trips on top of that.
+//
+// Emitting the cmdline inline (rather than fetching it per candidate
+// afterwards) is what collapses it to one: `tcpdump` processes are rare enough
+// that printing all of their cmdlines costs nothing, and it removes a round
+// trip per candidate.
+func captureStatusRemote() string {
+	return `for p in /proc/[0-9]*; do read c < "$p/comm" 2>/dev/null || continue; ` +
+		`case "$c" in tcpdump) echo "PID ${p##*/}"; cat "$p/cmdline" 2>/dev/null; echo;; esac; done` +
+		`; echo '` + procNetSentinel + `'; ls -l ` + capturePath + ` 2>/dev/null`
 }
 
 // CaptureStatus probes for the running tcpdump and the file size of the pcap.
@@ -464,43 +459,73 @@ func (c *Client) tcpdumpPIDs(ctx context.Context, serial string) []int {
 // identified as the capture process.
 func (c *Client) CaptureStatus(ctx context.Context, serial, iface, bpf string) (*CaptureState, error) {
 	st := &CaptureState{Iface: iface, BPF: bpf, RemoteFile: capturePath}
-
-	// 1. Find candidate processes whose comm is exactly "tcpdump", then confirm
-	//    the one writing OUR pcap by inspecting its (null-separated) cmdline.
-	for _, n := range c.tcpdumpPIDs(ctx, serial) {
-		cmdline, _, err := c.ShellSU(ctx, serial, "cat /proc/"+itoa(int64(n))+"/cmdline 2>/dev/null")
-		if err != nil && cmdline == "" {
-			continue
-		}
-		cmdline = strings.ReplaceAll(cmdline, "\x00", " ")
-		if strings.Contains(cmdline, capturePath) {
-			st.PID = n
-			st.Active = true
-			break
-		}
+	out, _, err := c.ShellSU(ctx, serial, captureStatusRemote())
+	if err != nil && strings.TrimSpace(out) == "" {
+		return st, nil
 	}
+	applyCaptureStatus(st, out)
 	// StartedAt: deriving an epoch from /proc/<pid>/stat field 22 requires
 	// btime + jiffies math that's fragile on this ROM (no getconf, no stat).
 	// We deliberately leave it at 0 rather than add unreliable dependencies.
-
-	// File size: stat is missing, so parse `ls -l` with the package's existing
-	// parser (it already handles this ROM's layout).
-	if out, err := c.Shell(ctx, serial, "ls -l "+capturePath+" 2>/dev/null"); err == nil {
-		for _, ln := range strings.Split(out, "\n") {
-			ln = strings.TrimRight(ln, "\r")
-			if ln == "" || strings.HasPrefix(ln, "total ") {
-				continue
-			}
-			if e, ok := parseLsLine(ln); ok {
-				st.SizeBytes = e.Size
-				break
-			}
-		}
-	}
 	if st.Active && st.SizeBytes >= 24 {
 		st.PacketHint = "≈" + itoa((st.SizeBytes-24)/80) + " packets"
 	}
 	return st, nil
+}
+
+// applyCaptureStatus parses one captureStatusRemote result: which tcpdump (if
+// any) is writing our pcap, and how big that file is.
+//
+// Pure, so both halves are testable without a device. The half that matters is
+// the ownership test — a false positive reports a capture the user did not
+// start, and the panel then offers to stop a process belonging to something
+// else.
+func applyCaptureStatus(st *CaptureState, out string) {
+	procs, listing, _ := strings.Cut(out, procNetSentinel)
+	st.PID, st.Active = findOurTcpdump(procs)
+	st.SizeBytes = parseCaptureSize(listing)
+}
+
+// findOurTcpdump walks "PID <n>" records, each followed by that process's
+// NUL-separated cmdline, and returns the one whose command line names our pcap.
+func findOurTcpdump(procs string) (pid int, active bool) {
+	candidate := 0
+	for _, raw := range strings.Split(procs, "\n") {
+		ln := strings.TrimRight(raw, "\r")
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(ln), "PID "); ok {
+			n, err := strconv.Atoi(strings.TrimSpace(rest))
+			if err != nil {
+				candidate = 0
+				continue
+			}
+			candidate = n
+			continue
+		}
+		if candidate == 0 || strings.TrimSpace(ln) == "" {
+			continue
+		}
+		// adb turns the NULs into nothing useful, so match on the path alone.
+		if strings.Contains(strings.ReplaceAll(ln, "\x00", " "), capturePath) {
+			return candidate, true
+		}
+	}
+	return 0, false
+}
+
+// parseCaptureSize reads the pcap's size out of `ls -l` output. `stat` is
+// absent on the stripped ROMs this app supports, so the package's existing
+// listing parser does the work.
+func parseCaptureSize(listing string) int64 {
+	for _, ln := range strings.Split(listing, "\n") {
+		ln = strings.TrimRight(ln, "\r")
+		if ln == "" || strings.HasPrefix(ln, "total ") {
+			continue
+		}
+		if e, ok := parseLsLine(ln); ok {
+			return e.Size
+		}
+	}
+	return 0
 }
 
 func shQuote(s string) string {

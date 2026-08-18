@@ -52,6 +52,76 @@ const procTableFallbackCmd = `for p in /proc/[0-9]*; do u=; n=; while read k v _
 	`if [ -n "$u" ]; then c=; read c < "$p/cmdline" 2>/dev/null; ` +
 	`if [ -n "$c" ]; then n=$c; fi; echo "${p##*/} $u $n"; fi; done`
 
+// procTableResolver picks the process-listing command this device answers to
+// and remembers it.
+//
+// Without the resolver, ProcTable tried `ps -A -o` and fell back to a full
+// procfs walk on failure — and forgot which had worked. On a ROM where the
+// modern form is rejected, that meant running BOTH commands every four seconds
+// for the life of the logcat feed, the fallback being a shell loop that opens
+// two files per process. The resolver rules a strategy out permanently the
+// first time it reports ErrUnsupported, which is exactly the bookkeeping that
+// was missing.
+//
+// The fact is domain-prefixed so DomApps invalidation reaches it (cachedomain.go).
+var procTableResolver = NewResolver[map[int]ProcOwner]("apps.proctable",
+	procTableViaPS{},
+	procTableViaProcfs{},
+)
+
+// procTableViaPS uses toybox `ps -o`, supported since Android 6.
+type procTableViaPS struct{}
+
+func (procTableViaPS) Name() string           { return "ps-A-o" }
+func (procTableViaPS) Requires() Requirements { return Requirements{Bins: []string{"ps"}} }
+
+func (procTableViaPS) Run(ctx context.Context, c *Client, serial string) (map[int]ProcOwner, error) {
+	out, err := c.Shell(ctx, serial, procTableCmd)
+	if err != nil {
+		// Pre-toybox `ps` rejects -A/-o outright. That is a property of the
+		// ROM, not of this moment, so report it as permanent and let the
+		// resolver stop trying.
+		if looksLikeRejectedFlag(err.Error() + " " + out) {
+			return nil, ErrUnsupported
+		}
+		return nil, err
+	}
+	tbl := parseProcTable(out)
+	if len(tbl) == 0 {
+		// Exit status 0 with nothing usable is the other way an old `ps`
+		// declines: it prints a usage banner and succeeds.
+		return nil, ErrUnsupported
+	}
+	return tbl, nil
+}
+
+// procTableViaProcfs reads the same three fields straight out of procfs using
+// only shell builtins, for ROMs whose `ps` cannot do it.
+type procTableViaProcfs struct{}
+
+func (procTableViaProcfs) Name() string           { return "procfs-walk" }
+func (procTableViaProcfs) Requires() Requirements { return Requirements{} }
+
+func (procTableViaProcfs) Run(ctx context.Context, c *Client, serial string) (map[int]ProcOwner, error) {
+	out, err := c.Shell(ctx, serial, procTableFallbackCmd)
+	if err != nil {
+		return nil, err
+	}
+	return parseProcTable(out), nil
+}
+
+// looksLikeRejectedFlag reports whether a `ps` failure is the ROM refusing the
+// flags rather than a transient problem.
+func looksLikeRejectedFlag(msg string) bool {
+	low := strings.ToLower(msg)
+	for _, m := range []string{"unknown option", "invalid option", "bad -", "usage:", "unrecognized"} {
+		if strings.Contains(low, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // ProcTable snapshots the device's process list as pid → owner. It is used to
 // tell app log lines from OS ones without a second round-trip per line.
 //
@@ -59,20 +129,10 @@ const procTableFallbackCmd = `for p in /proc/[0-9]*; do u=; n=; while read k v _
 // and the logcat filter treats unknown pids as visible rather than hiding
 // lines it cannot attribute.
 func (c *Client) ProcTable(ctx context.Context, serial string) (map[int]ProcOwner, error) {
-	out, err := c.Shell(ctx, serial, procTableCmd)
-	if err == nil {
-		if tbl := parseProcTable(out); len(tbl) > 0 {
-			return tbl, nil
-		}
-	}
-	out, ferr := c.Shell(ctx, serial, procTableFallbackCmd)
-	if ferr != nil {
-		if err != nil {
-			return nil, err
-		}
-		return nil, ferr
-	}
-	return parseProcTable(out), nil
+	// The freshness key is empty: this is a live read, re-run every time. The
+	// resolver is here for its strategy selection, not for caching a snapshot
+	// of something that changes constantly.
+	return procTableResolver.Resolve(ctx, c, serial, "")
 }
 
 // parseProcTable parses "<pid> <uid> <name>" rows, skipping the `ps` header and

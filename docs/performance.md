@@ -43,7 +43,13 @@ go tool pprof -http=: 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'
 | `ListConnections` (bir Network yenilemesi) | 4 süreç | **1** | 4× |
 | **Boşta steady state** | **4,13 süreç/sn** | **0,57** | **7,2×** |
 
+| Cihaz takıldığında (soğuk cache) | ~30 süreç | **10** | 3× |
+
 Duvar saati de düştü: ısınmış poll 1,64 sn → 0,65 sn (3 döngü).
+
+Soğuk bağlanma özellikle önemli: adb eşzamanlılık altında çok kötü davranıyor —
+bu cihazda **40 eşzamanlı `adb shell` 3 dakikadan uzun sürdü**, seri hâlde ~55 ms/çağrı
+iken. Cihazın takıldığı an, transport'u doyurmak için en kötü an.
 
 Kalan iki süreç `adb devices -l` (Faz 3'te `track-devices` ile kalkacak) ve
 `Enrich`'in tek batch probe'u.

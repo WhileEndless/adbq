@@ -51,10 +51,25 @@ func (c *Client) FindTcpdump(ctx context.Context, serial string) (string, error)
 	return info.Path, nil
 }
 
+// tcpdumpProbeTTL backstops the tcpdump probe. Whether a binary exists on the
+// device only changes when something installs one, and adbq invalidates
+// DomTcpdump when it does — so this is the window for an install performed
+// outside adbq, not the mechanism that keeps the answer correct.
+const tcpdumpProbeTTL = 10 * time.Minute
+
 // ProbeTcpdump returns a TcpdumpInfo describing whichever tcpdump binary is
 // available, including the empty Available=false case when none was found.
 // Never returns an error for "missing" — that's expressed via Available.
+//
+// Cached: the Network and Capture screens both probe on mount and the answer
+// costs two round trips (a builtin-only path search, then `--version`).
 func (c *Client) ProbeTcpdump(ctx context.Context, serial string) (*TcpdumpInfo, error) {
+	return cachedRead(c, serial, "tcpdump.probe", tcpdumpProbeTTL, func() (*TcpdumpInfo, error) {
+		return c.probeTcpdumpUncached(ctx, serial)
+	})
+}
+
+func (c *Client) probeTcpdumpUncached(ctx context.Context, serial string) (*TcpdumpInfo, error) {
 	// Walk the candidate list using ONLY shell builtins (`[ -f ]`, `[ -x ]`,
 	// echo). This ROM is heavily stripped: printf, stat, head etc. are all
 	// missing, so the old stat/printf-based probe always reported "not found".

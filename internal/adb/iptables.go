@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // osCreateTemp / osRemove kept as locals so test helpers can override them.
@@ -131,7 +132,21 @@ func (s *iptablesState) popUndo(k undoKey) (string, bool) {
 // ProbeIptables reports whether the requested family is usable on the device
 // and what backend mode it's in. Never returns an error for "missing" — the
 // Available flag covers that case.
+// iptablesProbeTTL backstops the backend probe. Which iptables binary exists,
+// where, and in which mode is a property of the ROM — it changes when a Magisk
+// module is installed or removed, not while adbq is watching.
+const iptablesProbeTTL = 10 * time.Minute
+
 func (c *Client) ProbeIptables(ctx context.Context, serial string, fam IPFamily) (*IPTBackendInfo, error) {
+	// Three to six round trips (path lookup, Magisk module scan under su,
+	// `--version` twice, iptables-save lookup) for an answer that does not move.
+	// The Iptables screen re-reads it every 15s while open.
+	return cachedRead(c, serial, "iptables.probe."+string(fam), iptablesProbeTTL, func() (*IPTBackendInfo, error) {
+		return c.probeIptablesUncached(ctx, serial, fam)
+	})
+}
+
+func (c *Client) probeIptablesUncached(ctx context.Context, serial string, fam IPFamily) (*IPTBackendInfo, error) {
 	bin := iptablesBinary(fam)
 	info := &IPTBackendInfo{Family: fam, NeedsRoot: true}
 	if out, err := c.Shell(ctx, serial, "command -v "+bin); err == nil {

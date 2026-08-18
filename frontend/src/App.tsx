@@ -25,24 +25,28 @@ import {EmulatorsScreen} from './screens/Emulators';
 import {ProfileSelector, ProfileEditor, ApplyConfirm, PastDevices, deviceKey} from './screens/Profiles';
 import {deviceKey as cacheKey, getCached, prefetchData, useDeviceData} from './cache';
 
-// prefetchDeviceData warms the shared cache for the cheaper request/response
-// screens when a device appears online, so opening those screens is instant —
-// even if the user never opened them before. Keys/shapes MUST match what each
-// screen reads via useDeviceData. Heavy/streaming screens are left out.
+// prefetchDeviceData warms the shared cache when a device appears online, so
+// opening a screen is instant even the first time. Keys/shapes MUST match what
+// each screen reads via useDeviceData.
+//
+// Kept deliberately small. Warming everything meant a burst of roughly thirty
+// `adb shell` processes the moment a device was plugged in, all at once — and
+// adb serialises badly under that load: forty concurrent shells against a
+// physical device took over three minutes to drain, against ~55ms each when issued
+// one at a time. A plug-in storm is not free just because it is short; it is
+// the worst possible moment to saturate the transport, because that is when the
+// user is waiting for the first screen to paint.
+//
+// So only the two cheap reads are warmed. GetNetworkInfo (five to seven round
+// trips) and the iptables probe are left to their screens, which now cache the
+// results for minutes anyway.
 function prefetchDeviceData(d: adb.Device) {
   const id = d.id;
   prefetchData(cacheKey('forwards', id), async () => {
     const [f, r] = await Promise.all([API.ListForwards(id), API.ListReverses(id)]);
     return {fwd: f || [], rev: r || []};
   });
-  prefetchData(cacheKey('net', id, 'info'), () => API.GetNetworkInfo(id));
   prefetchData(cacheKey('storage', id, 'stats'), () => API.GetStats(id));
-  prefetchData(cacheKey('iptables', id, 'ipv4', 'filter'), async () => {
-    const pb = await API.ProbeIptables(id, 'ipv4');
-    if (!pb?.available || !d.root) return {info: pb, snap: null};
-    const sn = await API.ListIptables(id, 'ipv4', 'filter');
-    return {info: pb, snap: sn};
-  });
 }
 
 // The installed package list changes only when adbq installs or uninstalls

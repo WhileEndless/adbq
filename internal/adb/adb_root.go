@@ -98,8 +98,11 @@ func (c *Client) adbRootEligible(ctx context.Context, serial string) bool {
 	// A userdebug/eng build advertises this; a production build does not, and
 	// its adbd would refuse. Covers a debuggable device reached over Wi-Fi,
 	// whose serial carries no hint that it is an emulator.
-	out, err := c.ShellTimeout(ctx, serial, "getprop ro.debuggable", 5*time.Second)
-	return err == nil && strings.TrimSpace(out) == "1"
+	//
+	// From the capability scan: ro.debuggable is fixed for the connection, and
+	// this sits on the root-probe path that every privileged caller goes
+	// through, so a getprop of its own was being paid on every cold connect.
+	return c.Capabilities(ctx, serial).Debuggable
 }
 
 func (c *Client) setAdbRootState(serial string, st adbRootState) {
