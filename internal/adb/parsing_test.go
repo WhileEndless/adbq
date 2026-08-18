@@ -271,3 +271,50 @@ func TestDescribeAppRealDumpsys(t *testing.T) {
 	t.Logf("Parsed: minSdk=%s targetSdk=%s perms=%d/%d enabled=%s sigVer=%s",
 		d.MinSdk, d.TargetSdk, len(d.GrantedPerms), len(d.RequestedPerms), d.Enabled, d.ApkSigningVersion)
 }
+
+// The four /proc/net tables now arrive in one round trip, split by an echoed
+// sentinel. The sentinel has to be echoed rather than inferred from the output:
+// an unreadable table (hidepid, no IPv6) produces nothing at all, and without a
+// marker the sections would shift — silently relabelling udp rows as tcp6, which
+// is the kind of wrong that looks plausible on screen.
+func TestConnectionsRemoteSplitsSectionsPositionally(t *testing.T) {
+	if got := strings.Count(connectionsRemote(), procNetSentinel); got != len(procNetSources)-1 {
+		t.Fatalf("connectionsRemote has %d sentinels for %d tables", got, len(procNetSources))
+	}
+
+	const tcpRow = "   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 12345 1 0000000000000000 100 0 0 10 0"
+	const udpRow = "  466: 00000000:14E9 00000000:0000 07 00000000:00000000 00:00000000 00000000  1000        0 54321 2 0000000000000000 0"
+	header := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+
+	// tcp populated, tcp6 unreadable (empty), udp populated, udp6 unreadable.
+	out := strings.Join([]string{
+		header + tcpRow,
+		"",
+		header + udpRow,
+		"",
+	}, "\n"+procNetSentinel+"\n")
+
+	sections := strings.Split(out, procNetSentinel)
+	if len(sections) != len(procNetSources) {
+		t.Fatalf("split gave %d sections, want %d", len(sections), len(procNetSources))
+	}
+
+	var got []Connection
+	for i, src := range procNetSources {
+		got = append(got, parseProcNet(sections[i], src.proto)...)
+	}
+	if len(got) != 2 {
+		t.Fatalf("parsed %d connections, want 2: %+v", len(got), got)
+	}
+	// The point of the sentinel: the udp row must still be labelled udp even
+	// though the table before it was empty.
+	if got[0].Proto != "tcp" {
+		t.Errorf("first row proto = %q, want tcp", got[0].Proto)
+	}
+	if got[1].Proto != "udp" {
+		t.Errorf("second row proto = %q, want udp — an empty table shifted the sections", got[1].Proto)
+	}
+	if got[0].LocalAddr != "127.0.0.1:8080" {
+		t.Errorf("tcp local addr = %q, want 127.0.0.1:8080", got[0].LocalAddr)
+	}
+}

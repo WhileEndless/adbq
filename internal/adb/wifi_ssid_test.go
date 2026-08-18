@@ -189,24 +189,34 @@ func TestWlanStateFromIfaces(t *testing.T) {
 	}
 }
 
-// TestSSIDStrategyOrder pins the contract that matters for devices whose Wi-Fi
-// service dump is expensive: the cheap path is preferred, and the costly one is
-// registered last so it only runs where nothing better exists.
+// TestSSIDStrategyOrder pins two separate contracts that are easy to conflate.
+//
+// Preference: the shell-service path is tried first and is gated by API level;
+// the whole-service dump is the last resort and must never be gated out, or
+// old devices would have no way to answer at all.
+//
+// Caching: BOTH are marked Costly. Costly does not mean "slow" — it means "must
+// not run on a polling path" (see Requirements.Costly), and device enrichment
+// polls. The cheap path was left un-Costly for a while on the grounds that it
+// only reads a few lines, and the result was an adb process every few seconds
+// re-reading a value that moves only when the Wi-Fi link does. The freshness
+// key already tracks exactly that, so caching against it loses no accuracy.
 func TestSSIDStrategyOrder(t *testing.T) {
 	if len(ssidResolver.strategies) != 2 {
 		t.Fatalf("registered strategies = %d, want 2", len(ssidResolver.strategies))
 	}
 	first, second := ssidResolver.strategies[0], ssidResolver.strategies[1]
-	if first.Requires().Costly {
-		t.Errorf("%s is preferred but marked Costly", first.Name())
-	}
 	if first.Requires().MinSDK == 0 {
 		t.Errorf("%s has no API-level gate, so it would be tried on every device", first.Name())
 	}
-	if !second.Requires().Costly {
-		t.Errorf("%s is the fallback dump path and must be marked Costly", second.Name())
-	}
 	if second.Requires().MinSDK != 0 {
 		t.Errorf("%s is the last resort and must not be gated out by SDK level", second.Name())
+	}
+	for _, s := range ssidResolver.strategies {
+		if !s.Requires().Costly {
+			t.Errorf("%s is not marked Costly, so it will run on every device-list "+
+				"poll — a round trip per refresh for a value keyed by the Wi-Fi link "+
+				"state, which the freshness key already tracks", s.Name())
+		}
 	}
 }

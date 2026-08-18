@@ -4,98 +4,142 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 )
 
+// statsFastCmd reads everything that genuinely moves between refreshes, in one
+// round trip. Sections are `@@@`-delimited so the host parses them without awk
+// or sed, neither of which exists on stripped ROMs.
+//
+// The two /proc/stat samples now sit in the SAME shell, with the sleep between
+// them. That is not only cheaper — it is more accurate: previously the interval
+// was "0.3s plus two adb round trips of unpredictable length", so the busy
+// percentage was computed over a window nobody knew the width of.
+const statsFastCmd = "cat /proc/stat" +
+	"; echo '@@@'; sleep 0.3; cat /proc/stat" +
+	"; echo '@@@'; cat /proc/meminfo" +
+	"; echo '@@@'; cat /proc/loadavg 2>/dev/null" +
+	"; echo '@@@'; cat /proc/uptime" +
+	"; echo '@@@'; cat /proc/net/dev 2>/dev/null"
+
+// statsSlowCmd reads what changes on a human timescale. Battery percentage and
+// free storage do not meaningfully differ between two refreshes 2.5s apart, and
+// `dumpsys battery` is a binder call into a system service — the most expensive
+// thing the old Overview poll did, several times a minute, to watch a number
+// that changes a few times an hour.
+const statsSlowCmd = "dumpsys battery" +
+	"; echo '@@@'; df /data 2>/dev/null"
+
+// statsSlowTTL bounds how stale the battery/storage half may be.
+const statsSlowTTL = 30 * time.Second
+
 // GetStats returns a snapshot of CPU/RAM/battery/storage/uptime.
+//
+// Overview polls this every few seconds, so it is one of the two paths that
+// decide adbq's idle cost. It used to issue nine separate `adb shell` calls per
+// refresh; it now issues one, plus a second at most twice a minute for the
+// slow-moving half.
 func (c *Client) GetStats(ctx context.Context, serial string) (*Stats, error) {
 	s := &Stats{}
 
-	// Battery via dumpsys; fall back to sysfs for ROMs where dumpsys battery is
-	// stubbed/absent (some emulators, TV boxes, very stripped builds).
-	batteryFound := false
-	if out, err := c.Shell(ctx, serial, "dumpsys battery"); err == nil {
-		for _, ln := range strings.Split(out, "\n") {
-			t := strings.TrimSpace(ln)
-			switch {
-			case strings.HasPrefix(t, "level:"):
-				s.BatteryLevel = atoi(strings.TrimSpace(strings.TrimPrefix(t, "level:")))
-				batteryFound = true
-			case strings.HasPrefix(t, "temperature:"):
-				v := atoi(strings.TrimSpace(strings.TrimPrefix(t, "temperature:")))
-				s.BatteryTemp = float64(v) / 10.0
-			case strings.HasPrefix(t, "voltage:"):
-				s.BatteryVoltage = atoi(strings.TrimSpace(strings.TrimPrefix(t, "voltage:")))
-			case strings.HasPrefix(t, "AC powered:") || strings.HasPrefix(t, "USB powered:") || strings.HasPrefix(t, "Wireless powered:"):
-				if strings.Contains(t, "true") {
-					s.Charging = true
-				}
-			}
+	// ── Fixed for this connection ────────────────────────────────────────
+	caps := c.Capabilities(ctx, serial)
+	s.MemTotalKB = caps.MemTotalKB
+	s.StorageTotalKB = caps.StorageTotalKB
+
+	// ── Slow half: cached, and keyed under storage so a push or an install
+	//    drops it (see cachedomain.go). ────────────────────────────────────
+	slow, err := cachedRead(c, serial, "storage.stats.slow", statsSlowTTL, func() (statsSlow, error) {
+		out, err := c.Shell(ctx, serial, statsSlowCmd)
+		if err != nil {
+			return statsSlow{}, err
 		}
+		return parseStatsSlow(out), nil
+	})
+	if err == nil {
+		s.BatteryLevel = slow.batteryLevel
+		s.BatteryTemp = slow.batteryTemp
+		s.BatteryVoltage = slow.batteryVoltage
+		s.Charging = slow.charging
+		if slow.storageTotalKB > 0 {
+			s.StorageTotalKB = slow.storageTotalKB
+		}
+		s.StorageFreeKB = slow.storageFreeKB
 	}
-	if !batteryFound {
+	if !slow.batteryFound {
+		// dumpsys battery is stubbed or absent on some emulators, TV boxes and
+		// very stripped builds; sysfs is the universal fallback.
 		c.readBatterySysfs(ctx, serial, s)
 	}
 
-	// Memory
-	if out, err := c.Shell(ctx, serial, "cat /proc/meminfo"); err == nil {
-		var memFree, buffers, cached int64
-		memAvailFound := false
-		for _, ln := range strings.Split(out, "\n") {
-			t := strings.TrimSpace(ln)
-			switch {
-			case strings.HasPrefix(t, "MemTotal:"):
-				s.MemTotalKB = atoi64(extractNum(t))
-			case strings.HasPrefix(t, "MemAvailable:"):
-				s.MemAvailKB = atoi64(extractNum(t))
-				memAvailFound = true
-			case strings.HasPrefix(t, "MemFree:"):
-				memFree = atoi64(extractNum(t))
-			case strings.HasPrefix(t, "Buffers:"):
-				buffers = atoi64(extractNum(t))
-			case strings.HasPrefix(t, "Cached:"):
-				cached = atoi64(extractNum(t))
+	// ── Fast half ────────────────────────────────────────────────────────
+	out, err := c.Shell(ctx, serial, statsFastCmd)
+	if err != nil {
+		// The slow half may still have produced something worth showing.
+		return s, nil
+	}
+	applyStatsFast(s, out)
+	return s, nil
+}
+
+// statsSlow is the parsed slow half. A struct rather than mutating Stats so the
+// value can be cached and re-applied without re-reading.
+type statsSlow struct {
+	batteryFound   bool
+	batteryLevel   int
+	batteryTemp    float64
+	batteryVoltage int
+	charging       bool
+	storageTotalKB int64
+	storageFreeKB  int64
+}
+
+// parseStatsSlow parses `dumpsys battery` + `df /data`. Pure, so it is testable
+// against captured output from real ROMs.
+func parseStatsSlow(out string) statsSlow {
+	var sl statsSlow
+	parts := strings.Split(out, "@@@")
+	section := func(i int) string {
+		if i < len(parts) {
+			return parts[i]
+		}
+		return ""
+	}
+	for _, ln := range strings.Split(section(0), "\n") {
+		t := strings.TrimSpace(ln)
+		switch {
+		case strings.HasPrefix(t, "level:"):
+			sl.batteryLevel = atoi(strings.TrimSpace(strings.TrimPrefix(t, "level:")))
+			sl.batteryFound = true
+		case strings.HasPrefix(t, "temperature:"):
+			sl.batteryTemp = float64(atoi(strings.TrimSpace(strings.TrimPrefix(t, "temperature:")))) / 10.0
+		case strings.HasPrefix(t, "voltage:"):
+			sl.batteryVoltage = atoi(strings.TrimSpace(strings.TrimPrefix(t, "voltage:")))
+		case strings.HasPrefix(t, "AC powered:"), strings.HasPrefix(t, "USB powered:"), strings.HasPrefix(t, "Wireless powered:"):
+			if strings.Contains(t, "true") {
+				sl.charging = true
 			}
 		}
-		// MemAvailable arrived in kernel 3.14; API 21-22 devices on older
-		// kernels lack it, which would make Overview report 100% RAM used.
-		// Approximate with MemFree + Buffers + Cached.
-		if !memAvailFound {
-			s.MemAvailKB = memFree + buffers + cached
+	}
+	if total, free, ok := parseDataDF(section(1)); ok {
+		sl.storageTotalKB, sl.storageFreeKB = total, free
+	}
+	return sl
+}
+
+// applyStatsFast fills the live fields from one statsFastCmd result.
+func applyStatsFast(s *Stats, out string) {
+	parts := strings.Split(out, "@@@")
+	section := func(i int) string {
+		if i < len(parts) {
+			return parts[i]
 		}
+		return ""
 	}
 
-	// Load average — try /proc/loadavg first (may be denied on Android 9+),
-	// then fall back to `uptime` which usually still exposes it.
-	if out, err := c.Shell(ctx, serial, "cat /proc/loadavg 2>/dev/null"); err == nil && strings.TrimSpace(out) != "" {
-		fs := strings.Fields(out)
-		if len(fs) >= 1 {
-			if v, err := strconv.ParseFloat(fs[0], 64); err == nil {
-				s.LoadAvg1 = v
-			}
-		}
-	}
-	if s.LoadAvg1 == 0 {
-		if out, err := c.Shell(ctx, serial, "uptime"); err == nil {
-			// "... load average: 6.57, 6.55, 6.97"
-			if i := strings.Index(out, "load average:"); i >= 0 {
-				rest := strings.TrimSpace(out[i+len("load average:"):])
-				fs := strings.SplitN(rest, ",", 2)
-				if len(fs) >= 1 {
-					if v, err := strconv.ParseFloat(strings.TrimSpace(fs[0]), 64); err == nil {
-						s.LoadAvg1 = v
-					}
-				}
-			}
-		}
-	}
-
-	// CPU percent — derive from two /proc/stat samples. This avoids `top`,
-	// whose batch flags (`-b`/`-n`) and header layout vary wildly across
-	// toybox/legacy builds and whose pipe-to-`head` breaks on ROMs without
-	// `head`. /proc/stat is present on every Android kernel.
-	if a, ok := readCPUStat(ctx, c, serial, false); ok {
-		// Short device-side delay between samples so the delta is meaningful.
-		if b, ok2 := readCPUStat(ctx, c, serial, true); ok2 {
+	// CPU% from the delta between the two /proc/stat samples.
+	if a, ok := parseCPUSample(section(0)); ok {
+		if b, ok2 := parseCPUSample(section(1)); ok2 {
 			dTotal := b.total - a.total
 			dIdle := b.idle - a.idle
 			if dTotal > 0 {
@@ -110,48 +154,59 @@ func (c *Client) GetStats(ctx context.Context, serial string) (*Stats, error) {
 		}
 	}
 
-	// Uptime
-	if out, err := c.Shell(ctx, serial, "cat /proc/uptime"); err == nil {
-		fs := strings.Fields(out)
-		if len(fs) >= 1 {
-			if v, err := strconv.ParseFloat(fs[0], 64); err == nil {
-				s.UptimeSeconds = int64(v)
+	// Memory. MemTotal comes from the capability scan, but a device that was
+	// probed before /proc was readable may have none, so take it here too.
+	var memFree, buffers, cached int64
+	memAvailFound := false
+	for _, ln := range strings.Split(section(2), "\n") {
+		t := strings.TrimSpace(ln)
+		switch {
+		case strings.HasPrefix(t, "MemTotal:"):
+			if s.MemTotalKB == 0 {
+				s.MemTotalKB = atoi64(extractNum(t))
 			}
+		case strings.HasPrefix(t, "MemAvailable:"):
+			s.MemAvailKB = atoi64(extractNum(t))
+			memAvailFound = true
+		case strings.HasPrefix(t, "MemFree:"):
+			memFree = atoi64(extractNum(t))
+		case strings.HasPrefix(t, "Buffers:"):
+			buffers = atoi64(extractNum(t))
+		case strings.HasPrefix(t, "Cached:"):
+			cached = atoi64(extractNum(t))
+		}
+	}
+	// MemAvailable arrived in kernel 3.14; API 21-22 devices on older kernels
+	// lack it, which would make Overview report 100% RAM used.
+	if !memAvailFound {
+		s.MemAvailKB = memFree + buffers + cached
+	}
+
+	if fs := strings.Fields(section(3)); len(fs) >= 1 {
+		if v, err := strconv.ParseFloat(fs[0], 64); err == nil {
+			s.LoadAvg1 = v
 		}
 	}
 
-	// Storage of /data (user data) via df. Output formats vary widely:
-	//   modern toybox: "Filesystem 1K-blocks Used Available Use% Mounted" (KB)
-	//   legacy toolbox: "Filesystem Size Used Free Blksize" with human sizes
-	//                   like 5.9G / 881.8M (and `-k` is unsupported, erroring).
-	// We omit `-k` and detect the format from the header, parsing host-side.
-	if out, err := c.Shell(ctx, serial, "df /data 2>/dev/null"); err == nil {
-		total, free, ok := parseDataDF(out)
-		if ok {
-			s.StorageTotalKB = total
-			s.StorageFreeKB = free
+	if fs := strings.Fields(section(4)); len(fs) >= 1 {
+		if v, err := strconv.ParseFloat(fs[0], 64); err == nil {
+			s.UptimeSeconds = int64(v)
 		}
 	}
 
-	// Network counters for wlan0
-	if out, err := c.Shell(ctx, serial, "cat /proc/net/dev 2>/dev/null"); err == nil {
-		for _, ln := range strings.Split(out, "\n") {
-			ln = strings.TrimSpace(ln)
-			if !strings.HasPrefix(ln, "wlan0:") {
-				continue
-			}
-			rest := strings.TrimSpace(strings.TrimPrefix(ln, "wlan0:"))
-			fs := strings.Fields(rest)
-			// rx bytes is index 0, tx bytes is index 8
-			if len(fs) >= 9 {
-				s.NetRxBytes = atoi64(fs[0])
-				s.NetTxBytes = atoi64(fs[8])
-			}
-			break
+	for _, ln := range strings.Split(section(5), "\n") {
+		ln = strings.TrimSpace(ln)
+		if !strings.HasPrefix(ln, "wlan0:") {
+			continue
 		}
+		fs := strings.Fields(strings.TrimSpace(strings.TrimPrefix(ln, "wlan0:")))
+		// rx bytes is index 0, tx bytes is index 8
+		if len(fs) >= 9 {
+			s.NetRxBytes = atoi64(fs[0])
+			s.NetTxBytes = atoi64(fs[8])
+		}
+		break
 	}
-
-	return s, nil
 }
 
 // readBatterySysfs fills battery fields from /sys/class/power_supply/battery,
@@ -193,19 +248,11 @@ type cpuSample struct {
 	idle  int64
 }
 
-// readCPUStat reads the aggregate `cpu ...` line from /proc/stat. When delay is
-// true a short device-side sleep precedes the read, giving the second sample of
-// a pair a measurable window. Returns ok=false if the line can't be parsed.
-func readCPUStat(ctx context.Context, c *Client, serial string, delay bool) (cpuSample, bool) {
-	cmd := "cat /proc/stat 2>/dev/null"
-	if delay {
-		// `sleep` is a sh builtin / coreutil present on every Android.
-		cmd = "sleep 0.3 2>/dev/null; " + cmd
-	}
-	out, err := c.Shell(ctx, serial, cmd)
-	if err != nil {
-		return cpuSample{}, false
-	}
+// parseCPUSample extracts the aggregate `cpu ...` line from /proc/stat output.
+// Pure: both samples of a pair now arrive in one batched read (statsFastCmd),
+// so nothing here talks to a device. Returns ok=false if the line is absent or
+// unparseable.
+func parseCPUSample(out string) (cpuSample, bool) {
 	for _, ln := range strings.Split(out, "\n") {
 		if !strings.HasPrefix(ln, "cpu ") {
 			continue

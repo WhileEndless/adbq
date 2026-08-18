@@ -23,10 +23,7 @@ sorusunu yanıtlar, paket adı/pid gürültüsüne boğulmaz.
 ```sh
 go test ./internal/adb -run TestSpawnBudget -v
 ```
-Ölçümler her zaman yazdırılır. Bütçe ihlalinin **testi kırması** için:
-```sh
-ADBQ_SPAWN_BUDGET=1 go test ./internal/adb -run TestSpawnBudget -v
-```
+Bütçeler zorunludur: aşılırsa test kırılır. Cihaz yoksa test atlanır.
 
 ### Profil (yalnız dev build)
 ```sh
@@ -37,33 +34,38 @@ go tool pprof -http=: 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'
 
 ---
 
-## 2. Baseline — 2026-08-18, hiçbir toplu-okuma çalışması yapılmadan önce
+## 2. Ölçümler — a physical device over USB
 
-Cihaz: **a physical device over USB**.
+| Ölçüm | Önce | Sonra | Kazanç |
+|---|---|---|---|
+| Isınmış `ListDevices` + `Enrich` (bir poll) | 10,0 süreç | **2,0** | 5,0× |
+| `GetStats` (bir Overview yenilemesi) | 9 süreç | **1** | 9× |
+| `ListConnections` (bir Network yenilemesi) | 4 süreç | **1** | 4× |
+| **Boşta steady state** | **4,13 süreç/sn** | **0,57** | **7,2×** |
 
-| Ölçüm | Değer |
-|---|---|
-| Isınmış `ListDevices` + `Enrich` (bir poll) | **10,0 süreç** |
-| `GetStats` (bir Overview yenilemesi) | **9 süreç** |
-| `ListConnections` (bir Network yenilemesi) | **4 süreç** |
-| **Boşta steady state** (5 sn cihaz + 2,5 sn stat poll'u) | **4,13 süreç/sn** |
+Duvar saati de düştü: ısınmış poll 1,64 sn → 0,65 sn (3 döngü).
+
+Kalan iki süreç `adb devices -l` (Faz 3'te `track-devices` ile kalkacak) ve
+`Enrich`'in tek batch probe'u.
 
 Isınmış poll'un komut dağılımı (3 döngü):
 
 ```
-shell getprop   12      shell ip        3
-shell id         3      shell cat       3
-shell ls         3      devices         3
+önce                        sonra
+shell getprop   12          devices    3
+shell id         3          shell id   3
+shell ls         3
+shell ip         3
+shell cat        3
 shell uname      3
+devices          3
 ```
 
-Boşta 10 saniyede `shell cat` 21 kez — `GetStats`'ın `/proc` okumaları baskın.
+> Senaryo Overview'ın iki poll'unu modelliyor. Uygulamada ayrıca iki `ScrcpyActive`
+> poller'ı var (Faz 3'te olaya çevrilecek). Her ekran değişiminde önbelleksiz
+> `pm list packages` çağıran rozet-sayaç efekti kaldırıldı.
 
-> Gerçek uygulamada bu sayı biraz daha yüksektir: yukarıdaki senaryo yalnızca Overview'ın
-> iki poll'unu modelliyor. Uygulamada ayrıca iki `ScrcpyActive` poller'ı ve her ekran
-> değişiminde önbelleksiz çalışan bir rozet-sayaç efekti var.
-
-**Hedef:** boşta **< 1,0 süreç/sn**, pencere arka plandayken **~0**.
+**Kalan hedef:** pencere arka plandayken **~0** (Faz 3: görünürlük kapısı + track-devices).
 
 ---
 
@@ -99,10 +101,10 @@ takıldı/çıkarıldı, görev durumu.
 
 | Yol | Bütçe | Gerekçe |
 |---|---|---|
-| Isınmış `ListDevices`+`Enrich` | ≤ 4 süreç | Cihaz listesi + sınırlı sayıda gerçekten canlı okuma |
-| `GetStats` | ≤ 3 süreç | Hepsi `/proc` ve `dumpsys`; tek tura sığar |
-| `ListConnections` | ≤ 1 süreç | `connectionsRemote()` zaten tek komut olarak render ediyor |
-| Boşta steady state | ≤ 1,0 süreç/sn | — |
+| Isınmış `ListDevices`+`Enrich` | ≤ 4 süreç | Cihaz listesi + tek dinamik probe (bugün 2) |
+| `GetStats` | ≤ 3 süreç | Hepsi `/proc` ve `dumpsys`; tek tura sığar (bugün 1) |
+| `ListConnections` | ≤ 1 süreç | Dört tablo tek turda, sentinel'la ayrılıyor |
+| Boşta steady state | ≤ 1,0 süreç/sn | bugün 0,57 |
 
 Bütçeler hedef değil, **üst sınırdır**: amaçları, ileride bir değişikliğin okuma başına
 tur ekleyip bunu bir yıl boyunca sessizce kullanıcının CPU'sundan ödetmesini engellemek.

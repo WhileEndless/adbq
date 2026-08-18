@@ -200,9 +200,15 @@ func (c *Client) rootWrap(ctx context.Context, serial, inner string) (string, er
 // suRetryAfter bounds how long a failed root probe is remembered. The probe
 // costs five round trips (`id` plus four `su` forms) and callers like the
 // frida-server listing run it on every refresh, so re-probing each time made
-// unrooted devices crawl. Keeping it short means a Magisk grant the user just
-// approved is still picked up within seconds.
-const suRetryAfter = 30 * time.Second
+// unrooted devices crawl.
+//
+// It used to be 30s, which on an unrooted device meant paying those five round
+// trips twice a minute forever. A longer window is safe now that the cache
+// heals on demand instead of on a timer: any privileged call still really tries
+// su, and ShellSU forgets the probe the moment one is refused, so a Magisk
+// grant the user has just approved is picked up by the action that needs it
+// rather than by waiting for an expiry.
+const suRetryAfter = 5 * time.Minute
 
 // suStyleFor probes which `su -c` form works on the device and caches the
 // answer. A negative result is only cached for suRetryAfter, so a later Magisk

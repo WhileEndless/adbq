@@ -23,6 +23,30 @@ type Capabilities struct {
 	ABIList []string        `json:"abiList"` // ro.product.cpu.abilist
 	Bits64  bool            `json:"bits64"`  // a 64-bit ABI is present
 	Has     map[string]bool `json:"has"`     // presence of probed binaries (command -v)
+
+	// ─── Identity and hardware ────────────────────────────────────────────
+	//
+	// None of the following can change while a device stays connected: a new
+	// build id or kernel means a reboot, and a reboot drops this cache (see
+	// DomProps). They live here rather than being re-read on every device poll
+	// because that poll used to spend nine of its ten adb processes on exactly
+	// these values.
+	Serial       string `json:"serial"`       // ro.serialno — survives USB↔Wi-Fi
+	Model        string `json:"model"`        // ro.product.model
+	Manufacturer string `json:"manufacturer"` // ro.product.manufacturer
+	Product      string `json:"product"`      // ro.product.name
+	BuildID      string `json:"buildId"`      // ro.build.id
+	BuildTags    string `json:"buildTags"`    // ro.build.tags — "test-keys" implies root
+	Fingerprint  string `json:"fingerprint"`  // ro.build.fingerprint — identifies the ROM
+	Hardware     string `json:"hardware"`     // ro.hardware
+	Kernel       string `json:"kernel"`       // uname -r
+
+	// MemTotalKB and StorageTotalKB are the fixed halves of the Overview
+	// gauges; only the free/available side has to be re-read.
+	MemTotalKB     int64 `json:"memTotalKb"`
+	StorageTotalKB int64 `json:"storageTotalKb"`
+	// NCPU is the core count from /proc/stat's per-cpu lines.
+	NCPU int `json:"ncpu"`
 }
 
 // capBins is the set of binaries probed in the batched capability scan. Add a
@@ -93,6 +117,10 @@ func (c *Client) InvalidateCapabilities(serial string) {
 // output. Sections are separated by a sentinel so parsing needs no awk/sed
 // (matching the procfs scan approach), and binary presence is reported by
 // echoing the name of each found binary.
+// Sections are positional, so new ones are only ever APPENDED. Inserting one
+// would silently shift every field after it — and the parser has no way to
+// notice, because a getprop that returns nothing is indistinguishable from a
+// property that is simply unset on this ROM.
 func (c *Client) probeCapabilitiesRaw(ctx context.Context, serial string) string {
 	var sb strings.Builder
 	sb.WriteString("getprop ro.build.version.sdk; echo '@@@'; ")
@@ -103,6 +131,19 @@ func (c *Client) probeCapabilitiesRaw(ctx context.Context, serial string) string
 	sb.WriteString("for b in ")
 	sb.WriteString(strings.Join(capBins, " "))
 	sb.WriteString("; do command -v \"$b\" >/dev/null 2>&1 && echo \"$b\"; done")
+	// ── Appended: identity, hardware and the fixed halves of the gauges. ──
+	sb.WriteString("; echo '@@@'; getprop ro.serialno")
+	sb.WriteString("; echo '@@@'; getprop ro.product.model")
+	sb.WriteString("; echo '@@@'; getprop ro.product.manufacturer")
+	sb.WriteString("; echo '@@@'; getprop ro.product.name")
+	sb.WriteString("; echo '@@@'; getprop ro.build.id")
+	sb.WriteString("; echo '@@@'; getprop ro.build.tags")
+	sb.WriteString("; echo '@@@'; getprop ro.build.fingerprint")
+	sb.WriteString("; echo '@@@'; getprop ro.hardware")
+	sb.WriteString("; echo '@@@'; uname -r")
+	sb.WriteString("; echo '@@@'; cat /proc/meminfo 2>/dev/null")
+	sb.WriteString("; echo '@@@'; df /data 2>/dev/null")
+	sb.WriteString("; echo '@@@'; cat /proc/stat 2>/dev/null")
 	out, _ := c.Shell(ctx, serial, sb.String())
 	return out
 }
@@ -135,6 +176,30 @@ func parseCapabilities(out string) *Capabilities {
 	}
 	for _, b := range strings.Fields(get(5)) {
 		caps.Has[b] = true
+	}
+
+	// Appended sections. Each is independently optional: an old ROM may not
+	// have `uname` or a readable /proc, and a missing one must leave its field
+	// zero rather than disturb the others.
+	caps.Serial = get(6)
+	caps.Model = strings.ReplaceAll(get(7), "_", " ")
+	caps.Manufacturer = get(8)
+	caps.Product = get(9)
+	caps.BuildID = get(10)
+	caps.BuildTags = get(11)
+	caps.Fingerprint = get(12)
+	caps.Hardware = get(13)
+	caps.Kernel = firstLine(get(14))
+	caps.MemTotalKB = parseMemTotalKB(get(15))
+	if total, _, ok := parseDataDF(get(16)); ok {
+		caps.StorageTotalKB = total
+	}
+	_, caps.NCPU = parseProcStat(get(17))
+
+	// "unknown" is what a redacted or unset ro.serialno reads as on some ROMs;
+	// carrying it forward would make every such device share one identity.
+	if caps.Serial == "unknown" {
+		caps.Serial = ""
 	}
 	return caps
 }

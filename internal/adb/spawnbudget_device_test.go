@@ -2,7 +2,6 @@ package adb
 
 import (
 	"context"
-	"os"
 	"sort"
 	"testing"
 	"time"
@@ -23,33 +22,16 @@ import (
 // exist so a future change that reintroduces a per-read round trip fails here
 // instead of quietly costing the user CPU for a year.
 //
-// They do not pass yet — they describe where the read paths are going, and the
-// batching work that gets them there is still in progress. Until then enforcing
-// them would leave `go test ./...` permanently red, so the assertions are gated
-// behind ADBQ_SPAWN_BUDGET=1 while the measurements always print. Delete
-// requireBudget (not the budgets) once the batching lands.
-
-// measured on a physical device before any batching work:
+// Measured on a physical device, before and after the batching:
 //
-//	warm ListDevices+Enrich   10.0 processes per poll
-//	GetStats                   9 processes
-//	ListConnections            4 processes
-//	idle steady state          4.13 processes/second
+//	                          before    after
+//	warm ListDevices+Enrich    10.0      2.0   processes per poll
+//	GetStats                    9        1     processes
+//	ListConnections             4        1     processes
+//	idle steady state           4.13     0.57  processes/second
 //
-// Recorded here rather than only in docs/performance.md so the next person to
-// read a failure can see what "normal" used to be.
-
-// requireBudget reports whether budget assertions are enforced. The numbers are
-// always logged either way — the measurement is the point; the gate is only
-// about not failing CI on work that is still queued.
-func requireBudget(t *testing.T) bool {
-	t.Helper()
-	if os.Getenv("ADBQ_SPAWN_BUDGET") == "1" {
-		return true
-	}
-	t.Log("(budget not enforced — set ADBQ_SPAWN_BUDGET=1 to fail on regressions)")
-	return false
-}
+// The "before" column is kept so a future failure can be read against what the
+// problem actually looked like, rather than against a budget with no story.
 
 // spawnsDuring counts the one-shot adb processes started by fn.
 func spawnsDuring(fn func()) (spawns int64, elapsed time.Duration) {
@@ -121,7 +103,7 @@ func TestSpawnBudgetEnrich(t *testing.T) {
 	// genuinely-live reads. Anything more means a fact that cannot change is
 	// being re-read on the poll.
 	const budget = 4.0
-	if perCycle > budget && requireBudget(t) {
+	if perCycle > budget {
 		t.Errorf("warm poll costs %.1f adb processes, budget %.1f — "+
 			"a value that does not change while the device stays connected is being re-read; "+
 			"see the command breakdown above", perCycle, budget)
@@ -149,7 +131,7 @@ func TestSpawnBudgetStats(t *testing.T) {
 	reportTop(t)
 
 	const budget = 3
-	if spawns > budget && requireBudget(t) {
+	if spawns > budget {
 		t.Errorf("GetStats costs %d adb processes, budget %d — "+
 			"these are all /proc and dumpsys reads and belong in one round trip", spawns, budget)
 	}
@@ -175,7 +157,7 @@ func TestSpawnBudgetConnections(t *testing.T) {
 	t.Logf("ListConnections: %d adb processes", spawns)
 
 	const budget = 1
-	if spawns > budget && requireBudget(t) {
+	if spawns > budget {
 		t.Errorf("ListConnections costs %d adb processes, budget %d — "+
 			"connectionsRemote() already renders these four reads as ONE command for the "+
 			"§4.1 preview, so the preview and the execution have diverged", spawns, budget)
@@ -233,7 +215,7 @@ func TestSpawnBudgetIdleSteadyState(t *testing.T) {
 	reportTop(t)
 
 	const budget = 1.0
-	if perSec > budget && requireBudget(t) {
+	if perSec > budget {
 		t.Errorf("idle costs %.2f adb processes/second, budget %.2f", perSec, budget)
 	}
 }

@@ -106,7 +106,7 @@ func (r *Resolver[T]) Resolve(ctx context.Context, c *Client, serial, freshKey s
 		return zero, fmt.Errorf("%s: %w", r.fact, ErrNoStrategy)
 	}
 
-	if v, ok := c.cachedFact(r.fact, serial, freshKey); ok {
+	if v, ok := c.cachedFact(r.fact, serial, freshKey, factTTL); ok {
 		val, _ := v.(T)
 		return val, nil
 	}
@@ -214,18 +214,47 @@ type factState struct {
 func factKey(fact, serial string) string { return fact + "\x00" + serial }
 
 // cachedFact returns the remembered value when it was produced under the same
-// freshness key and has not aged out.
-func (c *Client) cachedFact(fact, serial, freshKey string) (any, bool) {
+// freshness key and is younger than ttl.
+func (c *Client) cachedFact(fact, serial, freshKey string, ttl time.Duration) (any, bool) {
 	c.factMu.Lock()
 	defer c.factMu.Unlock()
 	st := c.facts[factKey(fact, serial)]
 	if st == nil || !st.cached || st.key != freshKey {
 		return nil, false
 	}
-	if time.Since(st.at) > factTTL {
+	if time.Since(st.at) > ttl {
 		return nil, false
 	}
 	return st.val, true
+}
+
+// cachedRead serves a value from the per-(fact, serial) store when it is
+// younger than ttl, and reads it otherwise.
+//
+// It exists so callers that are not Resolvers — a batched stats read, a binary
+// presence probe — get the same caching and the same domain-based invalidation
+// without a second mechanism being invented for them. Everything lands in the
+// one facts map, so InvalidateDomains reaches all of it by prefix.
+//
+// fact MUST be named "<domain>.<something>": that prefix is what invalidation
+// matches on, and a name outside the scheme produces a value nothing can ever
+// drop. See cachedomain.go.
+//
+// A failed read is not cached. Caching an error would turn one bad moment —
+// a device dozing, a transient permission blip — into ttl seconds of a wrong
+// answer, and these are exactly the reads that then look like device faults.
+func cachedRead[T any](c *Client, serial, fact string, ttl time.Duration, read func() (T, error)) (T, error) {
+	if v, ok := c.cachedFact(fact, serial, "", ttl); ok {
+		if val, isT := v.(T); isT {
+			return val, nil
+		}
+	}
+	val, err := read()
+	if err != nil {
+		return val, err
+	}
+	c.rememberFact(fact, serial, "", val)
+	return val, nil
 }
 
 // rememberFact stores the value a Costly strategy produced, against the

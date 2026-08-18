@@ -91,15 +91,26 @@ var tcpStates = map[string]string{
 	"09": "LAST_ACK", "0A": "LISTEN", "0B": "CLOSING",
 }
 
-// ListConnections reads /proc/net/tcp(6) and /proc/net/udp(6) from the device.
+// ListConnections reads /proc/net/tcp(6) and /proc/net/udp(6) from the device
+// in a single round trip, and parses the four tables apart host-side.
+//
+// It used to issue one `adb shell` per table while connectionsRemote() showed
+// the user all four joined into one command — so the Network panel, refreshing
+// every few seconds, was displaying a command it did not run. CLAUDE.md §4.1
+// requires the preview and the execution to come from the same function, which
+// is now literally true: both call connectionsRemote().
 func (c *Client) ListConnections(ctx context.Context, serial string) ([]Connection, error) {
-	var conns []Connection
-	for _, src := range procNetSources {
-		out, err := c.Shell(ctx, serial, "cat "+src.path+" 2>/dev/null")
-		if err != nil {
-			continue
+	out, err := c.Shell(ctx, serial, connectionsRemote())
+	if err != nil && strings.TrimSpace(out) == "" {
+		return nil, err
+	}
+	sections := strings.Split(out, procNetSentinel)
+	conns := []Connection{}
+	for i, src := range procNetSources {
+		if i >= len(sections) {
+			break
 		}
-		conns = append(conns, parseProcNet(out, src.proto)...)
+		conns = append(conns, parseProcNet(sections[i], src.proto)...)
 	}
 	return conns, nil
 }
@@ -111,24 +122,51 @@ var procNetSources = []struct{ proto, path string }{
 	{"udp", "/proc/net/udp"}, {"udp6", "/proc/net/udp6"},
 }
 
-// connectionsRemote renders the reads ListConnections performs as one command,
-// for the preview.
+// procNetSentinel separates the four tables in the batched read. It has to be
+// echoed rather than inferred, because an unreadable table produces no output
+// at all and the sections would otherwise shift — silently labelling udp rows
+// as tcp6.
+const procNetSentinel = "@@@"
+
+// connectionsRemote renders the reads ListConnections performs — and is the
+// command it actually runs, not a description of it.
 func connectionsRemote() string {
 	parts := make([]string, 0, len(procNetSources))
 	for _, src := range procNetSources {
 		parts = append(parts, "cat "+src.path+" 2>/dev/null")
 	}
-	return strings.Join(parts, "; ")
+	return strings.Join(parts, "; echo '"+procNetSentinel+"'; ")
+}
+
+// isProcNetIndex reports whether a token is a /proc/net `sl` column: decimal
+// digits followed by a colon.
+func isProcNetIndex(tok string) bool {
+	if len(tok) < 2 || tok[len(tok)-1] != ':' {
+		return false
+	}
+	for i := 0; i < len(tok)-1; i++ {
+		if tok[i] < '0' || tok[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseProcNet(out, proto string) []Connection {
 	res := []Connection{}
-	for i, ln := range strings.Split(out, "\n") {
-		if i == 0 {
-			continue
-		}
+	for _, ln := range strings.Split(out, "\n") {
 		fs := strings.Fields(ln)
 		if len(fs) < 10 {
+			continue
+		}
+		// Skip the header by recognising it, not by position. Positional
+		// skipping worked only while each table arrived as its own `cat`
+		// output; batching the four reads into one round trip puts a blank
+		// line before each header, which shifted the header into the body and
+		// produced a phantom row reading "local_address → rem_address".
+		//
+		// A data row always begins with the `sl` index, "0:" / "466:".
+		if !isProcNetIndex(fs[0]) {
 			continue
 		}
 		local := decodeProcAddr(fs[1])
