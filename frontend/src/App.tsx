@@ -24,6 +24,8 @@ import {ProcessesScreen} from './screens/Processes';
 import {EmulatorsScreen} from './screens/Emulators';
 import {ProfileSelector, ProfileEditor, ApplyConfirm, PastDevices, deviceKey} from './screens/Profiles';
 import {deviceKey as cacheKey, getCached, prefetchData, useDeviceData} from './cache';
+import {useScrcpyActive, useScrcpyAvailable} from './lib/scrcpy';
+import {usePoll} from './lib/poll';
 
 // prefetchDeviceData warms the shared cache when a device appears online, so
 // opening a screen is instant even the first time. Keys/shapes MUST match what
@@ -163,22 +165,25 @@ function AppInner() {
       });
   }, []);
 
+  // applyDevices installs a device list, whatever produced it.
+  const applyDevices = useCallback((devs: adb.Device[] | null) => {
+    const list = devs || [];
+    // Free the logcat buffer and the backend feed of any device that has gone
+    // away. Otherwise an unplugged phone keeps an adb process and a periodic
+    // on-device poll alive, plus its ring buffer, for the rest of the session.
+    // Tracked in a ref rather than inside the state updater, which React may
+    // run more than once.
+    for (const id of knownIds.current) {
+      if (!list.some(d => d.id === id)) logcatStore.release(id);
+    }
+    knownIds.current = list.map(d => d.id);
+    setDevices(list);
+    setActiveId(prev => prev && list.some(d => d.id === prev) ? prev : (list[0]?.id || ''));
+  }, []);
+
   const reload = useCallback(() => {
     API.ListDevices()
-      .then(devs => {
-        const list = devs || [];
-        // Free the logcat buffer and the backend feed of any device that has
-        // gone away. Otherwise an unplugged phone keeps an adb process and a
-        // periodic on-device poll alive, plus its ring buffer, for the rest of
-        // the session. Tracked in a ref rather than inside the state updater,
-        // which React may run more than once.
-        for (const id of knownIds.current) {
-          if (!list.some(d => d.id === id)) logcatStore.release(id);
-        }
-        knownIds.current = list.map(d => d.id);
-        setDevices(list);
-        setActiveId(prev => prev && list.some(d => d.id === prev) ? prev : (list[0]?.id || ''));
-      })
+      .then(applyDevices)
       .catch(e => {
         // Don't spam the user with toasts when the device transiently goes
         // offline (usb replug, screen sleep). Just leave the list as-is.
@@ -188,7 +193,7 @@ function AppInner() {
           console.warn('ListDevices error:', msg);
         }
       });
-  }, []);
+  }, [applyDevices]);
 
   // Global handler for stray API rejections — keeps the UI alive instead of
   // bubbling to the React error boundary when a device drops.
@@ -205,11 +210,19 @@ function AppInner() {
     window.addEventListener('unhandledrejection', onRej);
     return () => window.removeEventListener('unhandledrejection', onRej);
   }, []);
+  // The device list is pushed, not polled. The adb server tells the backend the
+  // instant a transport appears or goes away, and the backend forwards that
+  // here — so a plugged-in phone shows up immediately instead of up to five
+  // seconds later, and an idle app asks adb nothing at all.
+  //
+  // No timer here as a safety net: the backend owns the fallback (it polls when
+  // the push subscription is down) and emits the same event either way. Two
+  // independent fallbacks would double the work in exactly the degraded case
+  // they exist for.
   useEffect(() => {
     reload();
-    const t = setInterval(reload, 5000);
-    return () => clearInterval(t);
-  }, [reload]);
+    return EventsOn('devices:changed', (devs: adb.Device[]) => applyDevices(devs));
+  }, [reload, applyDevices]);
 
   // Profile auto-apply: whenever a device becomes available (plugged in,
   // reconnected, or already connected when the app opened), if it has a bound
@@ -410,23 +423,15 @@ function Titlebar({theme, setTheme, themeMode, onOpenSettings, profileSelector}:
 }
 
 function ScrcpyButton({serial}: {serial: string}) {
-  const [active, setActive] = useState(false);
-  const [available, setAvailable] = useState<boolean | null>(null);
-  useEffect(() => { API.ScrcpyAvailable().then(setAvailable).catch(() => setAvailable(false)); }, []);
-  useEffect(() => {
-    if (!serial) return;
-    const tick = () => API.ScrcpyActive(serial).then(setActive).catch(() => {});
-    tick();
-    const t = setInterval(tick, 2500);
-    return () => clearInterval(t);
-  }, [serial]);
+  const active = useScrcpyActive(serial);
+  const available = useScrcpyAvailable();
   if (!available) return null;
   return (
     <button className={`iconbtn${active ? ' active' : ''}`} title={active ? 'Stop scrcpy mirror' : 'Mirror screen with scrcpy'}
             onClick={(e) => {
               e.stopPropagation();
-              if (active) { API.StopScrcpy(serial); setActive(false); }
-              else        { API.StartScrcpy(serial).then(() => setActive(true)).catch(err => showToast({title: 'scrcpy failed', body: String(err), kind: 'err'})); }
+              if (active) { API.StopScrcpy(serial).catch(() => {}); }
+              else        { API.StartScrcpy(serial).catch(err => showToast({title: 'scrcpy failed', body: String(err), kind: 'err'})); }
             }}>
       <Icon.Monitor width={13} height={13}/>
     </button>
@@ -568,14 +573,13 @@ function Settings({open, onClose, themeMode, setTheme, accent, setAccent}:{open:
 // ADBStats itself spawns nothing, so the figure stays truthful.
 function AdbLoadPanel({open}: {open: boolean}) {
   const [stats, setStats] = useState<adb.ADBStats | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    let live = true;
-    const tick = () => API.ADBStats().then(s => { if (live) setStats(s); }).catch(() => {});
-    tick();
-    const t = setInterval(tick, 1000);
-    return () => { live = false; clearInterval(t); };
-  }, [open]);
+  const [tracking, setTracking] = useState<adb.TrackerState | null>(null);
+  const tick = useCallback(() => {
+    API.ADBStats().then(setStats).catch(() => {});
+    API.DeviceTracking().then(setTracking).catch(() => {});
+  }, []);
+  useEffect(() => { if (open) tick(); }, [open, tick]);
+  usePoll(tick, 1000, open);
   if (!stats) return null;
   const top = stats.topCommands ?? [];
   const busiest = Math.max(1, ...top.map(c => c.count));
@@ -605,9 +609,18 @@ function AdbLoadPanel({open}: {open: boolean}) {
         <div className='spread'>
           <span className='muted'>device tracking</span>
           <span className='mono subtle' style={{fontSize: 11}}>
-            {stats.trackingDevices ? 'push (track-devices)' : 'polling (fallback)'}
+            {stats.trackingDevices
+              ? `push${tracking?.longForm === false ? ' (short form)' : ''}`
+              : 'polling (fallback)'}
           </span>
         </div>
+        {!stats.trackingDevices && tracking?.lastError && (
+          <div className='spread'>
+            <span className='muted'>last tracking error</span>
+            <span className='mono subtle' style={{fontSize: 10.5, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}
+                  title={tracking.lastError}>{tracking.lastError}</span>
+          </div>
+        )}
         {top.length > 0 && (
           <div style={{marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 8}}>
             {top.map(c => (

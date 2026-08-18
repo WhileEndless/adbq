@@ -20,6 +20,8 @@ type ScrcpyManager struct {
 	procs   map[string]*exec.Cmd // serial → running process
 	binPath string
 	major   int // cached scrcpy major version (0 = not yet probed/unknown)
+	// onExit is notified when a mirror ends. See OnExit.
+	onExit func(serial string)
 }
 
 // scrcpyV2OnlyFlags are options the v1.x CLI rejects; they're stripped unless we
@@ -28,6 +30,15 @@ var scrcpyV2OnlyFlags = map[string]bool{"--video-codec": true}
 
 func NewScrcpyManager() *ScrcpyManager {
 	return &ScrcpyManager{procs: map[string]*exec.Cmd{}}
+}
+
+// OnExit registers a callback fired when a mirror process ends, for any reason
+// — the user closing the window, the device unplugging, a crash. Set once at
+// startup.
+func (m *ScrcpyManager) OnExit(f func(serial string)) {
+	m.mu.Lock()
+	m.onExit = f
+	m.mu.Unlock()
 }
 
 func (m *ScrcpyManager) Binary() (string, error) {
@@ -214,7 +225,15 @@ func (m *ScrcpyManager) Start(ctx context.Context, serial string, extraArgs []st
 		if m.procs[serial] == cmd {
 			delete(m.procs, serial)
 		}
+		onExit := m.onExit
 		m.mu.Unlock()
+		// The mirror closing is something adbq witnesses directly. Announcing it
+		// is what lets the UI drop the two pollers that used to ask "is scrcpy
+		// still up?" every couple of seconds — a question only this process
+		// could answer, being the one that started it.
+		if onExit != nil {
+			onExit(serial)
+		}
 	}()
 
 	// If scrcpy exits within the grace window, treat it as a start failure.

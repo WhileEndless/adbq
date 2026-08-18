@@ -222,6 +222,10 @@ export function DeviceKey(arg1) {
   return window['go']['main']['App']['DeviceKey'](arg1);
 }
 
+export function DeviceTracking() {
+  return window['go']['main']['App']['DeviceTracking']();
+}
+
 export function DisconnectDevice(arg1) {
   return window['go']['main']['App']['DisconnectDevice'](arg1);
 }

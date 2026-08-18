@@ -15,6 +15,12 @@ import {showToast} from '../ui';
 /**
  * Prompts for a location and writes `content` there.
  *
+ * The user picks the folder and types the name in their own file manager, so
+ * "where did it go?" is answered before the write rather than after it. The
+ * confirmation then names the full path and offers to open it or show it in the
+ * file manager — the same shape the screenshot and screen-recording actions
+ * already use, because "Saved." with no path is barely better than silence.
+ *
  * A cancelled dialog is silent: it is the user changing their mind, not a
  * failure, and a toast for it would train people to ignore toasts.
  */
@@ -22,13 +28,17 @@ export async function saveTextAs(opts: {
   title: string;
   suggestedName: string;
   content: string;
-  /** Shown in the success toast, e.g. "1,204 lines". */
-  detail?: string;
 }): Promise<void> {
   try {
     const path = await API.SaveTextAs(opts.title, opts.suggestedName, opts.content);
     if (!path) return; // cancelled
-    showToast({title: 'Saved', body: path, kind: 'ok', mono: true});
+    showToast({
+      title: 'Saved', body: path, kind: 'ok', mono: true, ttl: 8000,
+      actions: [
+        {label: 'Open', onClick: () => { void API.OpenPath(path); }},
+        {label: 'Reveal', onClick: () => { void API.RevealPath(path); }},
+      ],
+    });
   } catch (e) {
     showToast({title: 'Save failed', body: String(e), kind: 'err'});
   }

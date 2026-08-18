@@ -68,6 +68,10 @@ type App struct {
 
 	procMu      sync.Mutex
 	procStreams map[string]*adb.TopStream
+
+	// devices publishes the device list to the UI. It owns both the push
+	// subscription and the fallback poll — see device_watcher.go.
+	devices *deviceWatcher
 }
 
 func NewApp() *App {
@@ -117,6 +121,16 @@ func (a *App) startup(ctx context.Context) {
 		a.client.SetBinary(p)
 	}
 	_ = a.client.StartServer(ctx)
+	// Start tracking before anything else asks for a device: the watcher's first
+	// publish is what the UI paints, and it needs the server up.
+	a.devices = a.startDeviceWatcher(ctx)
+	// The mirror is a process adbq starts, so its state is something adbq
+	// witnesses rather than something it has to ask about. Announcing the exit
+	// is what lets the UI stop polling ScrcpyActive twice a second from two
+	// separate places.
+	a.scrcpy.OnExit(func(serial string) {
+		runtime.EventsEmit(a.ctx, scrcpyEvent, scrcpyStatus{Serial: serial, Active: false})
+	})
 	// Reconcile persisted sessions: anything we left running on a device when
 	// adbq crashed/closed comes back as a task entry the user can see.
 	go a.reconcileSessions()
@@ -516,10 +530,24 @@ func boolString(b bool) string {
 
 // ─── scrcpy ─────────────────────────────────────────────────────────────
 
-func (a *App) ScrcpyAvailable() bool           { return a.scrcpy.Available() }
+func (a *App) ScrcpyAvailable() bool { return a.scrcpy.Available() }
+
+// scrcpyEvent carries mirror start/stop to the UI, so it does not have to ask.
+const scrcpyEvent = "scrcpy:changed"
+
+// scrcpyStatus is the scrcpyEvent payload.
+type scrcpyStatus struct {
+	Serial string `json:"serial"`
+	Active bool   `json:"active"`
+}
+
 func (a *App) ScrcpyActive(serial string) bool { return a.scrcpy.IsActive(serial) }
 func (a *App) StartScrcpy(serial string) error {
-	return a.scrcpy.Start(a.ctx, serial, adb.ScrcpyDefaultArgs(serial))
+	if err := a.scrcpy.Start(a.ctx, serial, adb.ScrcpyDefaultArgs(serial)); err != nil {
+		return err
+	}
+	runtime.EventsEmit(a.ctx, scrcpyEvent, scrcpyStatus{Serial: serial, Active: true})
+	return nil
 }
 
 // ScrcpyCommand renders the command StartScrcpy would run, so the mirror button
@@ -527,7 +555,13 @@ func (a *App) StartScrcpy(serial string) error {
 func (a *App) ScrcpyCommand(serial string) string {
 	return a.scrcpy.Command(serial, adb.ScrcpyDefaultArgs(serial))
 }
-func (a *App) StopScrcpy(serial string) error { return a.scrcpy.Stop(serial) }
+func (a *App) StopScrcpy(serial string) error {
+	// The exit callback also fires, but only once Wait returns; emitting here
+	// too makes the button feel immediate rather than waiting on the process.
+	err := a.scrcpy.Stop(serial)
+	runtime.EventsEmit(a.ctx, scrcpyEvent, scrcpyStatus{Serial: serial, Active: false})
+	return err
+}
 
 // ─── Hosts persistence ─────────────────────────────────────────────────
 
@@ -925,6 +959,11 @@ func (a *App) PullCapture(serial string) (string, error) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	// Stop publishing before tearing anything down, so a late device event
+	// cannot arrive after the UI has gone.
+	if a.devices != nil {
+		a.devices.Stop()
+	}
 	a.scrcpy.StopAll()
 	// Only emulators adbq launched are killed; one the user started from
 	// Android Studio is theirs and must survive adbq closing.
@@ -961,7 +1000,21 @@ func (a *App) shutdown(ctx context.Context) {
 
 // ─── Devices ─────────────────────────────────────────────────────────────
 
+// ListDevices returns the current device list.
+//
+// It reads the watcher's published list rather than shelling out: the watcher
+// is already tracking, so asking adb again would spawn a process to learn
+// something this app was told the moment it happened. The UI calls this once on
+// mount and then follows the `devices:changed` event.
+//
+// The direct read remains as a cold path for the window between startup and the
+// watcher's first publish.
 func (a *App) ListDevices() ([]adb.Device, error) {
+	if a.devices != nil {
+		if list := a.devices.Devices(); len(list) > 0 {
+			return list, nil
+		}
+	}
 	devs, err := a.client.ListDevices(a.ctx)
 	if err != nil {
 		return nil, err
@@ -1033,6 +1086,12 @@ func (a *App) SaveTextAs(title, suggestedName, content string) (string, error) {
 	})
 	if err != nil || dst == "" {
 		return "", err
+	}
+	// The dialog returns the typed name verbatim on every platform, so a name
+	// with no extension stays extensionless and opens in nothing. Only fill one
+	// in when there is none — a deliberate `.log` or `.csv` is the user's call.
+	if filepath.Ext(dst) == "" {
+		dst += ".txt"
 	}
 	if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", dst, err)

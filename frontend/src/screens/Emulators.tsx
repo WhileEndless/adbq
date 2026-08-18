@@ -7,6 +7,7 @@ import * as API from '../../wailsjs/go/main/App';
 import {EventsOn} from '../../wailsjs/runtime/runtime';
 import {Icon} from '../icons';
 import {Badge, CodeBlock, CommandChip, CommandPreview, FeatureNotice, IconBtn, Modal, SearchInput, Switch, commandToast, confirmDialog, showToast} from '../ui';
+import {usePoll, useTaskDone} from '../lib/poll';
 
 type Tab = 'avds' | 'images' | 'root' | 'host';
 
@@ -92,36 +93,6 @@ function humanBytes(n: number): string {
   return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-/**
- * Run onDone when a background task of one of these kinds stops running.
- *
- * Installing an image or rooting an AVD happens in the task tray, so without
- * this the screen that started the work keeps showing the state from before it.
- * The unsubscribe function EventsOn returns is what gets called on unmount —
- * EventsOff would take the task tray's own listener down with it.
- */
-function useTaskDone(kinds: string, onDone: () => void) {
-  const saved = useRef(onDone);
-  saved.current = onDone;
-  useEffect(() => {
-    const wanted = new Set(kinds.split(' '));
-    return EventsOn('task:update', (t: adb.TaskState) => {
-      if (wanted.has(t.kind) && t.status !== 'running') saved.current();
-    });
-  }, [kinds]);
-}
-
-/** Poll while anything is mid-transition; idle lists don't need a timer. */
-function usePolling(active: boolean, fn: () => void, ms: number) {
-  const saved = useRef(fn);
-  saved.current = fn;
-  useEffect(() => {
-    if (!active) return;
-    const t = setInterval(() => saved.current(), ms);
-    return () => clearInterval(t);
-  }, [active, ms]);
-}
-
 // ─── AVDs ──────────────────────────────────────────────────────────────────
 
 function AVDsTab({sdk}: {sdk: adb.AndroidSDKInfo | null}) {
@@ -142,7 +113,12 @@ function AVDsTab({sdk}: {sdk: adb.AndroidSDKInfo | null}) {
 
   // A booting AVD changes state on its own; a settled list does not.
   const settling = avds.some(a => a.state === 'booting');
-  usePolling(true, reload, settling ? 3000 : 10000);
+  // Fast only while something is actually booting. A settled list changes when
+  // an emulator starts or stops, which now arrives as a device event, and when
+  // a task finishes — so the idle interval is a slow backstop for changes made
+  // outside adbq rather than the mechanism that keeps the list right. Gated on
+  // window visibility by usePoll.
+  usePoll(reload, settling ? 3000 : 20000);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -581,7 +557,7 @@ function EmulatorLogPanel({name, live}: {name: string; live: boolean}) {
 
   useEffect(() => { cursor.current = 0; setLines([]); }, [name]);
   useEffect(() => { if (open) pull(); }, [open, pull]);
-  usePolling(open && live, pull, 2000);
+  usePoll(pull, 2000, open && live);
 
   return (
     <div style={{marginBottom: 14}}>
@@ -951,10 +927,11 @@ function RootTab() {
     API.ListAVDs().then(l => setAvds(l ?? [])).catch(() => {});
   }, []);
   useEffect(() => { reload(); }, [reload]);
-  // Everything on this tab is a statement about live state — is it running, does
-  // it have root, is the image patched — and all three change from elsewhere:
-  // the AVDs tab, the task tray, the emulator itself.
-  usePolling(true, reload, 8000);
+  // Everything on this tab is a statement about live state — is it running,
+  // does it have root, is the image patched. adbq's own changes arrive via
+  // useTaskDone below and start/stop via the device event, so this is the slow
+  // backstop for a change made with another tool.
+  usePoll(reload, 30000);
   useTaskDone('avd-root avd-restore rootavd-download', reload);
 
   const avd = avds.find(a => a.name === name) || null;

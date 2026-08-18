@@ -42,7 +42,8 @@ go tool pprof -http=: 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'
 | `GetStats` (bir Overview yenilemesi) | 9 süreç | **1** | 9× |
 | `ListConnections` (bir Network yenilemesi) | 4 süreç | **1** | 4× |
 | Cihaz takıldığında (soğuk cache) | ~30 süreç | **10** | 3× |
-| **Boşta steady state** | **4,13 süreç/sn** | **0,57** | **7,2×** |
+| **Boşta steady state** (Faz 2 sonrası) | 4,13 süreç/sn | 0,57 | 7,2× |
+| **Boşta steady state** (push tracking ile) | **4,13 süreç/sn** | **0,027** | **153×** |
 
 Duvar saati de düştü: ısınmış poll 1,64 sn → 0,65 sn (3 döngü).
 
@@ -70,9 +71,25 @@ devices          3
 > poller'ı var (Faz 3'te olaya çevrilecek). Her ekran değişiminde önbelleksiz
 > `pm list packages` çağıran rozet-sayaç efekti kaldırıldı.
 
-**Kalan hedef:** pencere arka plandayken **~0** (Faz 3: görünürlük kapısı + track-devices).
+Boştaki 0,027, dakikada bir çalışan güvenlik ağı poll'undan geliyor: adb sunucusu
+transport değişikliklerini bildiriyor ama başka bir araçla yapılan `adb root` gibi
+değişiklikleri bildirmiyor. 20 saniyelik bir pencerede ölçülen değer **0,00**.
+
+Pencere gizliyken kalan tüm poll'lar da duruyor (`usePoll` görünürlük kapısı).
 
 ---
+
+### Cihaz listesi: poll değil push
+
+`adb devices -l` beş saniyede bir çalıştırılmıyor artık. adb sunucusunun
+`host:track-devices` protokolüne kalıcı bir soket açılıyor (`internal/adb/track.go`,
+yalnız stdlib) ve sunucu her değişiklikte listeyi kendisi gönderiyor. Sonuç: boşta
+sıfır süreç, ve cihaz takıldığında **anında** görünüyor.
+
+Fallback zorunlu: tracker, kullanıcının uygulama içinden öldürebildiği bir sunucuya
+açılmış uzun ömürlü bir soket. Bağlantı düşerse arka uç poll'a döner ve **aynı olayı**
+yayınlar — arayüzde tek bir abonelik var, fallback mantığını yanlış yapabileceği bir
+yer yok. Hangi yolun aktif olduğu Settings → adb load altında görünür.
 
 ## 3. Veri volatilite sınıfları
 
@@ -109,7 +126,9 @@ takıldı/çıkarıldı, görev durumu.
 | Isınmış `ListDevices`+`Enrich` | ≤ 4 süreç | Cihaz listesi + tek dinamik probe (bugün 2) |
 | `GetStats` | ≤ 3 süreç | Hepsi `/proc` ve `dumpsys`; tek tura sığar (bugün 1) |
 | `ListConnections` | ≤ 1 süreç | Dört tablo tek turda, sentinel'la ayrılıyor |
-| Boşta steady state | ≤ 1,0 süreç/sn | bugün 0,57 |
+| Boşta steady state (tek okuma yolu) | ≤ 1,0 süreç/sn | bugün 0,57 |
+| Boşta uygulama, push aktif | ≤ 0,1 süreç/sn | bugün 0,00 (`TestAppIdleCost`) |
+| Boşta uygulama, fallback poll | ≤ 1,0 süreç/sn | eski steady state'ten kötü olmamalı |
 
 Bütçeler hedef değil, **üst sınırdır**: amaçları, ileride bir değişikliğin okuma başına
 tur ekleyip bunu bir yıl boyunca sessizce kullanıcının CPU'sundan ödetmesini engellemek.

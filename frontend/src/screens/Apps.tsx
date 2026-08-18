@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {adb} from '../../wailsjs/go/models';
 import * as API from '../../wailsjs/go/main/App';
 import {Icon} from '../icons';
@@ -9,6 +9,7 @@ import {ensureJadx, jadxInfo, jadxLabel} from '../lib/jadx';
 import {sdkLabel, rootUnavailableReason} from '../lib/android';
 import {deviceKey as cacheKey, getOrFetch, useDeviceData} from '../cache';
 import {APPS_STALE_MS} from '../App';
+import {usePoll} from '../lib/poll';
 
 // App details (permissions, version, sizes) move only when the app itself is
 // installed, updated or cleared — all of which invalidate the apps domain from
@@ -48,16 +49,21 @@ export function AppsScreen({device, setScreen}: {device: adb.Device; setScreen?:
   // panel is open so the Launch/Kill button reflects reality without the
   // user having to refresh by hand.
   const [running, setRunning] = useState<adb.AppRunning | null>(null);
+  const probe = useCallback(() => {
+    if (!sel || !device?.id) return;
+    API.IsAppRunning(device.id, sel.pkg).then(setRunning).catch(() => setRunning(null));
+  }, [sel?.pkg, device?.id]);
   useEffect(() => {
     if (!sel) { setRunning(null); return; }
     let cancelled = false;
-    const probe = () => API.IsAppRunning(device.id, sel.pkg)
-      .then(r => { if (!cancelled) setRunning(r); })
-      .catch(() => { if (!cancelled) setRunning(null); });
     probe();
-    const t = setInterval(probe, 3000);
-    return () => { cancelled = true; clearInterval(t); };
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.pkg, device?.id]);
+  // Only while a detail panel is open, and only while the window is visible —
+  // this exists so the Launch/Kill button matches reality, and neither is true
+  // of a hidden window with nothing selected.
+  usePoll(probe, 5000, !!sel && !!device?.id);
   // What each action in this panel will run. Fetched per selection because the
   // export step is named after the app's version and the root steps carry the
   // `su` form this device accepts — neither is guessable in the frontend.

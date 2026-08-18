@@ -113,6 +113,8 @@ export function DeviceDetails(arg1:string):Promise<adb.Device>;
 
 export function DeviceKey(arg1:string):Promise<string>;
 
+export function DeviceTracking():Promise<adb.TrackerState>;
+
 export function DisconnectDevice(arg1:string):Promise<string>;
 
 export function DownloadJadx():Promise<adb.JadxInfo>;

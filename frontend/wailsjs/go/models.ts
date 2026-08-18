@@ -2399,6 +2399,22 @@ export namespace adb {
 	        this.available = source["available"];
 	    }
 	}
+	export class TrackerState {
+	    connected: boolean;
+	    longForm: boolean;
+	    lastError: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TrackerState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connected = source["connected"];
+	        this.longForm = source["longForm"];
+	        this.lastError = source["lastError"];
+	    }
+	}
 
 }
 

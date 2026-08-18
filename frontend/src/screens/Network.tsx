@@ -5,6 +5,7 @@ import {Icon} from '../icons';
 import {Badge, CommandChip, CommandPreview, commandToast, confirmDialog, DataAge, SearchInput, showToast, Switch} from '../ui';
 import {installTcpdumpAuto} from '../lib/tcpdump';
 import {deviceKey as cacheKey, useDeviceData} from '../cache';
+import {usePoll} from '../lib/poll';
 
 type Tab = 'overview' | 'proxy' | 'cert' | 'hosts' | 'dns' | 'capture' | 'connections';
 
@@ -614,9 +615,15 @@ function NetCapture({device}: {device: adb.Device}) {
   useEffect(() => {
     poll();
     probeTd();
-    const t = setInterval(poll, 1500);
-    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device?.id]);
+  // This is the most expensive question adbq asks a device — finding the
+  // capture process means opening /proc/<pid>/comm for every process on the
+  // system. It used to run twice a second whether or not anything was
+  // capturing. Fast only while a capture of ours is live; otherwise it is
+  // watching for a tcpdump somebody else started, which is not a per-second
+  // concern. Gated on window visibility by usePoll.
+  usePoll(poll, state?.active ? 3000 : 15000, !!device?.id);
 
   function installTd() {
     API.InstallTcpdumpWithPicker(device.id)
@@ -813,10 +820,9 @@ function NetConnections({device}: {device: adb.Device}) {
   };
   useEffect(() => {
     reload();
-    if (paused) return;
-    const t = setInterval(reload, 3000);
-    return () => clearInterval(t);
-  }, [device?.id, paused]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device?.id]);
+  usePoll(reload, 3000, !!device?.id && !paused);
 
   // Sockets are read out of procfs; `ss` is missing on stripped ROMs, and the
   // preview should say what actually runs.

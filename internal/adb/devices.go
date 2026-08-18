@@ -55,6 +55,20 @@ func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseDeviceList(out), nil
+}
+
+// ParseDeviceList turns a device listing into Devices.
+//
+// Shared by the `adb devices -l` command and by the push tracker (track.go),
+// which receives the same line format over the host protocol. One parser
+// because the two must agree exactly: if push and poll disagreed about a
+// device's identity or transport, the UI would flip between two versions of
+// the same phone depending on which path last delivered.
+//
+// Tolerates the CLI's "List of devices attached" banner, which the protocol
+// stream does not send.
+func ParseDeviceList(out string) []Device {
 	devices := []Device{}
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -97,7 +111,7 @@ func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 		}
 		devices = append(devices, d)
 	}
-	return devices, nil
+	return devices
 }
 
 // Enrich pulls additional metadata for a single device.
