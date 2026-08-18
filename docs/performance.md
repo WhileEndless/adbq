@@ -117,7 +117,57 @@ takıldı/çıkarıldı, görev durumu.
 
 ---
 
-## 4. Bütçeler
+## 4. Invalidation matrisi
+
+Uzun TTL'i güvenli kılan şey bu tablo. Kural ve zorlaması: CLAUDE.md §4.2.
+
+| Eylem | Düşen domain'ler |
+|---|---|
+| Uygulama kur / kaldır | `apps`, `storage` |
+| Uygulama verisini temizle | `apps`, `storage` |
+| Uygulama başlat / durdur | `apps` |
+| Dosya sil / push | `files`, `storage` |
+| mkdir / mv / chmod / chown | `files` |
+| tcpdump kur | `tcpdump`, `files`, `storage` |
+| frida-server push / başlat / durdur | `frida` (+ push'ta `files`, `storage`) |
+| Sertifika kur | `certs` |
+| hosts yaz / uygula | `hosts` (+ uygulamada `net`) |
+| DNS flush | `net` |
+| iptables (her yazma) | `iptables` |
+| Forward / reverse ekle-sil | `forwards` |
+| Proxy ayarla | `proxy`, `net` |
+| Capture başlat / durdur | `tcpdump` |
+| `tcpip` moduna geç | `net` |
+| Profil uygula | `Profile.Domains()` — etkin adımlardan türetilir |
+| **Reboot / power off / adbd restart** | **hepsi** (`props` dahil) |
+| Bağlan / bağlantıyı kes | **hepsi** |
+| SDK / jadx / AVD işlemleri | `sdk` / `jadx` / `avd` (host kapsamlı) |
+
+Buna ek olarak **öz-iyileşme**: `ShellSU` beklenmedik bir `permission denied`
+aldığında root probe'unu unutur. Başarısızlığın kendisi, herhangi bir zamanlayıcıdan
+daha iyi bir bayatlık sinyali.
+
+## 5. Poll envanteri
+
+Kalan her zamanlayıcı `frontend/src/lib/poll.ts`'teki `usePoll`'dan geçer ve
+**pencere gizliyken durur**. Ayrıca her biri konusunun değişip değişemeyeceğine
+göre kapılıdır.
+
+| Yer | Aralık | Kapı |
+|---|---|---|
+| Cihaz listesi | — | **poll yok**; `track-devices` push |
+| scrcpy durumu | — | **poll yok**; olay |
+| Overview göstergeleri | 2,5 sn | cihaz var |
+| Süreç tablosu | 1/2/5 sn (kullanıcı seçer) | ekran açık, duraklatılmamış |
+| Soket listesi | 3 sn | duraklatılmamış |
+| Capture durumu (Network) | 3 sn aktif / 15 sn değilse | — |
+| Canlı capture durumu | 1,5 sn | **yalnız capture çalışırken** |
+| Uygulama çalışıyor mu | 5 sn | **yalnız detay paneli açıkken** |
+| AVD listesi | 3 sn boot ederken / 20 sn | — |
+| AVD root sekmesi | 30 sn | — |
+| Cihaz güvenlik ağı (arka uç) | 60 sn | push aktifken; düşerse 5 sn |
+
+## 6. Bütçeler
 
 `internal/adb/spawnbudget_device_test.go` içinde kodlanmıştır.
 
@@ -132,3 +182,26 @@ takıldı/çıkarıldı, görev durumu.
 
 Bütçeler hedef değil, **üst sınırdır**: amaçları, ileride bir değişikliğin okuma başına
 tur ekleyip bunu bir yıl boyunca sessizce kullanıcının CPU'sundan ödetmesini engellemek.
+
+## 7. Akış yolları
+
+Süreç sayısı dışında kalan iki maliyet kalemi.
+
+**Canlı capture.** Paket başına dört syscall (iki okuma, tee üzerinden iki yazma)
+vardı; iki uç da artık tamponlu. Çözülmüş paketler dilim + map yerine sabit bir
+ring'te (`internal/adb/packetring.go`): tahliye paket başına **424 µs → 87 ns**
+(100k kapasitede ölçüldü) — eskisi verimi ~2.360 paket/sn'ye sabitliyordu.
+Emit ve decode oturum kilidinin dışına çıktı.
+
+> Tampon bir sözleşme getirir: dosyayı **dışarıdan** okuyan her şey önce
+> `FlushMirror()` çağırmalı, yoksa en yeni paketleri göremez. `SaveLivePcap` ve
+> `Stop` çağırıyor.
+
+**Shell.** PTY okuması başına bir Wails olayı vardı (4 KB'lık okumalar, yani
+`top` çalıştırınca saniyede yüzlerce olay). Yaklaşık bir kare penceresinde
+birleştiriliyor. Scrollback tee'si de tamponlu; diskten okuyan her şey önce
+`flushShellLogs()` çağırıyor.
+
+**Logcat.** Ekranı bir kez ziyaret etmek, feed'i oturum boyunca tam hızda
+bırakıyordu. Akış açık kalıyor (geçmiş korunsun diye) ama ekran kapalıyken
+**olay yayını duruyor**.

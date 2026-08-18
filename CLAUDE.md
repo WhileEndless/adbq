@@ -149,6 +149,48 @@ adbq bir adb sarmalayıcısıdır; kullanıcı bir düğmeye bastığında cihaz
 Yeni bir cihaz eylemi, komut gösterimi olmadan tamamlanmış sayılmaz.
 Desen, envanter ve geriye dönük fazlı plan: [`docs/command-visibility.md`](docs/command-visibility.md).
 
+## 4.2. Önbellek beyanı (bağlayıcı)
+
+adbq cihaz durumunu saniyeler değil **dakikalar** boyunca önbellekliyor; boştaki
+maliyetini saniyede ~4 `adb` sürecinden ~0'a indiren şey bu. Bu takas ancak
+cihazı değiştiren her eylem **neyi değiştirdiğini söylerse** güvenli.
+
+Ve adbq bunu söyleyebilecek durumda: uygulamayı kuran o, forward'ı açan o,
+ikiliyi pushlayan o. Yani burada tahmin yok, muhasebe var.
+
+- Muhasebe birimi **domain**'dir: cihaz durumunun kaba bir alanı
+  (`apps`, `files`, `net`, `iptables`, `certs`, `hosts`, `frida`, …). Tam liste:
+  [`internal/adb/cachedomain.go`](internal/adb/cachedomain.go).
+  Anahtar başına eşleme değil domain, çünkü ~240 binding × N anahtar gözden
+  geçirilemez — ve gözden geçirilemeyen kural, sessizce doğru olmaktan çıkar.
+- **Cihazda etki yaratan her binding, kirlettiği domain'leri beyan eder:**
+  ```go
+  defer a.touch(serial, adb.DomApps, adb.DomStorage)
+  ```
+  Host kapsamlı durum (SDK, jadx, AVD) için serial boş geçilir.
+- Beyan **ertelenir ve koşulsuzdur**, hata yolunda da çalışır: yarım kalan bir
+  kurulum da cihazı değiştirmiş olabilir. Yeniden okumak bir tur, bayat veri
+  göstermek kullanıcının ekrana güvenini maliyet eder.
+- **Fazla geçersiz kılmak ucuzdur, eksik geçersiz kılmak yalandır.** Emin
+  değilsen domain'i düş.
+- Önbelleklenen bir fact'in adı domain önekiyle başlar (`net.ssid`,
+  `apps.list`) — invalidation bu öneki eşler, ayrı bir kayıt defteri yoktur.
+- Frontend anahtarları `deviceKey()` / `hostKey()` ile kurulur
+  ([`frontend/src/cache.tsx`](frontend/src/cache.tsx)). Elle yazılmış anahtar
+  önbelleğe girer ve okunur — sadece asla geçersiz kılınamaz, yani tam da
+  kullanıcı bir şeyi değiştirdiğinde bayatlar.
+- **Önbellek gösterimi besler, kararı beslemez.** `ShellSU` her zaman gerçekten
+  `su` dener; reddedilirse probe'u unutur. Root rozeti önbellekten çizilir,
+  root'lu eylem cihazdan doğrulanır.
+
+Bu kural **denetlenir, tavsiye edilmez**: [`invalidation_test.go`](invalidation_test.go)
+tüm exported `*App` metotlarının AST'sini gezer ve mutasyon fiiliyle başlayan
+her metodun ya beyanda bulunmasını ya da gerekçesi yazılı bir allowlist'te
+olmasını şart koşar. İlk çalıştırıldığında beyansız 48 mutasyon buldu.
+
+Beyan edilmemiş bir mutasyon, tamamlanmış sayılmaz.
+Sınıflandırma, bütçeler ve ölçüm yöntemi: [`docs/performance.md`](docs/performance.md).
+
 ## 5. Asla yapma listesi
 
 - Kullanıcıya sormadan **yıkıcı** komut (`rm -rf`, `git reset --hard`, `git push --force`, drop table, vb.) çalıştırma.
