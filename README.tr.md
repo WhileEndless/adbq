@@ -240,11 +240,18 @@ git push origin main --tags
 ```
 adbq/
 ├── app.go                  # Wails binding'leri: internal/adb üzerinde ince katman
+├── app_invalidate.go       # mutasyon yapan binding'lerin önbellek domain beyanı
+├── device_watcher.go       # cihaz listesini yayınlar (push, poll yedekli)
 ├── main.go                 # Wails önyükleme + `--version` bayrağı
 ├── internal/
 │   ├── version/            # sürüm için tek doğru kaynak
 │   └── adb/
 │       ├── adb.go          # Client (ikili arama, exec, su sarmalama)
+│       ├── metrics.go      # adb süreç sayaçları (Settings → adb load)
+│       ├── track.go        # host:track-devices — cihaz listesi push, poll yok
+│       ├── cachedomain.go  # önbellek domain'leri + invalidation (CLAUDE.md §4.2)
+│       ├── capabilities.go # cihaz başına sabit olan her şey, tek batch sorgu
+│       ├── packetring.go   # canlı capture'ın sabit bellekli ring'i
 │       ├── devices.go      # adb devices, getprop, root tespiti
 │       ├── logcat.go       # akışlı logcat (events)
 │       ├── shell.go        # etkileşimli shell oturumları
@@ -260,6 +267,8 @@ adbq/
 ├── frontend/src/
 │   ├── App.tsx             # kabuk (başlık çubuğu, cihaz sekmeleri, kenar çubuğu)
 │   ├── ui.tsx              # tema hook'u, toast'lar, modallar, arama
+│   ├── cache.tsx           # tek istemci önbelleği; anahtarlar domain taşır
+│   ├── lib/poll.ts         # görünürlüğe ve değişebilirliğe kapılı poll
 │   ├── icons.tsx          # satır içi SVG seti
 │   └── screens/            # ekran başına bir dosya, Wails events ile canlı bağlı
 ├── .github/workflows/      # ci.yml (her yerde derle) + release.yml (yayınla)
