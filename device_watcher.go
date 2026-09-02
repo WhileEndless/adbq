@@ -50,6 +50,9 @@ type deviceWatcher struct {
 
 	mu   sync.Mutex
 	last []adb.Device
+
+	// emitFn overrides the Wails event emit; tests set it, production leaves it nil.
+	emitFn func([]adb.Device)
 }
 
 // startDeviceWatcher begins tracking and emitting. Safe to call once, at startup.
@@ -158,12 +161,34 @@ func (w *deviceWatcher) enrichAndPublish(ctx context.Context, list []adb.Device)
 // user could see has changed. Re-emitting an identical list would re-render the
 // device tabs and re-run every effect keyed on the device — at the fallback
 // poll rate, for a machine sitting idle.
+//
+// It keeps a copy rather than the caller's slice. The push path publishes the
+// bare list the moment a transport appears and then enriches that same backing
+// array in place; holding the caller's slice made `last` alias the very list
+// the next publish compares against, so the enriched version compared equal to
+// itself and was never emitted. The UI kept the bare device — no Android
+// version, no kernel, and Root false — for as long as the app stayed open,
+// which read as "this device is not rooted" on every screen gated on root.
 func (w *deviceWatcher) publish(list []adb.Device) {
+	snapshot := append([]adb.Device(nil), list...)
 	w.mu.Lock()
-	same := devicesEqual(w.last, list)
-	w.last = list
+	same := devicesEqual(w.last, snapshot)
+	w.last = snapshot
 	w.mu.Unlock()
-	if same || w.app.ctx == nil {
+	if same {
+		return
+	}
+	w.emit(snapshot)
+}
+
+// emit sends the list to the frontend. A field rather than a direct call so the
+// publish rule above can be tested without a Wails runtime.
+func (w *deviceWatcher) emit(list []adb.Device) {
+	if w.emitFn != nil {
+		w.emitFn(list)
+		return
+	}
+	if w.app == nil || w.app.ctx == nil {
 		return
 	}
 	runtime.EventsEmit(w.app.ctx, devicesEvent, list)
