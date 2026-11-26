@@ -477,12 +477,47 @@ func (c *Client) UninstallApp(ctx context.Context, serial, pkg string) (string, 
 
 // ClearApp wipes user data via `pm clear`.
 func (c *Client) ClearApp(ctx context.Context, serial, pkg string) (string, error) {
-	return c.Shell(ctx, serial, appClearRemote(pkg))
+	out, err := c.Shell(ctx, serial, appClearRemote(pkg))
+	return out, appClearResultErr(out, err)
+}
+
+func appClearResultErr(out string, err error) error {
+	if err := pmResultErr(out, err); err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) != "Success" {
+		return fmt.Errorf("pm clear did not report success: %q", out)
+	}
+	return nil
 }
 
 // ForceStopApp via `am force-stop`.
 func (c *Client) ForceStopApp(ctx context.Context, serial, pkg string) (string, error) {
-	return c.Shell(ctx, serial, appForceStopRemote(pkg))
+	out, err := c.Shell(ctx, serial, appForceStopRemote(pkg))
+	return out, appStopResultErr(out, err)
+}
+
+func appStopResultErr(out string, err error) error {
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) != "" {
+		// am force-stop is silent on success. Older adb shells can return zero
+		// even if am reported a remote exception.
+		return fmt.Errorf("am force-stop: %s", out)
+	}
+	return nil
+}
+
+func (c *Client) RestartApp(ctx context.Context, serial, pkg string) (string, error) {
+	if out, err := c.ForceStopApp(ctx, serial, pkg); err != nil {
+		return out, fmt.Errorf("stop app: %w", err)
+	}
+	out, err := c.LaunchApp(ctx, serial, pkg)
+	if err != nil {
+		return out, fmt.Errorf("app stopped, launch failed: %w", err)
+	}
+	return out, nil
 }
 
 // AppRunning is the lightweight "is this app alive right now" snapshot the
@@ -574,7 +609,23 @@ func (c *Client) pidsForPackage(ctx context.Context, serial, pkg string) (main i
 
 // LaunchApp uses monkey to launch the default activity.
 func (c *Client) LaunchApp(ctx context.Context, serial, pkg string) (string, error) {
-	return c.Shell(ctx, serial, appLaunchRemote(pkg))
+	out, err := c.Shell(ctx, serial, appLaunchRemote(pkg))
+	return out, appLaunchResultErr(out, err)
+}
+
+func appLaunchResultErr(out string, err error) error {
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "Events injected: 1" {
+			return nil
+		}
+	}
+	if out != "" {
+		return fmt.Errorf("monkey did not launch the app: %s", out)
+	}
+	return fmt.Errorf("monkey did not report a launch event")
 }
 
 // PullAPK copies the base APK to localPath. For split-APK (App Bundle) apps it

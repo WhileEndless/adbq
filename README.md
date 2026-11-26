@@ -127,7 +127,7 @@ git clone https://github.com/WhileEndless/adbq.git
 cd adbq
 
 wails doctor          # verify your toolchain first
-make build            # → build/bin/  (or: wails build)
+make build            # → build/bin/
 make run              # build, then launch
 ```
 
@@ -138,6 +138,7 @@ Common Makefile targets (`make` with no args prints them all):
 | `make dev` | Hot-reload dev mode (Vite + Go) |
 | `make build` | Default build for **your own system** into `build/bin/` |
 | `make build-prod` | Stripped, `-trimpath`, version-stamped release build |
+| `make install` | Build and install or update `/Applications/adbq.app` on macOS |
 | `make build-mac` / `build-mac-intel` / `build-mac-arm` | macOS universal / Intel (x86_64) / Apple Silicon — any of these works on any Mac |
 | `make build-universal` | macOS universal2 (arm64 + amd64), macOS only |
 | `make build-linux` / `make build-windows` | Native build on that OS |
@@ -154,6 +155,8 @@ the OS it targets. Architectures of the *same* OS do cross-build, which is how
 one download serves both Apple Silicon and Intel: `make build-mac` produces the
 universal `.app`, `make build-mac-intel` an Intel-only one, and
 `make build-target PLATFORM=os/arch` forces any target you want.
+
+Use `make install INSTALL_DIR="$HOME/Applications"` for a per-user install. If adbq is running during an update, reopen it to load the new build.
 
 CI does the same thing on GitHub's runners:
 

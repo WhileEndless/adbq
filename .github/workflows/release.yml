@@ -77,7 +77,7 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          wails build -platform "$PLATFORM" -clean -trimpath \
+          wails build -skipembedcreate -platform "$PLATFORM" -clean -trimpath \
             -ldflags "-s -w -X adbq/internal/version.Version=${{ steps.ver.outputs.version }}"
 
       - name: Package

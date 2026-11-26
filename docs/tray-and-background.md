@@ -1,6 +1,20 @@
 # Sistem Tepsisi, Menü Bar ve Arka Plana Gizleme
 
-Bu doküman, Wails v2 uygulamanın **kapatılmadan** arka planda çalışmasını ve macOS menü bar / Windows system tray / Linux notification area üzerinden yönetilmesini tarif eder.
+## macOS hızlı işlemleri
+
+adbq'nun menü çubuğu ikonu **Device** menüsünden seçilen çevrimiçi cihazda çalışır. **Recent Apps** mevcut Frida geçmişindeki son on kaydı gösterir. Her paketin menüsündeki **Start with Frida** uygulamayı kayıtlı script'lerle başlatır. Daha önce Attach kullanılmışsa **Attach with Frida** çalışan sürece bağlanır. Aynı menüden ADB ile başlatabilir, yeniden başlatabilir, onay vererek uygulama verisini sıfırlayabilir ve son işlemin komutlarını görebilirsin.
+
+**Start scrcpy** seçili cihazın ekranını ayrı bir pencerede açar. Yansıtma çalışırken aynı menüden **Stop scrcpy** ile durdurabilirsin.
+
+Pencereyi kapatınca adbq arka planda çalışır. **Open adbq** pencereyi geri getirir, **Quit adbq** arka plan işlemlerini de kapatır.
+
+Başka bir uygulamanın tam ekran alanında da menünün açılabilmesi için adbq, menü çubuğu ikonunu kurarken AppKit'in `Accessory` politikasına geçer. Bu modda adbq Dock'ta ve `⌘Tab` uygulama değiştiricisinde görünmez.
+
+`toolbar.go` cihaz seçimine, aksiyon tanımlarına ve sonuçlara sahip. `internal/menubar` menü modelini AppKit ana kuyruğunda çizer. Menü açılırken cihaz izleyicisinin anlık görüntüsü ve mevcut Frida geçmişi okunur. Yeni bir paket aksiyonu eklerken Go'daki aksiyon tanımına etiketi, komut önizlemesini ve çalıştırıcıyı ekle.
+
+## Diğer platformlar için tasarım notları
+
+Aşağıdaki Wails v2 ve systray örnekleri olası platform entegrasyonlarını tarif eder.
 
 ## 1. Genel Mimari
 
@@ -142,15 +156,9 @@ func (a *App) startup(ctx context.Context) {
 
 macOS'ta tray uygulaması = menü bar uygulaması. Dock'tan saklamak için iki yol:
 
-### 6.1. Wails 2.8+ ile
+### 6.1. AppKit ile
 
-```go
-import "github.com/wailsapp/wails/v2/pkg/options/mac"
-
-Mac: &mac.Options{
-    ActivationPolicy: mac.NSApplicationActivationPolicyAccessory,
-}
-```
+Wails v2.12 açılışta `NSApplicationActivationPolicyRegular` uygular ve `mac.Options` üzerinden bu ayarı sunmaz. adbq menü çubuğu ikonunu kurduğu sırada ana kuyrukta `setActivationPolicy:` çağırır. Bu yol hem geliştirme hem üretim derlemesinde çalışır.
 
 ### 6.2. Info.plist ile (her sürümde çalışır)
 

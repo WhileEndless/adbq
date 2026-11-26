@@ -1,9 +1,45 @@
 package adb
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 )
+
+func TestFridaWaitReady(t *testing.T) {
+	t.Run("running", func(t *testing.T) {
+		s := &FridaSession{ready: make(chan struct{}), done: make(chan struct{}), info: FridaSessionInfo{Status: "running"}}
+		s.ingest(FridaMsg{Kind: "status", Detail: "running"})
+		if err := s.WaitReady(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("startup failure", func(t *testing.T) {
+		s := &FridaSession{ready: make(chan struct{}), done: make(chan struct{})}
+		s.ingest(FridaMsg{Kind: "fatal", Detail: "app process is not running"})
+		if err := s.WaitReady(context.Background()); err == nil || !strings.Contains(err.Error(), "process is not running") {
+			t.Fatalf("got %v, want driver failure", err)
+		}
+	})
+	t.Run("saved script did not load", func(t *testing.T) {
+		s := &FridaSession{ready: make(chan struct{}), done: make(chan struct{}), info: FridaSessionInfo{Status: "running"}, scriptsPending: 2}
+		s.ingest(FridaMsg{Kind: "loaded"})
+		s.ingest(FridaMsg{Kind: "status", Detail: "running"})
+		if err := s.WaitReady(context.Background()); err == nil || !strings.Contains(err.Error(), "1 missing") {
+			t.Fatalf("got %v, want script load failure", err)
+		}
+	})
+	t.Run("cancellation", func(t *testing.T) {
+		s := &FridaSession{ready: make(chan struct{}), done: make(chan struct{})}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := s.WaitReady(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v, want cancellation", err)
+		}
+	})
+}
 
 func TestParseFridaMsg(t *testing.T) {
 	cases := []struct {

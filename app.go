@@ -59,9 +59,10 @@ type App struct {
 	emu      *adb.EmulatorManager
 	pkgs     *adb.PackageManager
 
-	fridaMu   sync.Mutex
-	fridaSess map[string]*adb.FridaSession
-	fridaSeq  int
+	fridaMu      sync.Mutex
+	fridaSess    map[string]*adb.FridaSession
+	fridaSeq     int
+	fridaClosing bool
 
 	dnsMu   sync.Mutex
 	dnsSnif map[string]*adb.DNSSnifferStream
@@ -543,7 +544,11 @@ type scrcpyStatus struct {
 
 func (a *App) ScrcpyActive(serial string) bool { return a.scrcpy.IsActive(serial) }
 func (a *App) StartScrcpy(serial string) error {
-	if err := a.scrcpy.Start(a.ctx, serial, adb.ScrcpyDefaultArgs(serial)); err != nil {
+	return a.startScrcpy(a.ctx, serial)
+}
+
+func (a *App) startScrcpy(ctx context.Context, serial string) error {
+	if err := a.scrcpy.Start(ctx, serial, adb.ScrcpyDefaultArgs(serial)); err != nil {
 		return err
 	}
 	runtime.EventsEmit(a.ctx, scrcpyEvent, scrcpyStatus{Serial: serial, Active: true})
@@ -963,6 +968,9 @@ func (a *App) PullCapture(serial string) (string, error) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.fridaMu.Lock()
+	a.fridaClosing = true
+	a.fridaMu.Unlock()
 	// Stop publishing before tearing anything down, so a late device event
 	// cannot arrive after the UI has gone.
 	if a.devices != nil {
@@ -2296,28 +2304,45 @@ const fridaFlushInterval = 100 * time.Millisecond
 // Messages stream via the "frida-session:<id>" event; call GetFridaSessionLog
 // right after subscribing to backfill the start race.
 func (a *App) StartFridaSession(serial, pkg, mode, runtimeVer string, port int, scriptIDs []string) (adb.FridaSessionInfo, error) {
-	if a.frida == nil {
-		return adb.FridaSessionInfo{}, fmt.Errorf("frida store unavailable")
-	}
-	rt, kind := a.frida.ResolveForVersion(runtimeVer)
-	if kind == "none" {
-		return adb.FridaSessionInfo{}, fmt.Errorf("no host runtime for frida %s — create a venv or register an interpreter in the Runtime tab", runtimeVer)
-	}
-	scripts, err := a.collectScripts(scriptIDs)
+	sess, err := a.startFridaSession(a.ctx, serial, pkg, mode, runtimeVer, port, scriptIDs)
 	if err != nil {
 		return adb.FridaSessionInfo{}, err
 	}
+	return sess.Info(), nil
+}
+
+func (a *App) startFridaSession(ctx context.Context, serial, pkg, mode, runtimeVer string, port int, scriptIDs []string) (*adb.FridaSession, error) {
+	if a.frida == nil {
+		return nil, fmt.Errorf("frida store unavailable")
+	}
+	rt, kind := a.frida.ResolveForVersion(runtimeVer)
+	if kind == "none" {
+		return nil, fmt.Errorf("no host runtime for frida %s — create a venv or register an interpreter in the Runtime tab", runtimeVer)
+	}
+	scripts, err := a.collectScripts(scriptIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	a.fridaMu.Lock()
+	if a.fridaClosing {
+		a.fridaMu.Unlock()
+		return nil, fmt.Errorf("adbq is quitting")
+	}
 	a.fridaSeq++
 	id := fmt.Sprintf("f-%d", a.fridaSeq)
 	a.fridaMu.Unlock()
 
-	sess, err := adb.StartFridaSession(a.ctx, a.client, rt, id, serial, pkg, mode, port, scripts)
+	sess, err := adb.StartFridaSession(ctx, a.client, rt, id, serial, pkg, mode, port, scripts)
 	if err != nil {
-		return adb.FridaSessionInfo{}, err
+		return nil, err
 	}
 	a.fridaMu.Lock()
+	if a.fridaClosing {
+		a.fridaMu.Unlock()
+		sess.Stop()
+		return nil, fmt.Errorf("adbq is quitting")
+	}
 	a.fridaSess[id] = sess
 	a.fridaMu.Unlock()
 
@@ -2361,7 +2386,42 @@ func (a *App) StartFridaSession(serial, pkg, mode, runtimeVer string, port int, 
 			}
 		}
 	}()
-	return sess.Info(), nil
+	return sess, nil
+}
+
+// RepeatFridaSession reuses the settings of the latest history entry for pkg
+// against the server running on the selected device.
+func (a *App) RepeatFridaSession(serial, pkg string) (adb.FridaSessionInfo, error) {
+	for _, entry := range a.ListFridaHistory() {
+		if entry.Package == pkg {
+			sess, err := a.repeatFridaSession(a.ctx, serial, entry)
+			if err != nil {
+				return adb.FridaSessionInfo{}, err
+			}
+			return sess.Info(), nil
+		}
+	}
+	return adb.FridaSessionInfo{}, fmt.Errorf("no Frida history for %s", pkg)
+}
+
+func (a *App) repeatFridaSession(ctx context.Context, serial string, entry adb.FridaHistoryEntry) (*adb.FridaSession, error) {
+	if entry.Mode != "attach" {
+		defer a.touch(serial, adb.DomApps)
+	}
+	// Servers started outside adbq may be absent from the inventory. In that
+	// case let Frida connect using its default port as the Sessions screen did.
+	servers, _ := a.client.ListFridaServers(ctx, serial)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	port := 0
+	for _, server := range servers {
+		if server.Active {
+			port = server.Port
+			break
+		}
+	}
+	return a.startFridaSession(ctx, serial, entry.Package, entry.Mode, entry.RuntimeVer, port, entry.ScriptIDs)
 }
 
 // collectScripts resolves library script IDs to name+source pairs for the driver.

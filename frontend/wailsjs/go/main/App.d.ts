@@ -361,6 +361,8 @@ export function RemoveRootAVD():Promise<void>;
 
 export function RemoveTask(arg1:string):Promise<void>;
 
+export function RepeatFridaSession(arg1:string,arg2:string):Promise<adb.FridaSessionInfo>;
+
 export function ResetADBStats():Promise<void>;
 
 export function ResizeShell(arg1:string,arg2:number,arg3:number):Promise<void>;

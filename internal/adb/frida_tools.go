@@ -615,8 +615,8 @@ const fridaToolsProbeLimit = 24
 //
 // Walking down to the first release of that line matters. frida-tools patch
 // releases keep shipping newer frida-java-bridge builds without raising the
-// declared floor — 14.5.0 and 14.5.2 both claim `frida>=17.5.0`, yet only
-// 14.5.0's bridge actually hooks under a 17.5.1 agent. The floor tells us which
+// declared floor. A newer patch's bridge can fail under a core that still
+// meets that floor. The floor tells us which
 // line was cut for our core; the first release on it is the one built against it.
 func resolveFridaToolsVersion(ctx context.Context, fridaVer string) (string, error) {
 	all, err := pypiVersions(ctx, "frida-tools")

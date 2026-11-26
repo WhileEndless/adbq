@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"os"
+	"sync"
 
+	"adbq/internal/menubar"
 	"adbq/internal/version"
 
 	"github.com/wailsapp/wails/v2"
@@ -37,6 +40,9 @@ func main() {
 
 	// Create an instance of the app structure
 	app := NewApp()
+	var toolbarMu sync.Mutex
+	var stopToolbar func()
+	var toolbarClosed bool
 
 	// Create application with options
 	err := wails.Run(&options.App{
@@ -48,9 +54,27 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 12, G: 12, B: 16, A: 1},
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
+		BackgroundColour:  &options.RGBA{R: 12, G: 12, B: 16, A: 1},
+		HideWindowOnClose: menubar.Supported,
+		OnStartup: func(ctx context.Context) {
+			app.startup(ctx)
+			if menubar.Supported {
+				toolbarMu.Lock()
+				if !toolbarClosed {
+					stopToolbar = app.mountToolbar(ctx)
+				}
+				toolbarMu.Unlock()
+			}
+		},
+		OnShutdown: func(ctx context.Context) {
+			toolbarMu.Lock()
+			toolbarClosed = true
+			if stopToolbar != nil {
+				stopToolbar()
+			}
+			toolbarMu.Unlock()
+			app.shutdown(ctx)
+		},
 		Bind: []interface{}{
 			app,
 		},

@@ -230,14 +230,14 @@ func TestRequirementAllows(t *testing.T) {
 		want      bool
 	}{
 		{spec, "17.5.0", true},
-		{spec, "17.5.1", true},
+		{spec, "17.6.41", true},
 		{spec, "17.10.0", true},
 		{spec, "17.4.9", false},
 		{spec, "18.0.0", false},
 		{spec, "16.7.19", false},
 		{"(>=17.8.0)", "17.8.0", true},
 		{">=17.10.0; python_version >= '3.9'", "17.9.0", false},
-		{"", "17.5.1", true},
+		{"", "17.6.41", true},
 		{spec, "", false},
 	}
 	for _, c := range cases {

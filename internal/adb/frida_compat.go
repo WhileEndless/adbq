@@ -24,9 +24,8 @@ const (
 // fridaJavaBridgeART is the first frida line whose Java bridge locates ART's
 // internals by scanning for field offsets rather than by table. The scan does not
 // resolve on Android 5.x, so the server runs but nothing Java-related works.
-// Measured on an API 21 emulator with 17.5.1: frida-server reports its version,
-// then the agent fails with "Unable to find fields in java/lang/Thread" and every
-// enumerate/spawn call times out.
+// On Android 5.x the server can report its version before the agent fails
+// with "Unable to find fields in java/lang/Thread" and requests time out.
 const fridaJavaBridgeART = "16.6.0"
 
 // androidLollipopMax is the last API level of Android 5.x.

@@ -18,6 +18,7 @@ import (
 type ScrcpyManager struct {
 	mu      sync.Mutex
 	procs   map[string]*exec.Cmd // serial → running process
+	closed  bool
 	binPath string
 	major   int // cached scrcpy major version (0 = not yet probed/unknown)
 	// onExit is notified when a mirror ends. See OnExit.
@@ -76,30 +77,12 @@ func (m *ScrcpyManager) Available() bool {
 	return err == nil
 }
 
-// IsActive returns true when a tracked scrcpy process for the serial is still
-// running. Reaps any zombie before answering.
+// IsActive reports whether the manager still owns a mirror for this serial.
+// The Wait goroutine removes the process as soon as it exits.
 func (m *ScrcpyManager) IsActive(serial string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	cmd := m.procs[serial]
-	if cmd == nil {
-		return false
-	}
-	// Probe: ProcessState becomes non-nil only after Wait.
-	if cmd.ProcessState != nil {
-		delete(m.procs, serial)
-		return false
-	}
-	// Send signal 0 to test liveness.
-	if cmd.Process == nil {
-		delete(m.procs, serial)
-		return false
-	}
-	if err := cmd.Process.Signal(syscallZero); err != nil {
-		delete(m.procs, serial)
-		return false
-	}
-	return true
+	return m.procs[serial] != nil
 }
 
 // scrcpyEnv returns an environment slice suitable for scrcpy. It copies the
@@ -163,8 +146,7 @@ func resolveADBForScrcpy() string {
 }
 
 // Start launches `scrcpy -s SERIAL [extra args...]` detached from our stdio.
-// If a scrcpy is already running for this serial, it is left as-is and the
-// existing window comes to front (best-effort).
+// If a scrcpy is already running for this serial, it is left as-is.
 //
 // A 400 ms grace window after start is used to detect immediate failures (bad
 // flags, device not authorised, codec error, etc.) and surface them as an error
@@ -209,10 +191,23 @@ func (m *ScrcpyManager) Start(ctx context.Context, serial string, extraArgs []st
 	cmd.Stderr = &stderrBuf
 	cmd.Env = scrcpyEnv()
 
-	if err := cmd.Start(); err != nil {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return errors.New("scrcpy manager is shutting down")
+	}
+	if m.procs[serial] != nil {
+		m.mu.Unlock()
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		m.mu.Unlock()
 		return err
 	}
-	m.mu.Lock()
+	if err := cmd.Start(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
 	m.procs[serial] = cmd
 	m.mu.Unlock()
 
@@ -220,18 +215,19 @@ func (m *ScrcpyManager) Start(ctx context.Context, serial string, extraArgs []st
 	done := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
-		close(done)
 		m.mu.Lock()
 		if m.procs[serial] == cmd {
 			delete(m.procs, serial)
 		}
 		onExit := m.onExit
+		stillActive := m.procs[serial] != nil
 		m.mu.Unlock()
+		close(done)
 		// The mirror closing is something adbq witnesses directly. Announcing it
 		// is what lets the UI drop the two pollers that used to ask "is scrcpy
 		// still up?" every couple of seconds — a question only this process
 		// could answer, being the one that started it.
-		if onExit != nil {
+		if onExit != nil && !stillActive {
 			onExit(serial)
 		}
 	}()
@@ -255,6 +251,9 @@ func (m *ScrcpyManager) Start(ctx context.Context, serial string, extraArgs []st
 		return fmt.Errorf("%s", msg)
 	case <-time.After(400 * time.Millisecond):
 		return nil
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		return ctx.Err()
 	}
 }
 
@@ -329,6 +328,7 @@ func (m *ScrcpyManager) Stop(serial string) error {
 // StopAll kills any tracked scrcpy windows (used on app shutdown).
 func (m *ScrcpyManager) StopAll() {
 	m.mu.Lock()
+	m.closed = true
 	procs := make([]*exec.Cmd, 0, len(m.procs))
 	for _, c := range m.procs {
 		procs = append(procs, c)

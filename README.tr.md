@@ -128,7 +128,7 @@ git clone https://github.com/WhileEndless/adbq.git
 cd adbq
 
 wails doctor          # önce araç zincirini doğrula
-make build            # → build/bin/  (veya: wails build)
+make build            # → build/bin/
 make run              # derle, ardından çalıştır
 ```
 
@@ -139,6 +139,7 @@ Sık kullanılan Makefile hedefleri (argümansız `make` hepsini listeler):
 | `make dev` | Hot-reload geliştirme modu (Vite + Go) |
 | `make build` | **Kendi sisteminiz** için `build/bin/` altına derler |
 | `make build-prod` | Sembolleri çıkarılmış, `-trimpath`, sürüm damgalı yayın derlemesi |
+| `make install` | macOS’ta derler ve `/Applications/adbq.app` uygulamasını kurar veya günceller |
 | `make build-mac` / `build-mac-intel` / `build-mac-arm` | macOS universal / Intel (x86_64) / Apple Silicon — herhangi biri her Mac'te çalışır |
 | `make build-universal` | macOS universal2 (arm64 + amd64), yalnızca macOS |
 | `make build-linux` / `make build-windows` | O işletim sisteminde yerel derleme |
@@ -156,6 +157,8 @@ mimarileri ise çapraz derlenebilir — tek bir indirmenin hem Apple Silicon'da 
 Intel'de çalışmasının yolu bu: `make build-mac` universal `.app` üretir,
 `make build-mac-intel` yalnızca Intel'i, `make build-target PLATFORM=os/arch` ise
 istediğiniz hedefi zorlar.
+
+Kullanıcıya özel kurulum için `make install INSTALL_DIR="$HOME/Applications"` komutunu kullanın. Güncelleme sırasında adbq çalışıyorsa yeni derlemeyi yüklemek için uygulamayı yeniden açın.
 
 CI aynı işi GitHub runner'larında yapar:
 

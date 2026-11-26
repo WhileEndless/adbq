@@ -5,6 +5,7 @@
 #   make dev        → wails dev (hot-reload, opens app)
 #   make build      → wails build (release binary in build/bin/)
 #   make build-prod → stripped + UPX-skipped release with -trimpath
+#   make install    → build and install/update the macOS app
 #   make test       → Go tests + frontend type-check
 #   make lint       → gofmt, go vet, staticcheck (if installed), tsc, eslint (if installed)
 #   make tidy       → go mod tidy + npm install
@@ -32,6 +33,10 @@ VERSION       := $(shell awk -F'"' '/Version = "/{print $$2; exit}' internal/ver
 # debug symbols for smaller release binaries.
 LDFLAGS_PROD  := -s -w -X adbq/internal/version.Version=$(VERSION)
 GO_FLAGS_PROD := -trimpath
+# Wails v2.12's embed scan can fail with newer Go import data. Prepare our
+# known embed path directly and keep Wails binding generation enabled.
+WAILS_BUILD   := $(WAILS) build -skipembedcreate
+INSTALL_DIR   ?= /Applications
 
 # Detect host OS for nicer "build all" affordances. Cross-compiling .app
 # bundles between macOS and Linux/Windows is not supported by Wails — build each
@@ -39,7 +44,7 @@ GO_FLAGS_PROD := -trimpath
 HOST_OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 
 # ─── Phony ──────────────────────────────────────────────────────────────────
-.PHONY: help all version dev build build-prod build-debug build-target \
+.PHONY: help all version dev build build-prod build-debug build-target install prepare-embed \
         build-mac build-mac-intel build-mac-arm build-universal \
         build-linux build-windows \
         test test-go test-frontend vet fmt lint tidy generate \
@@ -66,14 +71,24 @@ else
 endif
 
 # ─── Build ──────────────────────────────────────────────────────────────────
-build: frontend-install ## Default debug-friendly build (build/bin/).
-	$(WAILS) build
+build: frontend-install prepare-embed ## Default debug-friendly build (build/bin/).
+	$(WAILS_BUILD)
 
-build-prod: frontend-install ## Release build with stripped symbols + trimpath.
-	$(WAILS) build -clean -trimpath -ldflags "$(LDFLAGS_PROD)"
+build-prod: frontend-install prepare-embed ## Release build with stripped symbols + trimpath.
+	$(WAILS_BUILD) -clean $(GO_FLAGS_PROD) -ldflags "$(LDFLAGS_PROD)"
 
-build-debug: frontend-install ## Debug build (devtools open, symbols kept).
-	$(WAILS) build -debug -devtools
+build-debug: frontend-install prepare-embed ## Debug build (devtools open, symbols kept).
+	$(WAILS_BUILD) -debug -devtools
+
+ifeq ($(HOST_OS),darwin)
+install: export ADBQ_INSTALL_DIR = $(INSTALL_DIR)
+install: build-prod ## Build and install or update adbq.app (default: /Applications).
+	sh build/install-macos.sh "$(BIN_DIR)/$(APP_NAME).app" "$$ADBQ_INSTALL_DIR"
+else
+install: ## Install adbq.app (macOS only).
+	@echo "make install is available on macOS." >&2
+	@exit 1
+endif
 
 version: ## Print the version (single source: internal/version/version.go).
 	@echo "$(VERSION)"
@@ -85,42 +100,46 @@ version: ## Print the version (single source: internal/version/version.go).
 # Cross-OS (e.g. a Linux binary from macOS) is NOT supported by Wails and will
 # fail at the CGO/webview step — use CI (release.yml) for those.
 PLATFORM ?=
-build-target: frontend-install ## Build a specific target: make build-target PLATFORM=os/arch.
+build-target: frontend-install prepare-embed ## Build a specific target: make build-target PLATFORM=os/arch.
 	@test -n "$(PLATFORM)" || { echo "set PLATFORM, e.g. make build-target PLATFORM=darwin/amd64" >&2; exit 1; }
-	$(WAILS) build -platform $(PLATFORM) -clean -trimpath -ldflags "$(LDFLAGS_PROD)"
+	$(WAILS_BUILD) -platform $(PLATFORM) -clean $(GO_FLAGS_PROD) -ldflags "$(LDFLAGS_PROD)"
 
 # ─── macOS architecture shortcuts (work on any Mac) ──────────────────────────
 build-mac: build-universal ## Alias for build-universal (arm64 + amd64 .app).
 
-build-mac-intel: frontend-install ## macOS Intel/x86_64 (.app). Works on Apple Silicon too.
-	$(WAILS) build -platform darwin/amd64 -clean -trimpath -ldflags "$(LDFLAGS_PROD)"
+build-mac-intel: frontend-install prepare-embed ## macOS Intel/x86_64 (.app). Works on Apple Silicon too.
+	$(WAILS_BUILD) -platform darwin/amd64 -clean $(GO_FLAGS_PROD) -ldflags "$(LDFLAGS_PROD)"
 
-build-mac-arm: frontend-install ## macOS Apple Silicon/arm64 (.app).
-	$(WAILS) build -platform darwin/arm64 -clean -trimpath -ldflags "$(LDFLAGS_PROD)"
+build-mac-arm: frontend-install prepare-embed ## macOS Apple Silicon/arm64 (.app).
+	$(WAILS_BUILD) -platform darwin/arm64 -clean $(GO_FLAGS_PROD) -ldflags "$(LDFLAGS_PROD)"
 
-build-universal: frontend-install ## macOS universal2 (arm64 + amd64). macOS-only.
+build-universal: frontend-install prepare-embed ## macOS universal2 (arm64 + amd64). macOS-only.
 ifeq ($(HOST_OS),darwin)
-	$(WAILS) build -platform darwin/universal -clean -trimpath -ldflags "$(LDFLAGS_PROD)"
+	$(WAILS_BUILD) -platform darwin/universal -clean $(GO_FLAGS_PROD) -ldflags "$(LDFLAGS_PROD)"
 else
 	@echo "build-universal is macOS-only; use 'make build' on $(HOST_OS)" >&2; exit 1
 endif
 
 # ─── Other-OS builds: native only. Use 'make build-target' to force, or CI. ───
-build-linux: frontend-install ## Linux amd64 build. Run on Linux (needs gtk3 + webkit2gtk).
+build-linux: frontend-install prepare-embed ## Linux amd64 build. Run on Linux (needs gtk3 + webkit2gtk).
 ifeq ($(HOST_OS),linux)
-	$(WAILS) build -platform linux/amd64 -clean -trimpath -ldflags "$(LDFLAGS_PROD)"
+	$(WAILS_BUILD) -platform linux/amd64 -clean $(GO_FLAGS_PROD) -ldflags "$(LDFLAGS_PROD)"
 else
 	@echo "build-linux must run on Linux (cross-OS unsupported). Use CI, or force with 'make build-target PLATFORM=linux/amd64'." >&2; exit 1
 endif
 
-build-windows: frontend-install ## Windows amd64 build. Run on Windows.
+build-windows: frontend-install prepare-embed ## Windows amd64 build. Run on Windows.
 ifeq ($(HOST_OS),windows)
-	$(WAILS) build -platform windows/amd64 -clean -trimpath -ldflags "$(LDFLAGS_PROD)"
+	$(WAILS_BUILD) -platform windows/amd64 -clean $(GO_FLAGS_PROD) -ldflags "$(LDFLAGS_PROD)"
 else
 	@echo "build-windows must run on Windows (cross-OS unsupported). Use CI, or force with 'make build-target PLATFORM=windows/amd64'." >&2; exit 1
 endif
 
 # ─── Frontend convenience ───────────────────────────────────────────────────
+prepare-embed:
+	@mkdir -p $(FRONTEND_DIR)/dist
+	@test -f $(FRONTEND_DIR)/dist/.gitkeep || touch $(FRONTEND_DIR)/dist/.embed-ready
+
 frontend-install: $(FRONTEND_DIR)/node_modules/.package-lock.json ## Install npm deps if missing.
 
 $(FRONTEND_DIR)/node_modules/.package-lock.json: $(FRONTEND_DIR)/package.json

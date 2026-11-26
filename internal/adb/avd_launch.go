@@ -590,7 +590,7 @@ func emulatorEnv(info AndroidSDKInfo) []string {
 }
 
 // procAlive reports whether a started child is still running, reaping the
-// bookkeeping for one that has exited. Mirrors ScrcpyManager.IsActive.
+// bookkeeping for one that has exited.
 func procAlive(cmd *exec.Cmd) bool {
 	if cmd == nil || cmd.Process == nil || cmd.ProcessState != nil {
 		return false

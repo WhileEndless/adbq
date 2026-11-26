@@ -113,7 +113,7 @@ func isRunnableServer(name, perms string) bool {
 // Identification degrades in steps because how much /proc reveals depends on
 // privilege: the exe link is authoritative but root-only, the command line
 // survives without root, and the comm name is always readable but truncated to
-// 15 characters — far too short to tell frida-server-17.5.1 from -17.5.2.
+// 15 characters, which can make different releases share the same name.
 func markRunningServers(servers []FridaServer, procs []fridaProc) {
 	for _, p := range procs {
 		if i := indexOfServerFor(servers, p); i >= 0 {

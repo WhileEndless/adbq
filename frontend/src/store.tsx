@@ -277,8 +277,12 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
       // proportional to the history rather than to what arrived.
       ring.push(...fresh);
       if (ring.length > FRIDA_MSG_MAX) ring.splice(0, ring.length - FRIDA_MSG_MAX);
-      const ended = fresh.some(m => m.kind === 'detached') || cur.ended;
-      return {...prev, [id]: {...cur, messages: ring, lastSeq: maxSeq, rev: cur.rev + 1, ended}};
+      const fatal = fresh.find(m => m.kind === 'fatal');
+      const ended = !!fatal || fresh.some(m => m.kind === 'detached') || cur.ended;
+      const info = fatal && cur.info.status === 'running'
+        ? new adb.FridaSessionInfo({...cur.info, status: 'error', statusNote: fatal.detail || fatal.payload})
+        : cur.info;
+      return {...prev, [id]: {...cur, info, messages: ring, lastSeq: maxSeq, rev: cur.rev + 1, ended}};
     });
   }, []);
 
@@ -302,9 +306,19 @@ export function StoreProvider({children}: {children: React.ReactNode}) {
   // adoptFridaSession registers a session the backend already created (e.g. via
   // StartAppWithFrida's orchestration) so the store subscribes + backfills it.
   const adoptFridaSession = useCallback((info: adb.FridaSessionInfo) => {
-    setFridaSessions(prev => prev[info.id] ? prev : ({...prev, [info.id]: {info, messages: fridaMsgs.current[info.id] || (fridaMsgs.current[info.id] = []), lastSeq: 0, rev: 0, ended: false}}));
+    setFridaSessions(prev => prev[info.id] ? prev : ({...prev, [info.id]: {info, messages: fridaMsgs.current[info.id] || (fridaMsgs.current[info.id] = []), lastSeq: 0, rev: 0, ended: info.status !== 'running'}}));
     attachFridaSession(info.id);
   }, [attachFridaSession]);
+
+  // A macOS menu action can create a session without the WebView in front.
+  useEffect(() => {
+    let live = true;
+    const off = EventsOn('frida:session-started', adoptFridaSession);
+    API.ListFridaSessions().then(sessions => {
+      if (live) sessions?.forEach(adoptFridaSession);
+    }).catch(() => {});
+    return () => { live = false; off(); };
+  }, [adoptFridaSession]);
 
   // port is the device port the frida-server listens on; 0 means frida's
   // default, anything else is reached through an adb forward the backend opens.

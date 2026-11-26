@@ -718,6 +718,10 @@ export function RemoveTask(arg1) {
   return window['go']['main']['App']['RemoveTask'](arg1);
 }
 
+export function RepeatFridaSession(arg1, arg2) {
+  return window['go']['main']['App']['RepeatFridaSession'](arg1, arg2);
+}
+
 export function ResetADBStats() {
   return window['go']['main']['App']['ResetADBStats']();
 }

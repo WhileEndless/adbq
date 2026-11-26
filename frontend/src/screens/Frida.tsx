@@ -981,11 +981,8 @@ function FridaSessionsTab({device}: {device: adb.Device}) {
     if (!device?.id) { showToast({title: 'No device', body: 'Connect a device first', kind: 'err'}); return; }
     setRepeating(h.package);
     try {
-      // Repeat a past launch against whatever server is up now, on its own port
-      // — it may not be the one (or the port) the original run used.
-      const list = await API.ListFridaServers(device.id).catch(() => [] as adb.FridaServer[]);
-      const active = (list || []).find(x => x.active);
-      const info = await store.startFridaSession(device.id, h.package, h.mode, h.runtimeVer, active?.port || 0, h.scriptIds || []);
+      const info = await API.RepeatFridaSession(device.id, h.package);
+      store.adoptFridaSession(info);
       setSelId(info.id);
       loadHistory();
     } catch (e) {

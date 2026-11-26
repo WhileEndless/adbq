@@ -74,8 +74,11 @@ type FridaSession struct {
 	status string
 	note   string
 
-	done     chan struct{}
-	stopOnce sync.Once
+	done           chan struct{}
+	ready          chan struct{}
+	readyOnce      sync.Once
+	scriptsPending int
+	stopOnce       sync.Once
 }
 
 type fridaJob struct {
@@ -185,6 +188,14 @@ func StartFridaSession(ctx context.Context, c *Client, rt FridaRuntime, id, seri
 		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		cleanup()
+		_ = os.RemoveAll(tmp)
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
 		cleanup()
 		_ = os.RemoveAll(tmp)
@@ -192,6 +203,8 @@ func StartFridaSession(ctx context.Context, c *Client, rt FridaRuntime, id, seri
 	}
 
 	s := &FridaSession{
+		ready:          make(chan struct{}),
+		scriptsPending: len(scripts),
 		info: FridaSessionInfo{
 			ID: id, Serial: serial, Package: pkg, Mode: mode,
 			Runtime: rt.FridaVersion, StartedAt: time.Now().UnixMilli(), Status: "running",
@@ -294,6 +307,12 @@ func (s *FridaSession) ingest(m FridaMsg) {
 		s.info.Status = "error"
 		s.info.StatusNote = s.note
 	}
+	if m.Kind == "loaded" && s.scriptsPending > 0 {
+		s.scriptsPending--
+	}
+	if s.ready != nil && (m.Kind == "fatal" || (m.Kind == "status" && m.Detail == "running")) {
+		s.readyOnce.Do(func() { close(s.ready) })
+	}
 	if len(s.ring) >= fridaSessionRing {
 		s.ring = append(s.ring[1:], m)
 	} else {
@@ -307,6 +326,28 @@ func (s *FridaSession) ingest(m FridaMsg) {
 // ring is the single source of truth, so a slow consumer coalesces rather than
 // losing lines — which is what a chatty script needs.
 func (s *FridaSession) Done() <-chan struct{} { return s.done }
+
+// WaitReady waits for the driver to attach and finish its startup handshake.
+func (s *FridaSession) WaitReady(ctx context.Context) error {
+	select {
+	case <-s.ready:
+	case <-s.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.info.StatusNote != "" {
+		return fmt.Errorf("%s", s.info.StatusNote)
+	}
+	if s.info.Status != "running" {
+		return fmt.Errorf("Frida driver exited during startup")
+	}
+	if s.scriptsPending > 0 {
+		return fmt.Errorf("Frida could not load all saved scripts (%d missing). See Frida → Sessions for details", s.scriptsPending)
+	}
+	return nil
+}
 
 // Info returns the current session metadata snapshot.
 func (s *FridaSession) Info() FridaSessionInfo {
