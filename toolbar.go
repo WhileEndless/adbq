@@ -67,22 +67,15 @@ func (a *App) mountToolbar(ctx context.Context) func() {
 		ctx: ctx, devices: a.devices.Devices, history: a.ListFridaHistory,
 		actions: a.toolbarActions(), deviceActions: a.toolbarDeviceActions, busy: make(map[[2]string]bool),
 		confirm: func(target toolbarTarget, commands []string) (bool, error) {
-			if ctx.Err() != nil {
-				return false, ctx.Err()
-			}
-			response, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
-				Type:  runtime.WarningDialog,
+			return menubar.ShowDialog(ctx, menubar.Dialog{
 				Title: fmt.Sprintf("Clear data for %s?", target.history.Package),
 				Message: fmt.Sprintf("Device: %s\n\nThis permanently deletes the app’s settings, cache, and local data.\n\n%s",
 					toolbarDeviceName(target.device), strings.Join(commands, "\n")),
-				Buttons: []string{"Cancel", "Clear data"}, DefaultButton: "Cancel", CancelButton: "Cancel",
+				Dismiss: "Cancel", Action: "Clear data", Destructive: true,
 			})
-			return response == "Clear data", err
 		},
 		showResult: func(result toolbarResult) {
-			if ctx.Err() == nil {
-				showToolbarResult(ctx, result)
-			}
+			showToolbarResult(ctx, result)
 		},
 		showWindow: func() { runtime.Show(ctx); runtime.WindowShow(ctx) },
 		quit:       func() { runtime.Quit(ctx) },
@@ -103,20 +96,13 @@ func showToolbarResult(ctx context.Context, result toolbarResult) {
 		message += "\n\n" + result.detail
 	}
 	commands := strings.Join(result.commands, "\n")
-	buttons := []string{"Close"}
+	dialog := menubar.Dialog{Title: result.title, Dismiss: "Close"}
 	if commands != "" {
 		message += "\n\nCommands\n" + commands
-		buttons = append(buttons, "Copy commands")
+		dialog.Action = "Copy commands"
 	}
-	style := runtime.InfoDialog
-	if result.icon == "exclamationmark.triangle" {
-		style = runtime.ErrorDialog
-	}
-	response, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
-		Type: style, Title: result.title, Message: message, Buttons: buttons,
-		DefaultButton: "Close", CancelButton: "Close",
-	})
-	if err == nil && response == "Copy commands" {
+	dialog.Message = message
+	if copyCommands, err := menubar.ShowDialog(ctx, dialog); err == nil && copyCommands {
 		_ = runtime.ClipboardSetText(ctx, commands)
 	}
 }
